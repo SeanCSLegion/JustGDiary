@@ -182,7 +182,8 @@ schema 与查询 SQL 已用宿主 SQLite 真执行验证，但**这三层还没�
 3. `mergeBackupDatabase` 的整天 skip/overwrite 行为与统计。
 
 它们都需要一台 Android 设备或模拟器（Robolectric 亦可，但需先确认其 SQLite 是否编入 FTS5）。
-按已确认的决策 Q8，本轮不做安装运行验证，因此与 M3 一起做一次运行验证时优先补这三层。
+按已确认的决策 Q8，本轮不做安装运行验证 —— **这三层已在 M9 用 Robolectric 补上**
+（`DiaryRepositoryRobolectricTest`，10 条；见文末 M9 一节）。
 
 ## M2 —— 设计系统 ✅ 已完成
 
@@ -742,7 +743,8 @@ iOS 的 `DiaryViewModel.handleBack` 问的是 `controller.isEmpty()`；Android �
 | `-slow-morph` / `-morph-log` 调试开关 | 需要一个能跑的设备才有意义（方案 §6.2 已定方案：`BuildConfig.DEBUG` + `Intent` extra + `Choreographer` 帧日志） |
 | morph 帧率实测 | 同上：无设备/无 AVD（本机 `adb devices` 为空） |
 | TalkBack 走查、年月切换的 `customActions` | 需要 TalkBack；`a11y_*` 文案已在资源里备好 |
-| 运行时验证（建表/迁移/参数绑定/编辑器往返） | 需要设备或 Robolectric 宿主；已在 `docs/migration-progress.md` 里列为"有设备后的第一件事" |
+| ~~运行时验证（建表/迁移/参数绑定/编辑器往返）~~ | **已用 Robolectric 补上**（`DiaryRepositoryRobolectricTest`，10 条） |
+| 真机上的安装运行验证（安装/启动/交互/帧率/TalkBack） | 本机无设备与 AVD（`adb devices` 为空），按 Q8 的验收口径不做 |
 
 ### M9 续：内联图片不再变形、调试开关、无障碍入口
 
@@ -755,3 +757,32 @@ iOS 的 `DiaryViewModel.handleBack` 问的是 `controller.isEmpty()`；Android �
 
 本轮新增测试 14 条：`ImageDisplaySizeTest`（8，含"竖构图不设高度上限""小图不缩到 40 以下""缺 w/h 时回落到位图"）
 与 `DebugFlagsTest`（6，含"环境变量只认 1"这种静默失效点）。
+
+
+### M9 续（三）：数据层的**运行时**验证（Robolectric）
+
+在此之前项目里所有断言都是"给定输入 → 期望输出"的纯函数测试 —— SQL 字符串、参数绑定、
+游标列名、迁移链**一次都没有真的被执行过**。本轮接上 Robolectric 宿主，
+新增 `DiaryRepositoryRobolectricTest`（10 条），把下面这些只可能在运行时暴露的问题纳入验收：
+
+| 断言 | 为什么它重要 |
+| --- | --- |
+| fresh install 走完 v0 → v1 → v3 的迁移链，三张表 + FTS 表 + `user_version` 都对 | DDL 里任何一处列名/索引/FTS 语句写错，此前只会在真机上炸 |
+| 新片段写入后能按 `day_key` 读回，且位置列、`content_json`、`search_text` 逐列正确 | 覆盖 `execSQL` 参数绑定与 `blockFrom` 游标映射 |
+| `day_key` 归属与 `dayStartHour` 一致（写入与查询两侧同一规则） | 跨日归属是数据正确性的地基 |
+| 编辑片段**不改坐标**，只改精度与文案 | 这是 `LocationRules` 的核心规则，之前只有纯函数断言 |
+| 关键词搜索与地区筛选都能命中；不存在的词命中 0 | 覆盖 `SearchSql` + FTS5/LIKE 两条路径 |
+| 删掉当天最后一条片段后，`diary`/`diary_flag` 一起消失 | 覆盖 `deleteBlocks` 的清理分支 |
+| `day_key` 重算幂等（同一 `dayStartHour` 无冲突） | 覆盖两阶段临时键写法 |
+| 编辑器 `List<EditorLine>` → `Spannable` → `List<EditorLine>` 往返：段落数、文本、待办 items/done、图片 `src/w/h` 一个不丢 | **这条在 JVM 上做不了**（需要真实的 `SpannableStringBuilder` 与 `ImageSpan`），而它正是"图片会不会丢"的关键路径 |
+| 空白行按设计被丢弃、全空编辑器保留一个可编辑行 | 与 iOS `PartsCodec.parts(from:)` 的既有规则一致 |
+
+Robolectric 运行时要下载 `android-all-instrumented`（约 100MB）；直连 `repo1.maven.org`
+在本机网络下会被 TLS 重置，因此 `app/build.gradle.kts` 里把
+`robolectric.dependency.repo.url` 指到阿里云镜像（已确认该镜像有全部版本）。
+这只是**测试期**依赖，不进 APK。
+
+**过程中抓到的一处测试自身错误**（值得记）：我最初把图片段落写成 `style = body` + `src = ...`，
+于是 `partsToLines` 走的是"普通段落"分支 —— 文本为空 → 空白行被丢弃 → 断言 5 段变 4 段。
+真正的规则是**图片段落必须 `style = image`**（iOS 的 `ContentPartStyle.image`）。
+这条如果只靠阅读代码很难发现，是 Robolectric 宿主把它逼出来的。

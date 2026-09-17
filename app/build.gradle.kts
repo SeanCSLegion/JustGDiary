@@ -53,6 +53,17 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all { test ->
+                // Robolectric 运行时要下载 android-all-instrumented（~100MB）。
+                // 直连 repo1.maven.org 在本机网络下会被 TLS 重置，因此指到阿里云镜像
+                // （已确认该镜像有全部版本）。这只是一个测试期依赖，不进 APK。
+                test.systemProperty(
+                    "robolectric.dependency.repo.url",
+                    "https://maven.aliyun.com/repository/public",
+                )
+                test.systemProperty("robolectric.dependency.repo.id", "aliyun")
+                test.systemProperty("robolectric.logging.enabled", "false")
+            }
         }
     }
 }
