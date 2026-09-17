@@ -1,0 +1,40 @@
+# 默认按文本处理并自动归一化换行
+* text=auto eol=lf
+
+# 明确文本类型
+*.md        text
+*.txt       text
+*.kt        text
+*.kts       text
+*.java      text
+*.xml       text
+*.json      text
+*.pro       text
+*.gradle    text
+*.properties text
+*.yml       text
+*.yaml      text
+
+# Windows 批处理脚本
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# 二进制文件（不做换行转换，也不在 diff 中显示）
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.ttf       binary
+*.otf       binary
+*.jar       binary
+*.apk       binary
+*.aab       binary
+*.jks       binary
+*.keystore  binary
+
+# 让 Gradle wrapper 与锁文件在 GitHub 上不参与语言统计
+gradle/wrapper/gradle-wrapper.jar  binary
+gradle.lockfile                    linguist-generated
+*.lock                             linguist-generated
