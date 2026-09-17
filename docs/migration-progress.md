@@ -93,13 +93,75 @@ targetSdkVersion:'36'
 
 ---
 
-## M1 —— 数据层（下一步）
+## M1 —— 数据层（进行中）
 
-计划见方案 §4 与 §4.7，`docs/migration-analysis/01-data-layer.md` 是逐行参考。要点：
+计划见方案 §4 与 §4.7，`docs/migration-analysis/01-data-layer.md` 是逐行参考。
 
-1. 先做**不依赖 UI 的正确性基线**：以 iOS 真实 `content_json` 作 golden file，验证字节级兼容
-   （`sortedKeys` 键序、`/` 不转义、未开启的行内样式不写 `false`）；
-2. `SQLiteOpenHelper` + 裸 SQL 复刻 `diary` / `edit_block` / `diary_flag` / `diary_fts` 与迁移链（user_version 1 → 3）；
-3. `FtsSegment`（相邻 CJK 插空格）+ FTS5 建表 + `snippet()`，建表失败降级 LIKE；
-4. `PartsCodec`（v1/v2 编解码）、`DiaryRepository` 全 API、备份 zip（**流式**）导入导出；
-5. JVM 单测：编解码往返、分词、`dayKeyForUtc`、聚合、zip 往返。
+### 已完成
+
+| 交付物 | 说明 |
+| --- | --- |
+| `model/ContentPart.kt` | `content_json` v2 编解码 + v1 兼容 + `ImagePathUtil`；**与 iOS 逐字节一致** |
+| `model/DateUtil.kt` | `dayKeyOf` / `dayKeyForUtc`（"日记日"规则）/ `weekFirst` / `weekdayIndex` / `relativeDays` … |
+| `model/DiaryModels.kt` | `DiaryRecord` / `EditBlock` / `LocRegion` / `LocFilter` / `LocOption` / `FootprintRow` / `SearchResultItem` / `SearchPageResult` / 精度与质量档位 |
+| `model/AppSettings.kt` | 13 个设置 key、默认值、**纯函数取值校验**（可 JVM 单测）、语言 → locale 映射 |
+| `service/FtsSegment.kt` | CJK 切分 / 反切分，按**字素簇**遍历（对齐 Swift 的 `Character` 语义） |
+| `service/SearchUtil.kt` | LIKE 转义、关键词高亮分段、无 FTS 时的 ±18 字兜底摘要 |
+| `service/SettingsStore.kt` | `SharedPreferences` 实现（key 与 iOS 同名）；三个内部状态独立读写 |
+| `data/db/JustDiarySchema.kt` | 全部 DDL 与 SQL 常量（表/索引/FTS5/迁移/查询/重算/回填），44+ 条逐字对齐 iOS |
+| `data/db/JustDiaryOpenHelper.kt` | 打开与迁移链 v0→v1→v3、FTS5 建表与降级探测、WAL、`foreign_keys=OFF` |
+| `data/SearchSql.kt` | 搜索语句构造（纯函数，可单测 SQL 文本与**参数顺序**） |
+| `data/DiaryRepository.kt` | 读 / 写 / 搜索 / 索引重建 / 日期重算 / 地区回填 / 图片清理；单并发调度器 + `BEGIN IMMEDIATE` |
+| `app/src/test/resources/golden/*.json` | **真实 iOS 编码器产出的 golden file** |
+| `tools/verify_sqlite_schema.py` | 用宿主 SQLite 真执行 schema 与查询的验证脚本（18 项断言全通过） |
+
+### 验证证据
+
+```
+./gradlew testDebugUnitTest assembleDebug   →  BUILD SUCCESSFUL
+  ContentFormatTest   15 tests  （含与 iOS golden file 的字节级比对）
+  DateUtilTest        14 tests
+  SearchSqlTest       13 tests
+  FtsSegmentTest       7 tests
+  DesignTokensTest     5 tests
+  TOTAL: 54 tests, 0 failed
+
+python3 tools/verify_sqlite_schema.py       →  18 项断言全部 PASS
+  schema 表名/列名/索引名与 iOS 一致；FTS5 + CJK 切分可子串命中；snippet 产出 <hl>；
+  不分词则查不到（证明切分必要）；搜索/总数/足迹/未记录判定/day_key 两阶段重算 均可用
+```
+
+### golden file 是怎么来的（可复现）
+
+不是手写期望值，而是**编译 iOS 真实的 `ContentPart.swift` 并执行**得到的：
+
+```bash
+swiftc -O /Users/cov/JustADiary/JustDiary/Models/ContentPart.swift main.swift -o golden && ./golden
+# main.swift 复刻 JustDiaryTests/ContentFormatTests.swift 的 storedFixture/editorFixture/v1 字面量
+```
+
+它当场纠正了两个**方案文档里写错的细节**：
+
+1. **信封键序**：实际是 `{"parts":[…],"v":2}`（`sortedKeys` 的字母序），
+   而 `docs/editor-typography.md` 的示例写的是 `{"v":2,…}` —— 按文档实现就会与 iOS 不逐字节一致；
+2. **数字格式**：`w`/`h` 输出 `300` 而不是 `300.0` → Kotlin 侧为此写了
+   `SwiftDoubleSerializer`（整数时不输出小数位）。
+
+### 与 iOS 的有意差异（3 处，都是"不复制缺陷"）
+
+| # | iOS 行为 | Android 行为 | 理由 |
+| --- | --- | --- | --- |
+| D1 | 搜索无 FTS 时仍把 `ftsQuery` 加进绑定参数，但它对应的占位符并不存在（`matchSql` 是 `1=0`）| 只在 `ftsEnabled` 时才加该参数 | iOS 的绑定失败被静默忽略；**Android 会直接抛 `SQLiteException`**。这是必须修的，否则无 FTS 的设备一搜索就崩 |
+| D2 | LIKE 兜底用**没去掉引号**的原词（引号只在 FTS 分支被剥掉）| LIKE 也用去掉引号后的词 | 否则带引号的输入在 LIKE 分支永远匹配不到 |
+| D3 | 删片段时按被删片段自己的 json 删图片文件，不检查是否仍被别的片段引用 | 先查库确认无引用才删 | 备份导入会按 `src` 复用映射，使两个片段共用同一张图；照抄会删掉另一个片段仍在用的图 |
+
+> D1/D2 只影响搜索实现，D3 只影响本地文件清理 —— **库结构、`content_json`、FTS 文本、备份格式都不变**。
+
+### 尚未完成（下一轮）
+
+1. **备份 / 导入（`BackupService` + zip）**：`.jdiary` 的流式导出与导入、
+   `manifest.json`、`settingsJson` 的 DTO、`VACUUM INTO` 快照、整天 skip/overwrite 合并；
+2. **媒体存储**：`BitmapFactory` 降采样（最长边 2048 / JPEG 85）、`img_<ms>.jpg` 命名、内存 + 磁盘缓存；
+3. **DB 执行层测试**：目前 schema 与查询已用宿主 SQLite 验证，但 `SQLiteOpenHelper`、
+   参数绑定、游标映射这三层还没有自动化测试（本机无 AVD；候选方案是 Robolectric 或
+   一台真机，届时与 M3 一起做一次运行验证）。
