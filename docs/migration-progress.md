@@ -184,10 +184,71 @@ schema 与查询 SQL 已用宿主 SQLite 真执行验证，但**这三层还没�
 它们都需要一台 Android 设备或模拟器（Robolectric 亦可，但需先确认其 SQLite 是否编入 FTS5）。
 按已确认的决策 Q8，本轮不做安装运行验证，因此与 M3 一起做一次运行验证时优先补这三层。
 
-### M2 起（下一轮）
+## M2 —— 设计系统 ✅ 已完成
 
-按方案 §12 进入 **M2 设计系统**：M3 主题（动态取色 + 品牌色回落）、动态字体与逐档上限
-（**需从 `DesignSystem.swift:124-136` 逐字核对**，见下）、M3 组件封装、日期格式化、自绘组件所需语义色。
+### 交付物
 
-> 注意：`ui/theme/DesignTokens.kt` 里的缩放上限表目前是**由 AX5 实测值反推的近似值**，
-> M2 必须逐字核对后再固化；单测只断言"缩放后字阶严格递减"，所以换成精确值后测试依然有效。
+| 文件 | 说明 |
+| --- | --- |
+| `ui/theme/DesignTokens.kt` | `Radius` / `Spacing` / `TypeSize` **逐字对齐** iOS；`DynamicTypeMetrics` 移植缩放上限表与文本样式映射 |
+| `ui/theme/Type.kt` | 把设计字号梯级映射到 M3 的 15 个排版角色（`justDiaryTypography(fontScale)`）；`EditorTypography` 的行距/段后距比例与最小输入高度 |
+| `ui/theme/Theme.kt` | M3 主题 + **动态取色（默认开启）** + 品牌色回落；`themeMode` 三值映射；`LocalIncreasedContrast`（增强对比度） |
+| `ui/components/Components.kt` | 共享原语：`DiaryCard`（含增强对比度描边规则）、`PageHeader`、`SectionTitle`、`IconBadge`、`EmptyState`、`ContentWidth` 约束 |
+| `service/DateFormats.kt` | 日期/时间的**语义槽位**（年 / 月 / 日+星期 / 区间 / 时刻 / 相对日 / 起始行 / 小时档位）；小时制跟设备、AM/PM 跟应用语言 |
+| `res/values/date_formats.xml` + `values-zh-rCN/` | 19 个语义槽位模板，**key 名与 iOS String Catalog 同名** |
+| `model/AppSettings.kt` / `SettingsStore.kt` | 新增 **Android 专有**设置 `dynamic_color`（默认开，不进 `settingsJson`） |
+
+### 验证证据
+
+```
+./gradlew assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  97 个 JVM 单测通过
+    DynamicTypeMetricsTest  12  ← 新增
+    DateFormatsTest         13  ← 新增（直接读真实的 strings.xml 模板）
+    ContentFormatTest       15
+    DateUtilTest            14
+    SearchSqlTest           13
+    BackupModelsTest         9
+    FtsSegmentTest           7
+    ZipArchiveTest           7
+    DesignTokensTest         4
+    ThemeModeTest            3  ← 新增
+```
+
+两个值得单独说的断言：
+
+1. **复现 iOS 文档里的 AX5 表**：`DynamicTypeMetricsTest` 断言
+   `size × effectiveMultiplier(size, fontScale=2.0)` 等于 iOS 注释里记录的
+   32→44.8、28→39.2、24→34.8、22→31.9、20→29、18→27、17→25.5、16→24.8、
+   15→24、13→21.45、12→20.4、11→19.25 —— 这证明上限表的移植没有抄错。
+2. **日期槽位直接读资源文件**：`DateFormatsTest` 不在测试里手抄模板，而是解析
+   `res/values/date_formats.xml` 与 `values-zh-rCN/`，于是它同时守住模板内容与拼接逻辑，
+   并断言两份资源的 key 集合完全一致。
+
+### 动态字体的 Android 等价物（与 iOS 的差异）
+
+iOS 有"每个文本样式一条曲线"；Android 只有一个全局 `fontScale`。因此规则是：
+
+```
+effectiveMultiplier(size, fontScale) = min(ceiling(size), max(1, fontScale))
+```
+
+- 默认字号（`fontScale = 1`）→ 全部为 1，**默认外观与设计完全一致**；
+- `fontScale` 取到 2.0 时正好复现 iOS 的 AX5 实测表（因为那些值就是各档上限）；
+- 由于各档上限不同且 `min` 单调，缩放后**字阶永不倒挂**（已在 8 个 `fontScale` 上断言）。
+
+实现细节：`sp` 会被 Compose 自动乘一次 `fontScale`，所以 `effectiveSp()` 先把系统缩放除掉，
+让最终绘制值恰好等于 `designSize × min(ceiling, fontScale)`（有单测守住这个换算）。
+
+### 第 4 处有意不复制 iOS 的缺陷（D4）
+
+`L10n.dayStartLabel(hour)` 把**原始 0–23 的小时**直接塞进 12 小时制的模板，
+而模板是 `下午 %1$ld:00` / `%1$ld:00 PM` —— 于是 13 点会显示成
+**"下午 13:00"（中文）/ "13:00 PM"（英文）**。这里先把小时归一到 12 小时制再套模板，
+档位**区间**仍按原始小时判定（0 / 1–5 / 6–11 / 12 / 13–17 / 18–23）。
+
+### M3 起（下一轮）
+
+按方案 §12 进入 **M3 首页日历与 morph**：布局常量（`CalendarLayout`）、月/年/周三种形态的
+Canvas 绘制、手势与翻页、morph 单进度插值、以及横屏左右分栏。
+`docs/migration-analysis/03-home-calendar-and-motion.md` 与方案 §6.4 已给出可直接当单测断言的数值。

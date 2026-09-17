@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 日期/时间格式的**语义槽位**：key 名与 iOS Localizable.xcstrings 完全一致，
+     模板内容也逐字对齐（只是把 %1$ld 换成 Android 的 %1$d）。
+     同一类信息只允许一种写法，改动前先看 docs/design-system.md §4。 -->
+<resources>
+    <!-- 年 -->
+    <string name="date_year">%1$d</string>
+    <!-- 年 + 月（大标题） -->
+    <string name="date_month_title">%2$s %1$d</string>
+    <!-- 月 + 日 -->
+    <string name="date_day_only">%1$s %2$d</string>
+    <!-- 月 + 日 + 星期 -->
+    <string name="date_day_title">%3$s, %1$s %2$d</string>
+    <!-- 区间（中间是 en dash，两侧各一个空格） -->
+    <string name="date_range">%1$s – %2$s</string>
+    <!-- 年 + 月 + 日 + 星期（周标题） -->
+    <string name="index_week_head">%4$s, %2$s %3$d, %1$d</string>
+
+    <!-- 相对日 -->
+    <string name="index_today">Today</string>
+    <string name="index_yesterday">Yesterday</string>
+    <string name="index_tomorrow">Tomorrow</string>
+    <string name="index_days_ago">%1$d days ago</string>
+    <string name="index_days_later">in %1$d days</string>
+
+    <!-- 起始行 -->
+    <string name="read_start_time">Started at %1$s</string>
+    <string name="read_start_time_loc">Started at %1$s in %2$s</string>
+
+    <!-- 时间选择器的小时档位文案 -->
+    <string name="time_label_midnight">12:00 AM</string>
+    <string name="time_label_dawn">%1$d:00 AM</string>
+    <string name="time_label_morning">%1$d:00 AM</string>
+    <string name="time_label_noon">12:00 PM</string>
+    <string name="time_label_afternoon">%1$d:00 PM</string>
+    <string name="time_label_evening">%1$d:00 PM</string>
+</resources>

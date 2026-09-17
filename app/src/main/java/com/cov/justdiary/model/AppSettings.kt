@@ -21,6 +21,12 @@ object SettingsKeys {
     const val REMIND_HOUR = "remind_hour"
     const val REMIND_MINUTE = "remind_minute"
 
+    /**
+     * **Android 专有**（iOS 没有对应项）：是否跟随壁纸取色（Material You）。
+     * 刻意**不进入** `settingsJson`（见 `AppSettingsJson`），因此不影响跨端设置互导。
+     */
+    const val DYNAMIC_COLOR = "dynamic_color"
+
     /** 以下三个不是"偏好"，而是数据版本/内部状态（iOS 亦然）。 */
     const val SEARCH_INDEX_VERSION = "search_index_version"
     const val CONTENT_FORMAT_VERSION = "content_format_version"
@@ -53,6 +59,8 @@ data class AppSettings(
     val remindEnabled: Boolean = true,
     val remindHour: Int = DEFAULT_REMIND_HOUR,
     val remindMinute: Int = DEFAULT_REMIND_MINUTE,
+    /** Android 专有：动态取色（Material You），默认开启（Q4 已确认）。 */
+    val dynamicColor: Boolean = true,
     /** FTS 索引格式版本；与 [SEARCH_INDEX_VERSION_REQUIRED] 比较决定是否重建。 */
     val searchIndexVersion: Int = 0,
     /** `content_json` 存储格式版本；与 `ContentDocument.CURRENT_VERSION` 比较决定是否一次性迁移。 */
@@ -99,6 +107,7 @@ data class AppSettings(
                 remindEnabled = raw.bool(SettingsKeys.REMIND_ENABLED, defaults.remindEnabled),
                 remindHour = raw.int(SettingsKeys.REMIND_HOUR, defaults.remindHour).coerceIn(0, 23),
                 remindMinute = raw.int(SettingsKeys.REMIND_MINUTE, defaults.remindMinute).coerceIn(0, 59),
+                dynamicColor = raw.bool(SettingsKeys.DYNAMIC_COLOR, defaults.dynamicColor),
                 searchIndexVersion = raw.int(SettingsKeys.SEARCH_INDEX_VERSION, 0),
                 contentFormatVersion = raw.int(SettingsKeys.CONTENT_FORMAT_VERSION, 0),
             )

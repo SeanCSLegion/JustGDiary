@@ -44,6 +44,8 @@ class SettingsStore(context: Context) : SettingsRaw {
             .putBoolean(SettingsKeys.REMIND_ENABLED, settings.remindEnabled)
             .putInt(SettingsKeys.REMIND_HOUR, settings.remindHour)
             .putInt(SettingsKeys.REMIND_MINUTE, settings.remindMinute)
+            // Android 专有：动态取色
+            .putBoolean(SettingsKeys.DYNAMIC_COLOR, settings.dynamicColor)
             .apply()
         cache = settings
     }

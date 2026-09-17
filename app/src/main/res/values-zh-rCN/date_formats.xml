@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中文的日期/时间语义槽位，与 iOS 侧 zh-Hans 的模板逐字对齐。 -->
+<resources>
+    <string name="date_year">%1$d年</string>
+    <string name="date_month_title">%1$d年 %2$s</string>
+    <string name="date_day_only">%1$s%2$d日</string>
+    <string name="date_day_title">%1$s%2$d日 %3$s</string>
+    <string name="date_range">%1$s – %2$s</string>
+    <string name="index_week_head">%1$d年%2$s%3$d日 %4$s</string>
+
+    <string name="index_today">今天</string>
+    <string name="index_yesterday">昨天</string>
+    <string name="index_tomorrow">明天</string>
+    <string name="index_days_ago">%1$d天前</string>
+    <string name="index_days_later">%1$d天后</string>
+
+    <string name="read_start_time">%1$s 开始写</string>
+    <string name="read_start_time_loc">%1$s · 于%2$s开始写</string>
+
+    <string name="time_label_midnight">凌晨 0:00</string>
+    <string name="time_label_dawn">凌晨 %1$d:00</string>
+    <string name="time_label_morning">上午 %1$d:00</string>
+    <string name="time_label_noon">中午 12:00</string>
+    <string name="time_label_afternoon">下午 %1$d:00</string>
+    <string name="time_label_evening">晚上 %1$d:00</string>
+</resources>
