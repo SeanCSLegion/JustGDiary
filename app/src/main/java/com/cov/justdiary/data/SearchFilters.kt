@@ -114,6 +114,13 @@ object SearchFilters {
         today: LocalDate,
         weekStart: String,
         rangeLabel: (DayKeyRange) -> String,
+        /**
+         * "未记录地点"的文案。
+         *
+         * 由调用方注入而不是写死：这里是 JVM 可测的纯逻辑层，不能依赖 Android 资源；
+         * 真机路径由 `SearchViewModel` 传 `context.getString(...)`，文案跟随应用内语言。
+         */
+        noLocLabel: String = NO_LOCATION_LABEL,
     ): List<SearchFilterItem> {
         val items = mutableListOf<SearchFilterItem>()
         state.keywords.forEach { word ->
@@ -128,7 +135,7 @@ object SearchFilters {
             )
         }
         if (state.locFilter.noLoc) {
-            items.add(SearchFilterItem(SearchFilterItem.Kind.Location, NO_LOCATION_LABEL))
+            items.add(SearchFilterItem(SearchFilterItem.Kind.Location, noLocLabel))
         } else if (state.locFilter.country.isNotEmpty()) {
             val label = listOf(state.locFilter.country, state.locFilter.region1)
                 .filter { it.isNotEmpty() }

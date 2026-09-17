@@ -28,6 +28,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.cov.justdiary.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -396,22 +398,36 @@ private fun PlaceRow(
     }
 }
 
+@Composable
 private fun summaryLabel(located: Int, unlocated: Int): String =
-    "已标注 $located 处 · 未记录 $unlocated 篇"
+    stringResource(R.string.footprint_summary, located, unlocated)
 
-private const val TITLE = "足迹"
-private const val ALL_LABEL = "全部"
-private const val EMPTY_LABEL = "还没有记录过地点。"
-private const val TREND_TITLE = "年度记录天数"
-private const val NO_TREND_LABEL = "这一年还没有记录。"
-private const val PLACES_TITLE = "地点清单"
-private const val STAT_PROVINCES = "省市"
-private const val STAT_CITIES = "城市"
-private const val STAT_COUNTRIES = "国家"
-private const val STAT_BLOCKS = "片段"
-private const val STAT_DAYS = "天数"
-private const val EXPAND_LABEL = "展开"
-private const val COLLAPSE_LABEL = "收起"
+private val TITLE: String
+    @Composable get() = stringResource(R.string.footprint_title)
+private val ALL_LABEL: String
+    @Composable get() = stringResource(R.string.footprint_time_all)
+private val EMPTY_LABEL: String
+    @Composable get() = stringResource(R.string.footprint_empty)
+private val TREND_TITLE: String
+    @Composable get() = stringResource(R.string.footprint_trend_title)
+private val NO_TREND_LABEL: String
+    @Composable get() = stringResource(R.string.footprint_trend_empty)
+private val PLACES_TITLE: String
+    @Composable get() = stringResource(R.string.footprint_list_title)
+private val STAT_PROVINCES: String
+    @Composable get() = stringResource(R.string.footprint_stat_provinces)
+private val STAT_CITIES: String
+    @Composable get() = stringResource(R.string.footprint_stat_cities)
+private val STAT_COUNTRIES: String
+    @Composable get() = stringResource(R.string.footprint_stat_countries)
+private val STAT_BLOCKS: String
+    @Composable get() = stringResource(R.string.footprint_stat_blocks)
+private val STAT_DAYS: String
+    @Composable get() = stringResource(R.string.footprint_stat_days)
+private val EXPAND_LABEL: String
+    @Composable get() = stringResource(R.string.a11y_expand)
+private val COLLAPSE_LABEL: String
+    @Composable get() = stringResource(R.string.a11y_collapse)
 
 /** 图表度量（与设计稿一致）。 */
 private val TREND_HEIGHT = 132.dp

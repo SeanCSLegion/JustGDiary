@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.cov.justdiary.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
@@ -310,13 +312,14 @@ private fun LocationRow(
     }
 }
 
+@Composable
 private fun precisionLabel(precision: String): String = when (precision) {
-    LocPrecision.exact -> "精确"
-    LocPrecision.street -> "街道"
-    LocPrecision.district -> "区县"
-    LocPrecision.city -> "城市"
-    LocPrecision.province -> "省市"
-    else -> "未设置"
+    LocPrecision.exact -> stringResource(R.string.loc_precision_exact)
+    LocPrecision.street -> stringResource(R.string.loc_precision_street)
+    LocPrecision.district -> stringResource(R.string.loc_precision_district)
+    LocPrecision.city -> stringResource(R.string.loc_precision_city)
+    LocPrecision.province -> stringResource(R.string.loc_precision_province)
+    else -> stringResource(R.string.loc_precision_none)
 }
 
 /** 与进入编辑时的快照比较，判断是否有改动（决定"放弃修改"是否需要确认）。 */
@@ -343,18 +346,33 @@ private fun buildPayload(
     )
 }
 
-private const val BACK_LABEL = "返回"
-private const val DISCARD_LABEL = "放弃修改"
-private const val SAVE_LABEL = "保存"
-private const val CANCEL_LABEL = "取消"
-private const val DISCARD_TITLE = "放弃修改？"
-private const val DISCARD_MESSAGE = "将回到进入编辑时的内容。"
-private const val DISCARD_CONFIRM = "放弃"
-private const val LOCATION_TITLE = "还没有获取到地点"
-private const val LOCATION_MESSAGE = "保存后这条记录将无法再添加位置。"
-private const val SAVE_ANYWAY_LABEL = "仍然保存"
-private const val LOCATING_LABEL = "位置获取中…"
-private const val REFETCH_LABEL = "重新获取位置"
-private const val NOT_RECORDED_LABEL = "未记录地点"
-private const val PRECISION_LABEL = "精度"
-private const val PLACEHOLDER = "写点什么…"
+private val BACK_LABEL: String
+    @Composable get() = stringResource(R.string.a11y_back)
+private val DISCARD_LABEL: String
+    @Composable get() = stringResource(R.string.editor_discard)
+private val SAVE_LABEL: String
+    @Composable get() = stringResource(R.string.save)
+private val CANCEL_LABEL: String
+    @Composable get() = stringResource(R.string.cancel)
+private val DISCARD_TITLE: String
+    @Composable get() = stringResource(R.string.editor_discard_title)
+private val DISCARD_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_discard_revert_msg)
+private val DISCARD_CONFIRM: String
+    @Composable get() = stringResource(R.string.discard)
+private val LOCATION_TITLE: String
+    @Composable get() = stringResource(R.string.editor_location_retry)
+private val LOCATION_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_location_missing_msg)
+private val SAVE_ANYWAY_LABEL: String
+    @Composable get() = stringResource(R.string.editor_save_anyway)
+private val LOCATING_LABEL: String
+    @Composable get() = stringResource(R.string.editor_location_fetching)
+private val REFETCH_LABEL: String
+    @Composable get() = stringResource(R.string.editor_location_retry_action)
+private val NOT_RECORDED_LABEL: String
+    @Composable get() = stringResource(R.string.search_loc_no_loc)
+private val PRECISION_LABEL: String
+    @Composable get() = stringResource(R.string.editor_location_precision)
+private val PLACEHOLDER: String
+    @Composable get() = stringResource(R.string.editor_placeholder_new)

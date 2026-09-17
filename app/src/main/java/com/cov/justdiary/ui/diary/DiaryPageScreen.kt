@@ -19,8 +19,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cov.justdiary.JustDiaryApplication
+import com.cov.justdiary.R
 import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.LocationRules
@@ -67,12 +69,13 @@ fun DiaryPageScreen(
             onClose()
         }
     }
-    // 分享图渲染完成后交给系统分享面板
+    // 分享图渲染完成后交给系统分享面板（标题先在这里取好：LaunchedEffect 里不是 composable 作用域）
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
     LaunchedEffect(state.shareImageFile) {
         val file = state.shareImageFile ?: return@LaunchedEffect
         runCatching {
             context.startActivity(
-                ShareIntents.shareImage(context, file, SHARE_CHOOSER_TITLE),
+                ShareIntents.shareImage(context, file, shareChooserTitle),
             )
         }
         viewModel.consumeShareImage()
@@ -245,7 +248,7 @@ private fun DiaryAlertDialog(
 
         is DiaryPageViewModel.DiaryAlert.CrossDay -> {
             title = CROSS_DAY_TITLE
-            message = CROSS_DAY_MESSAGE.format(alert.dayKey)
+            message = stringResource(R.string.editor_cross_day_msg, alert.dayKey)
             confirmLabel = SAVE_EXIT_LABEL
             onConfirm = viewModel::confirmCrossDay
         }
@@ -257,7 +260,7 @@ private fun DiaryAlertDialog(
 
         is DiaryPageViewModel.DiaryAlert.DeleteConfirm -> {
             title = DELETE_TITLE
-            message = DELETE_MESSAGE.format(alert.count)
+            message = stringResource(R.string.editor_delete_msg, alert.count)
             confirmLabel = DELETE_LABEL
             onConfirm = viewModel::performDeleteSelected
         }
@@ -292,29 +295,53 @@ private fun DiaryAlertDialog(
     )
 }
 
-private const val SHARE_CHOOSER_TITLE = "分享日记"
+private val SHARE_CHOOSER_TITLE: String
+    @Composable get() = stringResource(R.string.share_chooser_title)
 
-private const val OK_LABEL = "好"
-private const val CANCEL_LABEL = "取消"
-private const val DISCARD_LABEL = "放弃"
-private const val DELETE_LABEL = "删除"
-private const val SAVE_EXIT_LABEL = "保存并退出"
+private val OK_LABEL: String
+    @Composable get() = stringResource(R.string.ok)
+private val CANCEL_LABEL: String
+    @Composable get() = stringResource(R.string.cancel)
+private val DISCARD_LABEL: String
+    @Composable get() = stringResource(R.string.discard)
+private val DELETE_LABEL: String
+    @Composable get() = stringResource(R.string.delete)
+private val SAVE_EXIT_LABEL: String
+    @Composable get() = stringResource(R.string.editor_save_exit)
 
-private const val HISTORY_NO_ADD_TITLE = "无法新增编辑块"
-private const val HISTORY_NO_ADD_MESSAGE = "历史日记只能修改原有编辑块，不能新增内容，以免时间线错乱。"
-private const val READONLY_TITLE = "只读内容"
-private const val READONLY_MESSAGE = "开启「允许补写 / 修改历史日记」后，可修改已有内容。"
-private const val EXIT_TITLE = "退出编辑"
-private const val EXIT_MESSAGE = "内容尚未保存，退出前需要处理。"
-private const val DISCARD_TITLE = "放弃修改？"
-private const val DISCARD_MESSAGE = "未保存的内容将丢失，且无法恢复。"
-private const val CROSS_DAY_TITLE = "跨日编辑提示"
-private const val CROSS_DAY_MESSAGE = "本次内容将保存为 %s 的日记。保存并退出后，这篇日记将归档。"
-private const val SAVE_FAILED_TITLE = "保存失败"
-private const val SAVE_FAILED_MESSAGE = "日记保存失败，请稍后重试。"
-private const val DELETE_TITLE = "删除编辑块"
-private const val DELETE_MESSAGE = "将删除选中的 %d 个编辑块，删除后不可恢复。"
-private const val IMAGE_FAILED_TITLE = "插入图片失败"
-private const val IMAGE_FAILED_MESSAGE = "无法读取这张图片，请换一张重试。"
-private const val SHARE_FAILED_TITLE = "分享失败"
-private const val SHARE_FAILED_MESSAGE = "日记图片生成失败，请稍后重试。"
+private val HISTORY_NO_ADD_TITLE: String
+    @Composable get() = stringResource(R.string.editor_history_no_add_title)
+private val HISTORY_NO_ADD_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_history_no_add_msg)
+private val READONLY_TITLE: String
+    @Composable get() = stringResource(R.string.editor_readonly_title)
+private val READONLY_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_readonly_msg)
+private val EXIT_TITLE: String
+    @Composable get() = stringResource(R.string.editor_exit_title)
+private val EXIT_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_exit_content_msg)
+private val DISCARD_TITLE: String
+    @Composable get() = stringResource(R.string.editor_discard_title)
+private val DISCARD_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_discard_msg)
+private val CROSS_DAY_TITLE: String
+    @Composable get() = stringResource(R.string.editor_cross_day_title)
+private val CROSS_DAY_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_cross_day_msg)
+private val SAVE_FAILED_TITLE: String
+    @Composable get() = stringResource(R.string.editor_save_failed_title)
+private val SAVE_FAILED_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_save_failed_msg)
+private val DELETE_TITLE: String
+    @Composable get() = stringResource(R.string.editor_delete_title)
+private val DELETE_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_delete_msg)
+private val IMAGE_FAILED_TITLE: String
+    @Composable get() = stringResource(R.string.editor_image_failed_title)
+private val IMAGE_FAILED_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_image_failed_msg)
+private val SHARE_FAILED_TITLE: String
+    @Composable get() = stringResource(R.string.read_share_failed_title)
+private val SHARE_FAILED_MESSAGE: String
+    @Composable get() = stringResource(R.string.read_share_failed_msg)

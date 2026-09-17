@@ -133,6 +133,7 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
             rows = state.rows,
             yearFilter = state.yearFilter,
             timeRange = range,
+            order = placeOrder,
         )
         return state.copy(viewState = viewState, expanded = pruneExpanded(state.expanded, viewState.nodes))
     }
@@ -149,6 +150,26 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
         }
         walk(nodes)
         return expanded intersect alive
+    }
+
+    /**
+     * 地点名的排序策略。
+     *
+     * iOS 用 `localizedStandardCompare`（区域感知 **+ 数字自然序**）。Android 的对应物是
+     * `android.icu.text.Collator.setNumericCollation(true)`（平台 API 24+），但它**在 JVM 单测里
+     * 不可用**，因此：
+     *
+     * - 纯逻辑层保留可注入的 [com.cov.justdiary.data.PlaceOrder]，单测用
+     *   `FootprintAggregator.NaturalPlaceOrder` 断言"数字自然序"这条规则本身；
+     * - 真机路径在这里接 ICU 版本（`第2章` 排在 `第10章` 之前）。
+     */
+    private val placeOrder: com.cov.justdiary.data.PlaceOrder by lazy {
+        runCatching {
+            val collator = android.icu.text.Collator.getInstance(java.util.Locale.getDefault())
+            // 数字自然序：`第2章` 排在 `第10章` 之前（对应 iOS 的 localizedStandardCompare）
+            if (collator is android.icu.text.RuleBasedCollator) collator.setNumericCollation(true)
+            com.cov.justdiary.data.PlaceOrder { a, b -> collator.compare(a, b) }
+        }.getOrDefault(com.cov.justdiary.data.FootprintAggregator.DefaultPlaceOrder)
     }
 
     companion object {

@@ -96,4 +96,97 @@
     <string name="settings_section_about">About</string>
     <string name="settings_version">Version</string>
 
+
+    <!-- ============================================================
+         四屏文案（M9 补齐）。key 与 iOS Localizable.xcstrings 同名同值；
+         末尾几条是 Android 专有（iOS 用符号/无标签之处），已注明。
+         %1$ld → %1$d、%@ → %1$s 按 Android 的格式化规则改写。
+         ============================================================ -->
+    <string name="index_day_empty">No entry for this day.</string>
+    <string name="index_future_empty">This day hasn\'t arrived yet.</string>
+    <string name="index_write">Write</string>
+    <string name="index_continue_write">Continue writing</string>
+    <string name="footprint_title">Footprint</string>
+    <string name="footprint_time_all">All</string>
+    <string name="footprint_empty">No places recorded yet</string>
+    <string name="footprint_trend_title">Diary days per year</string>
+    <string name="footprint_list_title">Places</string>
+    <string name="footprint_stat_provinces">Provinces</string>
+    <string name="footprint_stat_cities">Cities</string>
+    <string name="footprint_stat_countries">Countries</string>
+    <string name="footprint_stat_blocks">Blocks</string>
+    <string name="footprint_stat_days">Days</string>
+    <string name="footprint_summary">Located %1$d · Unlocated %2$d</string>
+    <string name="search_title">Search</string>
+    <string name="search_placeholder">Search diary content…</string>
+    <string name="search_time_clear">Clear</string>
+    <string name="search_clear_all">Clear all filters</string>
+    <string name="search_loc_no_loc">No place recorded</string>
+    <string name="search_preparing">Preparing search index…</string>
+    <string name="search_start_title">Search your diary</string>
+    <string name="search_load_more">Load more</string>
+    <string name="search_all_time">All time</string>
+    <string name="search_time_week">This week</string>
+    <string name="search_time_month">This month</string>
+    <string name="search_time_year">This year</string>
+    <string name="search_result_count">%1$d entries found</string>
+    <string name="read_search_placeholder">Search this entry…</string>
+    <string name="read_search_prev">Previous match</string>
+    <string name="read_search_next">Next match</string>
+    <string name="share_image_placeholder">Image</string>
+    <string name="editor_discard">Discard Changes</string>
+    <string name="editor_discard_title">Discard changes?</string>
+    <string name="editor_discard_msg">Your unsaved changes will be lost and can’t be recovered.</string>
+    <string name="editor_location_retry">Location unavailable</string>
+    <string name="editor_location_missing_msg">No location yet. Once saved, you can\'t add one to this entry.</string>
+    <string name="editor_save_anyway">Save Anyway</string>
+    <string name="editor_location_fetching">Locating…</string>
+    <string name="editor_location_retry_action">Retry location</string>
+    <string name="editor_placeholder_new">Start writing your thoughts…</string>
+    <string name="editor_font_heading">Heading</string>
+    <string name="editor_font_sub">Subheading</string>
+    <string name="editor_font_body">Body</string>
+    <string name="editor_tool_quote">Quote</string>
+    <string name="editor_tool_style">Paragraph Style</string>
+    <string name="editor_tool_list">List</string>
+    <string name="editor_tool_todo">To-do</string>
+    <string name="editor_history_no_add_title">Cannot add blocks</string>
+    <string name="editor_history_no_add_msg">Past entries can only be edited in place. Adding new blocks is disabled to keep timestamps consistent.</string>
+    <string name="editor_readonly_title">Read-only content</string>
+    <string name="editor_readonly_msg">Enable “Edit past entries” to modify existing content.</string>
+    <string name="editor_exit_title">Leave editor</string>
+    <string name="editor_exit_content_msg">You have unsaved content.</string>
+    <string name="editor_cross_day_title">Crossing day boundary</string>
+    <string name="editor_cross_day_msg">This content will be saved to %1$s. It will be archived after you save and exit.</string>
+    <string name="editor_save_failed_title">Save failed</string>
+    <string name="editor_save_failed_msg">Couldn\'t save your entry. Please try again.</string>
+    <string name="editor_delete_title">Delete blocks</string>
+    <string name="editor_delete_msg">Delete the selected %1$d blocks? This cannot be undone.</string>
+    <string name="editor_image_failed_title">Insert image failed</string>
+    <string name="editor_image_failed_msg">Couldn\'t load this image. Please try another one.</string>
+    <string name="read_share_failed_title">Share failed</string>
+    <string name="read_share_failed_msg">Couldn\'t generate the image. Please try again later.</string>
+    <string name="loc_precision_exact">Exact place</string>
+    <string name="loc_precision_street">Street</string>
+    <string name="loc_precision_district">District</string>
+    <string name="loc_precision_city">City</string>
+    <string name="loc_precision_province">Province</string>
+    <string name="a11y_back">Back</string>
+    <string name="a11y_share">Share</string>
+    <string name="a11y_insert_image">Insert image</string>
+    <string name="delete">Delete</string>
+    <string name="discard">Discard</string>
+    <string name="editor_save_exit">Save &amp; exit</string>
+    <string name="a11y_expand">Expand</string>
+    <string name="a11y_collapse">Collapse</string>
+    <string name="a11y_remove">Remove</string>
+    <string name="ok">OK</string>
+    <string name="share_chooser_title">Share entry</string>
+    <string name="date_month_short">%1$d</string>
+    <string name="footprint_trend_empty">No entries this year.</string>
+    <string name="search_no_result">No matching entries.</string>
+    <string name="read_search_no_match">No match</string>
+    <string name="editor_location_precision">Precision</string>
+    <string name="editor_discard_revert_msg">Your edits revert to how the block was when you opened it.</string>
+    <string name="loc_precision_none">Not set</string>
 </resources>

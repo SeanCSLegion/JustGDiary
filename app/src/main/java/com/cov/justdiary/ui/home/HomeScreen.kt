@@ -21,6 +21,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.cov.justdiary.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -136,6 +139,8 @@ fun HomeScreen(
     LaunchedEffect(year) { onYearChange(year) }
     val selectedDate = remember(selectedKey) { DateUtil.parseDayKey(selectedKey) ?: monthFirst }
 
+    val context = LocalContext.current
+
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val availableW = maxWidth.value
@@ -152,7 +157,7 @@ fun HomeScreen(
                     .fillMaxSize(),
             ) {
                 HomeHeader(
-                    title = dateFormats?.year(year) ?: "${year}年",
+                    title = dateFormats?.year(year) ?: stringResource(R.string.date_year, year),
                     inYearMode = yearProgress.value > 0.01f || weekProgress.value > 0.01f,
                     // 与 iOS 的单一返回控件一致：周态 → 月态优先，再才是月态 → 年态
                     onToggleYear = {
@@ -262,6 +267,10 @@ fun HomeScreen(
                         scaleX = morph.yearScale
                         scaleY = morph.yearScale
                     },
+                    monthLabel = { date ->
+                        dateFormats?.monthName(date)
+                            ?: context.getString(R.string.date_month_short, date.monthValue)
+                    },
                 onMonthClick = { month ->
                     monthKey = CalendarGrid.monthKey(monthFirst.year, month)
                     selectedKey = DateUtil.dayKeyOf(LocalDate.of(monthFirst.year, month, 1))
@@ -354,7 +363,8 @@ private fun CalendarBody(
                 text = if (showWeekStrip) {
                     dateFormats?.weekHeaderTitle(selectedDate) ?: weekHeaderFallback(selectedDate)
                 } else {
-                    dateFormats?.monthTitle(monthFirst.year, monthFirst) ?: "${monthFirst.monthValue}月"
+                    dateFormats?.monthTitle(monthFirst.year, monthFirst)
+                        ?: stringResource(R.string.date_month_short, monthFirst.monthValue)
                 },
                 modifier = Modifier.padding(horizontal = Spacing.page),
                 style = if (landscape) {
@@ -477,10 +487,14 @@ private fun HomeHeader(
 
 // ---------------------------------------------------------------------- 内部
 
-private const val DAY_EMPTY_LABEL = "这一天没有留下日记。"
-private const val DAY_FUTURE_LABEL = "这一天还没有到来。"
-private const val DAY_WRITE_LABEL = "写日记"
-private const val DAY_CONTINUE_LABEL = "继续写日记"
+private val DAY_EMPTY_LABEL: String
+    @Composable get() = stringResource(R.string.index_day_empty)
+private val DAY_FUTURE_LABEL: String
+    @Composable get() = stringResource(R.string.index_future_empty)
+private val DAY_WRITE_LABEL: String
+    @Composable get() = stringResource(R.string.index_write)
+private val DAY_CONTINUE_LABEL: String
+    @Composable get() = stringResource(R.string.index_continue_write)
 
 /**
  * 横屏分栏右侧的"当日内容"。对应 iOS `Views/Home/DayContentView.swift`。
@@ -616,12 +630,26 @@ private fun DayPanePart(part: ContentPart, imageLoader: (String) -> ImageBitmap?
         )
     }
 }
-private const val TODAY_LABEL = "今天"
+private val TODAY_LABEL: String
+    @Composable get() = stringResource(R.string.index_today)
 
 /** 周条形态下取选中日所在的那一周（找不到就退回第一行）。 */
 private fun weekOf(weeks: List<List<LocalDate>>, selectedKey: String): List<LocalDate> =
     weeks.firstOrNull { row -> row.any { DateUtil.dayKeyOf(it) == selectedKey } } ?: weeks.first()
 
-/** 没有 DateFormats 时的兜底周标题（真机路径始终会传入 DateFormats）。 */
-private fun weekHeaderFallback(date: LocalDate): String =
-    "${date.year}年${date.monthValue}月${date.dayOfMonth}日"
+/**
+ * 没有 `DateFormats` 时的兜底周标题（只有预览会走到这条路）。
+ *
+ * 兜底也走资源，而不是写死中文 —— 否则预览里的文案会与真机不一致。
+ */
+@Composable
+private fun weekHeaderFallback(date: LocalDate): String = stringResource(
+    R.string.date_day_title,
+    stringResource(R.string.date_month_short, date.monthValue),
+    date.dayOfMonth,
+    date.dateOnlyWeekday(),
+)
+
+/** 兜底周标题用的星期名（跟随当前资源语言）。 */
+private fun LocalDate.dateOnlyWeekday(): String =
+    dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())

@@ -141,7 +141,7 @@ class SearchFiltersTest {
             timeKind = TimeRangeKind.ThisMonth,
             locFilter = LocFilter(country = "中国", region1 = "广东省"),
         )
-        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY) { "9月" }
+        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
         assertEquals(
             listOf(
                 SearchFilterItem(SearchFilterItem.Kind.Keyword, "深圳"),
@@ -155,7 +155,7 @@ class SearchFiltersTest {
     @Test
     fun `location filter shows only the country when no region is picked`() {
         val state = SearchUiState(locFilter = LocFilter(country = "日本"))
-        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY) { "9月" }
+        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
         assertEquals(
             listOf(SearchFilterItem(SearchFilterItem.Kind.Location, "日本")),
             items,
@@ -165,7 +165,7 @@ class SearchFiltersTest {
     @Test
     fun `no location filter shows its own label`() {
         val state = SearchUiState(locFilter = LocFilter(noLoc = true))
-        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY) { "9月" }
+        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
         assertEquals(
             listOf(SearchFilterItem(SearchFilterItem.Kind.Location, SearchFilters.NO_LOCATION_LABEL)),
             items,
@@ -174,7 +174,7 @@ class SearchFiltersTest {
 
     @Test
     fun `no conditions yields an empty summary`() {
-        assertTrue(SearchFilters.activeFilterItems(SearchUiState(), today, DateUtil.WEEK_START_MONDAY) { "x" }.isEmpty())
+        assertTrue(SearchFilters.activeFilterItems(SearchUiState(), today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "x" }).isEmpty())
     }
 
     // ------------------------------------------------------------------ 分页

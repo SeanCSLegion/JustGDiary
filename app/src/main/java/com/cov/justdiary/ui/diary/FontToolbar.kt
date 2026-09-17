@@ -17,6 +17,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.cov.justdiary.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -157,15 +159,21 @@ fun FontToolbar(
     }
 }
 
+@Composable
 private fun blockStyleLabel(style: EditorBlockStyle): String = when (style) {
-    EditorBlockStyle.Title -> "大标题"
-    EditorBlockStyle.Heading -> "小标题"
-    EditorBlockStyle.Body -> "正文"
-    EditorBlockStyle.Quote -> "引用"
+    EditorBlockStyle.Title -> stringResource(R.string.editor_font_heading)
+    EditorBlockStyle.Heading -> stringResource(R.string.editor_font_sub)
+    EditorBlockStyle.Body -> stringResource(R.string.editor_font_body)
+    EditorBlockStyle.Quote -> stringResource(R.string.editor_tool_quote)
 }
 
-private const val STYLE_LABEL = "段落样式"
-private const val QUOTE_LABEL = "引用"
-private const val LIST_LABEL = "列表"
-private const val TODO_LABEL = "待办"
-private const val IMAGE_LABEL = "图片"
+private val STYLE_LABEL: String
+    @Composable get() = stringResource(R.string.editor_tool_style)
+private val QUOTE_LABEL: String
+    @Composable get() = stringResource(R.string.editor_tool_quote)
+private val LIST_LABEL: String
+    @Composable get() = stringResource(R.string.editor_tool_list)
+private val TODO_LABEL: String
+    @Composable get() = stringResource(R.string.editor_tool_todo)
+private val IMAGE_LABEL: String
+    @Composable get() = stringResource(R.string.a11y_insert_image)

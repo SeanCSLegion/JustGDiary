@@ -175,14 +175,21 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         val today = LocalDate.now()
         _state.value = _state.value.copy(
             ui = ui,
-            filterItems = SearchFilters.activeFilterItems(ui, today, weekStart) { range ->
-                com.cov.justdiary.service.DateFormats
-                    .forContext(container.appContext, container.settings.load().appLanguage)
-                    .dateRange(
-                        DateUtil.parseDayKey(range.from) ?: today,
-                        DateUtil.parseDayKey(range.to) ?: today,
-                    )
-            },
+            filterItems = SearchFilters.activeFilterItems(
+                state = ui,
+                today = today,
+                weekStart = weekStart,
+                rangeLabel = { range ->
+                    com.cov.justdiary.service.DateFormats
+                        .forContext(container.appContext, container.settings.load().appLanguage)
+                        .dateRange(
+                            DateUtil.parseDayKey(range.from) ?: today,
+                            DateUtil.parseDayKey(range.to) ?: today,
+                        )
+                },
+                // 文案跟随应用内语言（`appContext.getString` 在 setApplicationLocales 之后按新语言解析）
+                noLocLabel = container.appContext.getString(com.cov.justdiary.R.string.search_loc_no_loc),
+            ),
         )
     }
 

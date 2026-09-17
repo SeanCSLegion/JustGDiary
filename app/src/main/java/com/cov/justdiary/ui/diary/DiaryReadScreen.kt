@@ -35,6 +35,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.cov.justdiary.R
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -431,12 +433,21 @@ private fun TodoBox(done: Boolean) {
     }
 }
 
-private const val WRITE_LABEL = "写日记"
-private const val DELETE_LABEL = "删除"
-private const val SHARE_LABEL = "分享"
-private const val SEARCH_PLACEHOLDER = "在当前日记中查找…"
-private const val CLEAR_LABEL = "清除"
-private const val PREV_MATCH_LABEL = "上一个匹配"
-private const val NEXT_MATCH_LABEL = "下一个匹配"
-private const val NO_MATCH_LABEL = "无匹配"
-private const val IMAGE_MISSING_LABEL = "图片"
+private val WRITE_LABEL: String
+    @Composable get() = stringResource(R.string.index_write)
+private val DELETE_LABEL: String
+    @Composable get() = stringResource(R.string.delete)
+private val SHARE_LABEL: String
+    @Composable get() = stringResource(R.string.a11y_share)
+private val SEARCH_PLACEHOLDER: String
+    @Composable get() = stringResource(R.string.read_search_placeholder)
+private val CLEAR_LABEL: String
+    @Composable get() = stringResource(R.string.search_time_clear)
+private val PREV_MATCH_LABEL: String
+    @Composable get() = stringResource(R.string.read_search_prev)
+private val NEXT_MATCH_LABEL: String
+    @Composable get() = stringResource(R.string.read_search_next)
+private val NO_MATCH_LABEL: String
+    @Composable get() = stringResource(R.string.read_search_no_match)
+private val IMAGE_MISSING_LABEL: String
+    @Composable get() = stringResource(R.string.share_image_placeholder)

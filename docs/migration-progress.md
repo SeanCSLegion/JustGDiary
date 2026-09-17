@@ -691,3 +691,55 @@ iOS 的 `DiaryViewModel.handleBack` 问的是 `controller.isEmpty()`；Android �
 
 `tools/verify_sqlite_schema.py`（18 条）与 `tools/verify_backup_interop.sh`（15 条，用 iOS 真实的
 `ZipArchive.swift` 读 Android 写出的 `.jdiary`）均通过。
+
+---
+
+## M9 —— 打磨（**部分完成**）
+
+### 本轮完成：全量文案资源化（语言切换真正生效）
+
+在此之前只有设置页走资源，其余四屏仍写死中文 —— 切到英文后 4/5 的界面不变，
+而这在 iOS 侧是完整本地化的。因此把四屏（首页 / 足迹 / 搜索 / 日记阅读 / 编辑器 / 格式栏）
+与日记页的所有对话框文案搬进资源：
+
+| 内容 | 数量 | 做法 |
+| --- | --- | --- |
+| 来自 iOS catalog 的 key | 78 | key 同名同值；`%1$ld → %1$d`、`%@ → %1$s` 按 Android 的格式化规则改写 |
+| Android 专有（iOS 用符号或无此文案） | 12 | 已单独注释：`a11y_expand/collapse/remove`、`ok`、`share_chooser_title`、`date_month_short`、`footprint_trend_empty`、`search_no_result`、`read_search_no_match`、`editor_location_precision`、`editor_discard_revert_msg`、`loc_precision_none` |
+
+三个实现要点：
+
+1. **文件级常量改成 `@Composable` 取值属性**：
+   `private val TITLE: String @Composable get() = stringResource(R.string.footprint_title)` ——
+   调用点一个字都不用改，而"在非组合上下文误用"会在编译期报错（正是我们要的护栏）。
+2. **原本是普通函数的文案函数改成 `@Composable`**：`summaryLabel`、`resultCountLabel`、
+   `precisionLabel`、`blockStyleLabel`、`timeRangeOptions`。
+3. **两处必须"先取值再用"**：
+   - 分享面板标题在 `LaunchedEffect`（非组合作用域）里用 → 在组合期先取好；
+   - 年历迷你月的标题在 **Canvas 绘制 lambda** 里用 → `YearCanvas` 的 `monthLabel` 改成**必传参数**
+     （原先写死 `monthValue + "月"`，切英文后年历仍是中文）。
+
+另外把两个"文案在非 UI 层"的地方也接了语言：
+
+- `SearchFilters.activeFilterItems` 新增可注入的 `noLocLabel`（纯逻辑层不能依赖 Android 资源，
+  真机由 `SearchViewModel` 传 `context.getString(...)`）；
+- `FootprintViewModel` 的地点排序接上 `android.icu.text.Collator.setNumericCollation(true)`，
+  即"数字自然序"（`第2章` 在 `第10章` 之前）—— 对应 iOS 的 `localizedStandardCompare`，
+  补上了 M6 留下的那处平台差异；纯逻辑层仍保留可注入的 `PlaceOrder` 供 JVM 断言。
+
+### 一处自检脚本
+
+资源键与占位符的一致性用一次性脚本核对过：`values/` 162 键 vs `values-zh-rCN/` 161 键
+（只差 `app_name`，它刻意 `translatable="false"`），且**没有任何键的 `%n$s/%n$d` 数量不一致** ——
+这类不一致会在真机上抛 `IllegalFormatException`，值得每次改文案后跑一遍。
+
+### 仍然留着的（需要真机 / 未做）
+
+| 项 | 为什么留着 |
+| --- | --- |
+| 真的 Material Symbols 图标 | `material-icons-extended` 的 aar 有 **35.7 MB**，而 release 的 `isMinifyEnabled = false`；为 15 个图标把整包打进 APK 不划算。当前用 `material-icons-core` 里语义最近的图标（同一张卡内不重复），并把映射集中在 `SettingsIcons` 一处 |
+| 编辑器内联图片的排版细节 | 需要真机看换行与占位高度；逻辑（`EditorModel.insertImageLine` + 宽高比）已就位 |
+| `-slow-morph` / `-morph-log` 调试开关 | 需要一个能跑的设备才有意义（方案 §6.2 已定方案：`BuildConfig.DEBUG` + `Intent` extra + `Choreographer` 帧日志） |
+| morph 帧率实测 | 同上：无设备/无 AVD（本机 `adb devices` 为空） |
+| TalkBack 走查、年月切换的 `customActions` | 需要 TalkBack；`a11y_*` 文案已在资源里备好 |
+| 运行时验证（建表/迁移/参数绑定/编辑器往返） | 需要设备或 Robolectric 宿主；已在 `docs/migration-progress.md` 里列为"有设备后的第一件事" |

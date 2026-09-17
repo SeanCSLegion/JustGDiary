@@ -230,6 +230,14 @@ fun YearCanvas(
     weekStart: String = DateUtil.WEEK_START_MONDAY,
     showLunar: Boolean = false,
     onMonthClick: ((Int) -> Unit)? = null,
+    /**
+     * 迷你月的标题文案（**必传**）。
+     *
+     * Canvas 的绘制 lambda 不是 `@Composable` 上下文，所以文案必须由调用方在组合期准备好。
+     * 原先这里写死 `monthValue + "月"`，切到英文后年历仍显示中文 —— 现在没有默认值，
+     * 调用方必须给出跟随语言的文案（见 `HomeScreen` 的 `DateFormats.monthName`）。
+     */
+    monthLabel: (LocalDate) -> String,
 ) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer(cacheSize = TEXT_CACHE_SIZE)
@@ -282,7 +290,7 @@ fun YearCanvas(
             val isCurrentMonth = month == selectedMonth
             val titleColor = if (isCurrentMonth) primary else onSurfaceVariant
 
-            val titleText = measurer.measure(monthName(monthFirst), titleStyle.copy(color = titleColor))
+            val titleText = measurer.measure(monthLabel(monthFirst), titleStyle.copy(color = titleColor))
             drawText(
                 textLayoutResult = titleText,
                 topLeft = Offset(
@@ -440,8 +448,6 @@ private fun DrawScope.drawDay(
     }
 }
 
-/** 年历迷你月的标题用的是紧凑月名（与 iOS 的 `monthName` 槽位一致）。 */
-private fun monthName(date: LocalDate): String = "${date.monthValue}月"
 
 /** 把 dp 度量换算成 px 度量（Canvas 绘制用）。 */
 private fun CalendarLayout.DayMetrics.scaled(density: Float): CalendarLayout.DayMetrics =

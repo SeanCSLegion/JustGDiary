@@ -30,6 +30,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.cov.justdiary.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -246,7 +248,7 @@ private fun TimeFilterRow(
             .padding(horizontal = Spacing.page),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        timeRangeOptions.forEach { (kind, label) ->
+        timeRangeOptions().forEach { (kind, label) ->
             FilterChip(
                 selected = state.timeKind == kind,
                 onClick = { onTimeKindChange(kind) },
@@ -368,22 +370,36 @@ private fun highlightSnippet(snippet: String): AnnotatedString {
     }
 }
 
-private fun resultCountLabel(total: Int): String = "$total 条结果"
+@Composable
+private fun resultCountLabel(total: Int): String =
+    stringResource(R.string.search_result_count, total)
 
-private val timeRangeOptions = listOf(
-    TimeRangeKind.All to "全部时间",
-    TimeRangeKind.ThisWeek to "本周",
-    TimeRangeKind.ThisMonth to "本月",
-    TimeRangeKind.ThisYear to "今年",
+/** 时间四档的标签（`@Composable`：文案跟随应用内语言）。 */
+@Composable
+private fun timeRangeOptions(): List<Pair<TimeRangeKind, String>> = listOf(
+    TimeRangeKind.All to stringResource(R.string.search_all_time),
+    TimeRangeKind.ThisWeek to stringResource(R.string.search_time_week),
+    TimeRangeKind.ThisMonth to stringResource(R.string.search_time_month),
+    TimeRangeKind.ThisYear to stringResource(R.string.search_time_year),
 )
 
-private const val TITLE = "搜索"
-private const val PLACEHOLDER = "搜索日记内容…"
-private const val CLEAR_LABEL = "清除"
-private const val CLEAR_ALL_LABEL = "清除全部条件"
-private const val REMOVE_LABEL = "移除"
-private const val NO_LOCATION_LABEL_ = "未记录地点"
-private const val PREPARING_LABEL = "正在准备搜索索引…"
-private const val START_TITLE = "输入关键词开始搜索"
-private const val NO_RESULT_LABEL = "没有找到匹配的日记。"
-private const val LOAD_MORE_LABEL = "加载更多"
+private val TITLE: String
+    @Composable get() = stringResource(R.string.search_title)
+private val PLACEHOLDER: String
+    @Composable get() = stringResource(R.string.search_placeholder)
+private val CLEAR_LABEL: String
+    @Composable get() = stringResource(R.string.search_time_clear)
+private val CLEAR_ALL_LABEL: String
+    @Composable get() = stringResource(R.string.search_clear_all)
+private val REMOVE_LABEL: String
+    @Composable get() = stringResource(R.string.a11y_remove)
+private val NO_LOCATION_LABEL_: String
+    @Composable get() = stringResource(R.string.search_loc_no_loc)
+private val PREPARING_LABEL: String
+    @Composable get() = stringResource(R.string.search_preparing)
+private val START_TITLE: String
+    @Composable get() = stringResource(R.string.search_start_title)
+private val NO_RESULT_LABEL: String
+    @Composable get() = stringResource(R.string.search_no_result)
+private val LOAD_MORE_LABEL: String
+    @Composable get() = stringResource(R.string.search_load_more)
