@@ -37,6 +37,19 @@ data class SearchUiState(
     /** 库还没准备好时 `total == -1`（与 iOS 一致）。 */
     val indexNotReady: Boolean get() = total < 0
     val isEmpty: Boolean get() = items.isEmpty()
+
+    /**
+     * 是否至少有一个条件（关键词或时间/地点筛选）。
+     *
+     * 没有条件时**不查库**（与 iOS 一致）：否则会退化成"列出全部日记"，
+     * 而搜索页在无条件时应当显示空态提示而不是所有结果。
+     */
+    val hasAnyCondition: Boolean
+        get() = keywords.any { it.isNotBlank() } ||
+            keyword.isNotBlank() ||
+            timeKind != TimeRangeKind.All ||
+            locFilter.country.isNotEmpty() ||
+            locFilter.noLoc
 }
 
 /**

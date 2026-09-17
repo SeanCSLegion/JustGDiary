@@ -2,7 +2,9 @@ package com.cov.justdiary.ui.diary
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -73,6 +78,7 @@ import com.cov.justdiary.ui.theme.Spacing
  * @param imageLoader 内联图片的加载器（返回已降采样的位图）。
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun DiaryReadScreen(
     dayTitle: String,
     blocks: List<ReadBlock>,
@@ -84,6 +90,18 @@ fun DiaryReadScreen(
     onToggleTodo: (Int, Int) -> Unit = { _, _ -> },
     onShare: () -> Unit = {},
     imageLoader: (ContentPart) -> ImageBitmap? = { null },
+    /** 点某个片段 → 进编辑（对应 iOS `handleBlockTap`）。 */
+    onEditBlock: (Int) -> Unit = {},
+    /** 长按某个片段 → 进多选（对应 iOS 的 `onLongPressGesture`）。 */
+    onLongPressBlock: (Int) -> Unit = {},
+    /** 多选态：显示勾选框、点击变成选中/取消。 */
+    selectMode: Boolean = false,
+    selectedIds: Set<Long> = emptySet(),
+    /** 今天才显示的"写日记"入口（`null` = 不显示）。 */
+    onWrite: (() -> Unit)? = null,
+    /** 多选态下点某个片段：切换选中（`blockIndex`）。 */
+    onToggleSelect: (Int) -> Unit = {},
+    onDeleteSelected: () -> Unit = {},
 ) {
     val parts = remember(blocks) { blocks.flatMap { it.parts } }
     val matches = remember(parts, keyword) { DiarySearch.findMatches(parts, keyword) }
@@ -103,8 +121,25 @@ fun DiaryReadScreen(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.widthIn(max = ReadLayout.READING_MAX_WIDTH.dp),
             )
-            IconButton(onClick = onShare) {
-                Icon(Icons.Filled.Share, contentDescription = SHARE_LABEL)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (selectMode) {
+                    Text(
+                        text = selectedIds.size.toString(),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    IconButton(onClick = onDeleteSelected, enabled = selectedIds.isNotEmpty()) {
+                        Icon(Icons.Filled.Delete, contentDescription = DELETE_LABEL)
+                    }
+                }
+                if (onWrite != null) {
+                    IconButton(onClick = onWrite) {
+                        Icon(Icons.Filled.Create, contentDescription = WRITE_LABEL)
+                    }
+                }
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Filled.Share, contentDescription = SHARE_LABEL)
+                }
             }
         }
 
@@ -148,17 +183,40 @@ fun DiaryReadScreen(
 
         // 片段列表
         blocks.forEachIndexed { blockIndex, block ->
+            val selected = block.id in selectedIds
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = {
+                            if (selectMode) onToggleSelect(blockIndex) else onEditBlock(blockIndex)
+                        },
+                        onLongClick = { onLongPressBlock(blockIndex) },
+                    )
                     .padding(horizontal = Spacing.page, vertical = Spacing.card),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    text = block.startLine,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (selectMode) {
+                        Icon(
+                            imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.Clear,
+                            contentDescription = null,
+                            tint = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    Text(
+                        text = block.startLine,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 block.parts.forEachIndexed { partIndex, part ->
                     ReadPart(
                         part = part,
@@ -176,6 +234,8 @@ fun DiaryReadScreen(
 
 /** 一天里的一个片段（与 iOS `ShareBlock` 同构，但多了渲染好的起始行文案）。 */
 data class ReadBlock(
+    /** 片段 id（多选与待办回写要用）。 */
+    val id: Long = 0,
     val startTimeUtc: Long,
     val startLine: String,
     val parts: List<ContentPart>,
@@ -371,6 +431,8 @@ private fun TodoBox(done: Boolean) {
     }
 }
 
+private const val WRITE_LABEL = "写日记"
+private const val DELETE_LABEL = "删除"
 private const val SHARE_LABEL = "分享"
 private const val SEARCH_PLACEHOLDER = "在当前日记中查找…"
 private const val CLEAR_LABEL = "清除"

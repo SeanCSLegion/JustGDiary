@@ -96,8 +96,4 @@
     <string name="settings_section_about">About</string>
     <string name="settings_version">Version</string>
 
-    <!-- M0 占位 -->
-    <string name="m0_placeholder_title">JustGDiary</string>
-    <string name="m0_placeholder_body">Android port of the JustADiary journal app.\nThis is the M0 skeleton: build pipeline, Material 3 theme, dynamic color and adaptive navigation.\nFeature screens are migrated in M1–M9.</string>
-    <string name="m0_package_note">applicationId: com.cov.justdiary</string>
 </resources>

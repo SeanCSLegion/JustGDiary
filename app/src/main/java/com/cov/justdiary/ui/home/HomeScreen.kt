@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,11 +36,28 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextDecoration
+import com.cov.justdiary.model.ContentFlatten
+import com.cov.justdiary.model.ContentPart
+import com.cov.justdiary.model.ContentPartStyle
 import com.cov.justdiary.model.DateUtil
+import com.cov.justdiary.model.EditBlock
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.Spacing
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.util.Locale
 
@@ -73,6 +91,14 @@ fun HomeScreen(
     showLunar: Boolean = true,
     dateFormats: DateFormats? = null,
     onOpenDay: (LocalDate) -> Unit = {},
+    /** 当前选中日的片段（横屏右栏"当日内容"用；`null` = 这一天还没有日记）。 */
+    dayBlocks: List<EditBlock>? = null,
+    /** 年份变化 → 让上层按年份区间重新读日记标记。 */
+    onYearChange: (Int) -> Unit = {},
+    /** 选中日变化 → 让上层读这一天的内容。 */
+    onSelectDay: (String) -> Unit = {},
+    /** 内联图片加载器（接 `MediaStore`）。 */
+    imageLoader: (String) -> ImageBitmap? = { null },
 ) {
     val todayKey = DateUtil.dayKeyOf(today)
     var monthKey by rememberSaveable { mutableStateOf(CalendarGrid.monthKeyOf(today)) }
@@ -100,9 +126,13 @@ fun HomeScreen(
         }
     }
 
+    // 选中日与年份变化要上报给上层：前者决定"当日内容"面板，后者决定标记的读取区间
+    LaunchedEffect(selectedKey) { onSelectDay(selectedKey) }
+
     val monthFirst = remember(monthKey) { CalendarGrid.monthFirstOfMonthKey(monthKey) }
     val displayedWeeks = remember(monthKey, weekStart) { CalendarGrid.displayedWeeks(monthFirst, weekStart) }
     val year = CalendarGrid.yearOfMonthKey(monthKey)
+    LaunchedEffect(year) { onYearChange(year) }
     val selectedDate = remember(selectedKey) { DateUtil.parseDayKey(selectedKey) ?: monthFirst }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -193,13 +223,17 @@ fun HomeScreen(
             }
 
             if (landscape) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = DAY_CONTENT_PLACEHOLDER,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                DayContentPane(
+                    blocks = dayBlocks,
+                    dayKey = selectedKey,
+                    todayKey = todayKey,
+                    dateFormats = dateFormats,
+                    imageLoader = imageLoader,
+                    onOpenDay = { onOpenDay(selectedDate) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 8.dp),
+                )
             }
         }
 
@@ -442,7 +476,145 @@ private fun HomeHeader(
 
 private const val LANDSCAPE_SPLIT_THRESHOLD_DP = 700f
 private const val LANDSCAPE_CALENDAR_W_DP = 345f
-private const val DAY_CONTENT_PLACEHOLDER = "日记内容（M4 接入）"
+private const val DAY_EMPTY_LABEL = "这一天没有留下日记。"
+private const val DAY_FUTURE_LABEL = "这一天还没有到来。"
+private const val DAY_WRITE_LABEL = "写日记"
+private const val DAY_CONTINUE_LABEL = "继续写日记"
+
+/**
+ * 横屏分栏右侧的"当日内容"。对应 iOS `Views/Home/DayContentView.swift`。
+ *
+ * 与 iOS 的差别只有渲染方式：iOS 用 `DiaryBlockCard`（玻璃卡片 + `RichTextView`），
+ * 这里用 M3 的 `Card` + 逐段落渲染（与 `DiaryReadScreen` 同一套段落组件）。
+ * 空态与"写日记 / 继续写日记"按钮的显示条件与 iOS 完全一致：
+ * **只有今天**才有写入口，未来的日期显示"还没有到来"。
+ */
+@Composable
+private fun DayContentPane(
+    blocks: List<EditBlock>?,
+    dayKey: String,
+    todayKey: String,
+    dateFormats: DateFormats?,
+    imageLoader: (String) -> ImageBitmap?,
+    onOpenDay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isToday = dayKey == todayKey
+    val isFuture = dayKey > todayKey
+    val hasBlocks = !blocks.isNullOrEmpty()
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (hasBlocks) {
+            blocks.orEmpty().forEach { block ->
+                val startLine = buildString {
+                    if (block.startTimeUtc > 0) {
+                        append(dateFormats?.timeOf(Instant.ofEpochMilli(block.startTimeUtc)).orEmpty())
+                    }
+                    if (block.locText.isNotEmpty()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(block.locText)
+                    }
+                }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onOpenDay),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(Spacing.card),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = startLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        ContentFlatten.parseContent(block.contentJson).forEach { part ->
+                            DayPanePart(part = part, imageLoader = imageLoader)
+                        }
+                    }
+                }
+            }
+            if (isToday) {
+                Button(
+                    onClick = onOpenDay,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(DAY_CONTINUE_LABEL)
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 56.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = if (isFuture) DAY_FUTURE_LABEL else DAY_EMPTY_LABEL,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                if (isToday) {
+                    Button(onClick = onOpenDay) { Text(DAY_WRITE_LABEL) }
+                }
+            }
+        }
+    }
+}
+
+/** 当日内容面板里的一个段落（只做只读渲染，编辑与勾选都在日记页里）。 */
+@Composable
+private fun DayPanePart(part: ContentPart, imageLoader: (String) -> ImageBitmap?) {
+    when {
+        part.src != null -> {
+            val bitmap = imageLoader(part.src)
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.FillWidth,
+                )
+            }
+        }
+
+        !part.items.isNullOrEmpty() -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            part.items.orEmpty().forEachIndexed { index, item ->
+                val done = part.done?.getOrNull(index) == true
+                Text(
+                    text = (if (part.style == ContentPartStyle.todo) (if (done) "☑ " else "☐ ") else "• ") + item,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (done) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    textDecoration = if (done) TextDecoration.LineThrough else null,
+                )
+            }
+        }
+
+        else -> Text(
+            text = ContentFlatten.flattenPart(part),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
 private const val TODAY_LABEL = "今天"
 
 /** 周条形态下取选中日所在的那一周（找不到就退回第一行）。 */

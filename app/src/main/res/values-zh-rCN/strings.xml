@@ -87,6 +87,4 @@
     <string name="settings_section_about">关于</string>
     <string name="settings_version">版本</string>
 
-    <string name="m0_placeholder_body">JustADiary 日记应用的 Android 版。\n当前是 M0 骨架：构建链路、Material 3 主题、动态取色与自适应导航。\n功能页面在 M1–M9 阶段迁移。</string>
-    <string name="m0_package_note">包名：com.cov.justdiary</string>
 </resources>

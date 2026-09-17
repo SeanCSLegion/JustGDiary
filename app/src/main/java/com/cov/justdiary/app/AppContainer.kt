@@ -3,6 +3,7 @@ package com.cov.justdiary.app
 import android.content.Context
 import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.service.BackupService
+import com.cov.justdiary.service.ImageShareRenderer
 import com.cov.justdiary.service.LocationService
 import com.cov.justdiary.service.MediaStore
 import com.cov.justdiary.service.ReminderScheduler
@@ -48,6 +49,9 @@ class AppContainer(context: Context) {
     val reminderScheduler: ReminderScheduler by lazy {
         ReminderScheduler(appContext, settings, repository)
     }
+
+    /** 分享长图渲染（自绘，版式来自纯函数 `ShareLayout`）。 */
+    val imageShareRenderer: ImageShareRenderer by lazy { ImageShareRenderer(appContext, mediaStore) }
 
     /** 设置变更的平台侧执行器（外观 / 语言 / day_key 重算 / 回填 / 提醒重排）。 */
     val appSettingsApplier: AppSettingsApplier by lazy {

@@ -609,9 +609,35 @@ iOS 对 `region1` 有**两套不同规则**，且都在生产路径上：
 而 release 的 `isMinifyEnabled = false`，为十几个图标把整包打进 APK 不划算。
 真正的 Material Symbols 图标（矢量 XML，按需引入）留在 M9，与方案 §M9 一致。
 
-### 尚未接线（记在 M7 剩余部分）
+### 数据接线 + 日记页（M7 下半，已完成）
 
-1. `DiaryRepository` → 首页 / 足迹 / 搜索三个页面的 ViewModel（现在仍喂空状态）；
-2. 首页的"当日内容"面板（横屏分栏里目前是占位）；
-3. 点日记卡片 → 阅读页 → 编辑页的整条路径；
-4. 通知点开后直达当天编辑页（深链 `justdiary://editor?dayKey=…` 已在 Manifest 里，未消费）。
+这一半把"服务能跑"变成"页面能用"：四个标签页全部接上仓库，读/写/分享/深链一条链打通。
+
+| 文件 | 说明 |
+| --- | --- |
+| `ui/home/HomeViewModel.kt` | 首页：日记标记（年份区间 = **今年与当前页所在年的最小/最大 ±1**，与 iOS 一致）、选中日内容 |
+| `ui/footprint/FootprintViewModel.kt` | 足迹：`allFootprintRows()` **只读一次**并缓存，筛选在内存里做；展开集合由它持有，筛选后剪掉已消失的节点 |
+| `ui/search/SearchViewModel.kt` | 搜索：250ms 输入防抖、关键词胶囊、时间四档、地点筛选（国家 + 一级地区的候选来自仓库）、分页加载 |
+| `ui/diary/DiaryPageViewModel.kt` | 日记页（iOS `DiaryViewModel`，534 行的对应物）：读/写切换、新建与编辑、保存（含**跨日确认**）、批量删除、待办勾选、页内搜索（150ms 防抖 + 命中步进）、位置快照与精度调整、分享长图 |
+| `ui/diary/DiaryPageScreen.kt` | 日记页宿主：`isRead` 决定渲染阅读页还是编辑页；返回键经 `BackHandler` 走"有未保存内容先确认"；分享长图用 `Intent.ACTION_SEND` |
+| `ui/root/RootScreen.kt` | 自适应导航 + **全屏日记页路由**（对应 iOS 的 `.fullScreenCover`）+ `dataVersion` 失效机制（对应 iOS 的 `.diaryVersionChanged`） |
+| `app/LaunchIntent.kt` | 深链 `justdiary://editor?dayKey=…`（也接受 `justdiary://editor/YYYY-MM-DD`）；等 Compose 树就绪后再打开，与 iOS 的 `LaunchIntent` 同一时机 |
+
+页面上的新交互（对应 iOS 的 `handleBlockTap` / 长按 / 顶栏按钮）：
+
+- **点片段 → 进编辑**；**长按 → 多选**（多选态顶栏变成"数量 + 删除"）；
+- 阅读页顶栏：搜索开关、**写日记**（仅当天）、分享；
+- 首页横屏右栏的**当日内容**（`DayContentPane`）：片段卡片 + "写日记 / 继续写日记"，
+  未来的日期显示"这一天还没有到来"（与 `DayContentView` 的条件一致）。
+
+### 一处"看不见但要紧"的接线：编辑器脏标记
+
+iOS 的 `DiaryViewModel.handleBack` 问的是 `controller.isEmpty()`；Android 侧编辑内容在
+`EditorScreen` 内部（纯模型 `List<EditorLine>`），宿主看不到。因此给编辑器加了
+`onDirtyChange: (Boolean) -> Unit`，由它把"内容或历史与进入时不同"上报给日记页 ——
+否则返回键永远不会弹"未保存内容"的确认。
+
+### 空态文案里的一个事实
+
+之前四屏统一的 `m0_placeholder_*` 占位文案随 `SkeletonScreen` 一起删除了：
+四个标签页现在都是真实实现，占位文案留在资源里只会误导。

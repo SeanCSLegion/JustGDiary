@@ -25,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -74,10 +75,19 @@ fun EditorScreen(
     onImportImage: suspend (android.net.Uri) -> ImportedImage? = { null },
     /** 图片行的位图加载器（由调用方接 `MediaStore`）。 */
     loadImage: (String) -> android.graphics.Bitmap? = { null },
+    /**
+     * 是否有未保存内容（宿主用它决定返回键是否要二次确认）。
+     *
+     * iOS 的 `DiaryViewModel.handleBack` 直接问 `controller.isEmpty()`；Android 侧编辑内容
+     * 是纯模型，宿主看不到，因此由编辑器**上报**（内容或历史与进入时不同即为脏）。
+     */
+    onDirtyChange: (Boolean) -> Unit = {},
 ) {
     val initialLines = remember(initialParts) { EditorModel.partsToLines(initialParts) }
     val state = rememberEditorTextState(initialLines)
     val history = remember { EditorHistory(initial = initialLines) }
+    val dirty = hasChanges(state, initialLines, history)
+    LaunchedEffect(dirty) { onDirtyChange(dirty) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
     var showLocationConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()

@@ -1,7 +1,5 @@
 package com.cov.justdiary.ui.root
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,22 +16,33 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.cov.justdiary.R
-import com.cov.justdiary.data.FootprintViewStateBuilder
-import com.cov.justdiary.data.SearchUiState
-import com.cov.justdiary.data.YEAR_FILTER_ALL
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cov.justdiary.JustDiaryApplication
+import com.cov.justdiary.app.AppContainer
+import com.cov.justdiary.app.LaunchIntent
+import com.cov.justdiary.model.DateUtil
+import com.cov.justdiary.service.DateFormats
+import com.cov.justdiary.ui.diary.DiaryPageScreen
 import com.cov.justdiary.ui.footprint.FootprintScreen
+import com.cov.justdiary.ui.footprint.FootprintViewModel
+import com.cov.justdiary.ui.home.HomeViewModel
 import com.cov.justdiary.ui.home.HomeScreen
 import com.cov.justdiary.ui.search.SearchScreen
+import com.cov.justdiary.ui.search.SearchViewModel
 import com.cov.justdiary.ui.settings.SettingsScreen
 
 /**
@@ -50,8 +59,35 @@ import com.cov.justdiary.ui.settings.SettingsScreen
  */
 @Composable
 fun RootScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val container = remember(context) {
+        (context.applicationContext as JustDiaryApplication).container
+    }
     var selectedName by rememberSaveable { mutableStateOf(AppTab.Home.name) }
     val selected = AppTab.entries.firstOrNull { it.name == selectedName } ?: AppTab.Home
+
+    // 全屏的日记页（阅读/编辑）在标签页之上：对应 iOS 的 `.fullScreenCover`
+    var openDayKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // 日记数据变过之后，让各个页面自己刷一次（对应 iOS 的 `.diaryVersionChanged`）
+    var dataVersion by rememberSaveable { mutableIntStateOf(0) }
+
+    // 深链：justdiary://editor?dayKey=… → 打开这一天的日记页
+    val launchDayKey by LaunchIntent.dayKey.collectAsState()
+    LaunchedEffect(launchDayKey) {
+        val key = launchDayKey ?: return@LaunchedEffect
+        openDayKey = key
+        LaunchIntent.clear()
+    }
+
+    if (openDayKey != null) {
+        DiaryPageScreen(
+            dayKey = openDayKey,
+            onClose = { openDayKey = null },
+            onDataChanged = { dataVersion++ },
+            modifier = modifier,
+        )
+        return
+    }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val useRail = maxWidth >= 600.dp
@@ -69,7 +105,13 @@ fun RootScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 VerticalDivider()
-                SkeletonScreen(tab = selected, modifier = Modifier.weight(1f))
+                TabContent(
+                    tab = selected,
+                    container = container,
+                    dataVersion = dataVersion,
+                    onOpenDay = { openDayKey = it },
+                    modifier = Modifier.weight(1f),
+                )
             }
         } else {
             Scaffold(
@@ -86,8 +128,11 @@ fun RootScreen(modifier: Modifier = Modifier) {
                     }
                 },
             ) { innerPadding ->
-                SkeletonScreen(
+                TabContent(
                     tab = selected,
+                    container = container,
+                    dataVersion = dataVersion,
+                    onOpenDay = { openDayKey = it },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
@@ -98,68 +143,80 @@ fun RootScreen(modifier: Modifier = Modifier) {
 }
 
 /**
- * 页面宿主。
+ * 四个标签页的内容。
  *
- * 四个页面都已接入真实实现；**足迹与搜索拿到的仍是空状态**
- * （`DiaryRepository` → 页面状态的数据接线在 M7 剩余部分完成，
- * 编辑页入口也在同一批里打通）。
+ * 每个页面的 ViewModel 在**该标签第一次被打开时**创建（Compose 的 `viewModel()` 语义），
+ * 之后一直存活；`dataVersion` 变化时各页面自己重新读库，因此"在日记页里改完数据、
+ * 回到列表"看到的一定是新数据（对应 iOS 的 `.diaryVersionChanged` 通知）。
  */
 @Composable
-private fun SkeletonScreen(tab: AppTab, modifier: Modifier = Modifier) {
+private fun TabContent(
+    tab: AppTab,
+    container: AppContainer,
+    dataVersion: Int,
+    onOpenDay: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val formats = remember {
+        DateFormats.forContext(context, container.settings.load().appLanguage)
+    }
+
     when (tab) {
         AppTab.Home -> {
-            HomeScreen(modifier = modifier)
-            return
+            val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(container))
+            val state by viewModel.state.collectAsState()
+            LaunchedEffect(dataVersion) { viewModel.refresh() }
+            HomeScreen(
+                modifier = modifier,
+                today = state.today,
+                flags = state.flags,
+                weekStart = state.weekStart,
+                dateFormats = formats,
+                dayBlocks = state.dayBlocks,
+                onYearChange = viewModel::setVisibleYear,
+                onSelectDay = viewModel::select,
+                onOpenDay = { onOpenDay(DateUtil.dayKeyOf(it)) },
+                imageLoader = { src -> container.mediaStore.image(src)?.asImageBitmap() },
+            )
         }
 
         AppTab.Footprint -> {
-            FootprintScreen(
-                state = FootprintViewStateBuilder.build(emptyList()),
-                yearFilter = YEAR_FILTER_ALL,
-                modifier = modifier,
-            )
-            return
+            val viewModel: FootprintViewModel =
+                viewModel(factory = FootprintViewModel.factory(container))
+            val state by viewModel.state.collectAsState()
+            LaunchedEffect(dataVersion) { viewModel.reload() }
+            BoxWithConstraints(modifier = modifier) {
+                FootprintScreen(
+                    state = state.viewState,
+                    yearFilter = state.yearFilter,
+                    landscape = maxWidth >= 600.dp,
+                    expanded = state.expanded,
+                    onYearFilterChange = viewModel::setYearFilter,
+                    onToggleExpand = viewModel::toggleExpandNode,
+                    onDayClick = onOpenDay,
+                )
+            }
         }
 
         AppTab.Search -> {
+            val viewModel: SearchViewModel = viewModel(factory = SearchViewModel.factory(container))
+            val state by viewModel.state.collectAsState()
             SearchScreen(
-                state = SearchUiState(total = 0),
-                filterItems = emptyList(),
+                state = state.ui,
+                filterItems = state.filterItems,
                 modifier = modifier,
+                onKeywordChange = viewModel::onKeywordChange,
+                onCommitKeyword = viewModel::commitKeyword,
+                onRemoveKeyword = viewModel::removeKeyword,
+                onClearAll = viewModel::clearAll,
+                onTimeKindChange = viewModel::setTimeKind,
+                onNoLocationChange = viewModel::setNoLocation,
+                onLoadMore = viewModel::loadMore,
+                onOpenDiary = onOpenDay,
             )
-            return
         }
 
-        AppTab.Settings -> {
-            SettingsScreen(modifier = modifier)
-            return
-        }
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-        ) {
-            Text(
-                text = stringResource(tab.labelRes),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = stringResource(R.string.m0_placeholder_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = stringResource(R.string.m0_package_note),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-        }
+        AppTab.Settings -> SettingsScreen(modifier = modifier)
     }
 }

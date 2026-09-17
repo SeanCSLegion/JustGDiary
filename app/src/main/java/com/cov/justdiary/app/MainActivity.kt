@@ -1,5 +1,6 @@
 package com.cov.justdiary.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        LaunchIntent.consume(intent)
 
         // 启动序列是挂起的（开库/迁移/索引/排期），不阻塞首帧：界面先按当前设置渲染。
         lifecycleScope.launch {
@@ -70,6 +72,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        LaunchIntent.consume(intent)
     }
 
     override fun onStart() {

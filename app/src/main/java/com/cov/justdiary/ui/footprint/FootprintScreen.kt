@@ -77,8 +77,10 @@ fun FootprintScreen(
     landscape: Boolean = false,
     onYearFilterChange: (String) -> Unit = {},
     onDayClick: (String) -> Unit = {},
+    /** 展开的树节点（由 `FootprintViewModel` 持有：筛选变化时要剪掉已消失的节点）。 */
+    expanded: Set<String> = emptySet(),
+    onToggleExpand: (String) -> Unit = {},
 ) {
-    var expanded by remember { mutableStateOf(emptySet<String>()) }
 
     Column(modifier = modifier.fillMaxSize()) {
         PageHeader(
@@ -130,9 +132,7 @@ fun FootprintScreen(
                 PlaceTreeCard(
                     nodes = state.nodes,
                     expanded = expanded,
-                    onToggle = { id ->
-                        expanded = if (id in expanded) expanded - id else expanded + id
-                    },
+                    onToggle = onToggleExpand,
                     onDayClick = onDayClick,
                     modifier = Modifier.width(PLACE_LIST_WIDTH),
                 )
@@ -153,9 +153,7 @@ fun FootprintScreen(
                     PlaceTreeCard(
                         nodes = state.nodes,
                         expanded = expanded,
-                        onToggle = { id ->
-                            expanded = if (id in expanded) expanded - id else expanded + id
-                        },
+                        onToggle = onToggleExpand,
                         onDayClick = onDayClick,
                     )
                 }
