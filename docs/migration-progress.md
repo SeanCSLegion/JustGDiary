@@ -360,9 +360,74 @@ effectiveMultiplier(size, fontScale) = min(ceiling(size), max(1, fontScale))
 > D7 是本里程碑唯一的近似：分享图是**本地生成物**，不属于跨端数据契约，
 > 因此"真机换行位置与 iOS 基本一致"即可，不追求逐像素一致。
 
-### M5 起（下一轮）
+## M5 —— 富文本编辑器（**进行中**：内核已完成）
 
-**M5 富文本编辑器**（本项目最大的工作量）：`AndroidView` + `EditText` + `Spannable` 的编辑内核、
-`SpannableBridge`（`ContentPart` ↔ span）、格式栏、列表/待办重排、插入图片、
-位置胶囊与 5 条位置规则、放弃修改，以及方案 §5.4 列出的 5 个"静默数据损坏"暗坑
-（尤其是 IME 组合区与"不能用绘制字号反解块样式"）。
+M5 是本项目最大的一块，拆成两步做：**先做可验证的纯内核**（本轮完成），再做 Android 视图层（下一轮）。
+
+### 已完成：纯编辑内核
+
+| 文件 | 说明 |
+| --- | --- |
+| `ui/diary/EditorModel.kt` | 行模型 [EditorLine]、与 `content_json` 的双向转换、段落级操作（块样式/对齐/引用/列表/待办）、行内样式切换、Enter/Backspace 的行增删、图片行、**倒序/区间重建**工具、`FormatGate`（IME 组合区闸门） |
+| `ui/diary/EditorHistory.kt` | 撤销/重做栈（纯逻辑，可断言） |
+| `ui/diary/SpannableBridge.kt` | `EditorLine` ↔ `Spannable`：块样式用自定义 `BlockStyleSpan` 承载，行内样式映射到 `StyleSpan`/`StrikethroughSpan`/`UnderlineSpan`，列表/待办标记是真实字符 |
+| `service/LocationRules.kt` | 位置的 5 条规则 + 精度档位 + "坐标有、地址空视为没有位置" + 记录档位原文恢复 |
+
+### 架构：为什么把内核做成纯逻辑
+
+iOS 的 `RichTextEngine`（1,024 行）直接操作 `NSTextStorage`，块类型挂在 `NSAttributedString`
+的**自定义键**上 —— 因为 UIKit 会按固定的一组键从光标处重新同步 `typingAttributes`，
+自定义键**从输入第二个字符起丢失**，于是它不得不加一层"用字号精确匹配"的兜底
+（方案 §5.4 的 E1/E2，实测漂移 `15 → 18.75`，跨过阈值就把正文**永久变成标题**）。
+
+Android 侧把状态拆成两层，让内核完全可测：
+
+```
+List<EditorLine>    ← 纯模型：段落样式、对齐、行内 run、标记（本轮）
+       ↕ SpannableBridge
+Spannable           ← EditText 的真实文本（IME、选区、平台撤销由控件负责）
+```
+
+**关键收益**：`Spannable` 天然支持自定义 `ParagraphStyle`，块样式由 [BlockStyleSpan] 显式承载，
+**字号完全不参与样式判定** —— E1/E2 这两个坑在 Android 结构上就不存在，不需要"精确匹配"的兜底。
+
+### 验证证据
+
+```
+./gradlew assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  223 个 JVM 单测通过（本轮 +52）
+    EditorModelTest        33  ← 5 个暗坑的对应断言
+    LocationRulesTest      11  ← 位置 5 条规则
+    EditorHistoryTest       8  ← 撤销/重做语义
+```
+
+方案 §5.4 的 5 个"静默数据损坏"暗坑，现在都有可断言的守卫：
+
+| 坑 | 本轮的对应实现/断言 |
+| --- | --- |
+| **E1/E2** 不能用绘制字号反解块样式 | 模型里**没有字号输入**；`setBlockStyle` 设什么读什么，逐档验证四种样式往返 |
+| **E3** 段落操作必须倒序 | `setBlockStyle` 改为**按区间整体重建**（列表行会摊平成多行，逐下标改必错位）；另有一条**对照测试**演示正序就地改会得到错误结果 |
+| **E4** IME 组合区必须跳过 | `FormatGate.canApplyFormat` 的相交判定，含选区反向、相接不重叠等边界 |
+| **E5** 全量替换摧毁撤销栈 | `EditorHistory` 的压栈/撤销/重做/分支清空/深度上限 |
+
+另外两条与 iOS 一致的细节也钉住了：
+
+- **开启列表/待办前先把该行重置为正文**（对应 iOS 的 `restyle(to: .body, cancelCenter: true)`），
+  否则会出现"带项目符号的大标题"；
+- **连续列表项合并成一条 `list`**、连续待办合并成一条 `todo` 且 `done` 数组并行
+  （与 `PartsCodec` 的分组规则一致）。
+
+### 有意不复制 iOS 的一处行为（D8）
+
+iOS 的 `shouldBlockNewline` 在"空段落 + 居中"时**直接吞掉 Enter**，用户无法在居中段落后面另起一行。
+这里允许换行，新行继承居中 —— 吞掉按键属于"按键无响应"，比多一个空行更难理解。
+
+### 尚未完成（下一轮）
+
+1. `EditorTextArea`（`AndroidView` + `EditText`）：焦点/IME/最小高度/占位符，以及
+   **格式操作跳过组合区**的实际接线（`FormatGate` + `SpannableBridge.compositionRange`）；
+2. `FontToolbar`：样式菜单（大标题/小标题/正文）、引用、列表、待办、行内四样式、插入图片；
+3. `EditorScreen`：进入/保存/放弃修改（快照回滚 + 二次确认）、位置胶囊与保存前确认、
+   时间自动写入（让 `auto_time` 真正生效）、上一条位置的清空；
+4. 图片插入：`MediaStore.importImage` → 插入图片行 → 落库为 `image` 段落；
+5. 编辑器↔模型的往返不变量测试（在真机上跑一次 `Spannable` 往返）。
