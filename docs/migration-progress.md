@@ -641,3 +641,53 @@ iOS 的 `DiaryViewModel.handleBack` 问的是 `controller.isEmpty()`；Android �
 
 之前四屏统一的 `m0_placeholder_*` 占位文案随 `SkeletonScreen` 一起删除了：
 四个标签页现在都是真实实现，占位文案留在资源里只会误导。
+
+---
+
+## M8 —— 横屏与自适应 ✅ 已完成
+
+### 交付物
+
+| 文件 | 说明 |
+| --- | --- |
+| `ui/adaptive/AdaptiveLayout.kt` | **唯一**的版面判据（纯数据 + 纯计算），外加 `LocalAdaptiveLayout`、`rememberAdaptiveLayout`、`AdaptiveLayoutHost` |
+| `ui/adaptive/AdaptiveLayoutTest.kt` | 17 条临界值断言（档位边界、分栏的双条件、主栏公式、设置列数、页面级数值） |
+| `ui/root/RootScreen.kt` | 几何**只在这里读一次** → 解析成 `AdaptiveLayout` → 经 CompositionLocal 下发；导航形态改由 `navForm` 决定；侧栏分支补 `windowInsetsPadding(safeDrawing)` |
+| `ui/home/HomeScreen.kt` | 删除本地的 `LANDSCAPE_SPLIT_THRESHOLD_DP=700` / `LANDSCAPE_CALENDAR_W_DP=345`，改用 `splitsMasterDetail` + `masterWidth` |
+| `ui/footprint/FootprintScreen.kt` | 并排判定改由自适应层给；趋势图高 `trendHeight`、并排块高 `footprintBlockHeight`、清单宽 `footprintListWidth` |
+| `ui/search/SearchScreen.kt` | 时间 / 地点两组筛选：横屏左右并排、竖屏上下堆叠（省约 60dp 高度） |
+| `ui/settings/SettingsScreen.kt` | `LazyVerticalGrid`：1 列（<680dp）→ 2 列（≥680dp）→ 3 列（≥1000dp） |
+| `ui/diary/DiaryPageScreen.kt` | 全屏路由没有外层 `Scaffold`，系统栏避让自己做 |
+
+### 两组阈值，都有出处
+
+| 用途 | 阈值 | 出处 |
+| --- | --- | --- |
+| 主导航形态 | `<600dp` 底栏 / `≥600dp` 侧栏 | Material 3 窗口尺寸类（决策 Q10） |
+| 内容分栏与列数 | `<700` / `700–999` / `≥1000dp` | iOS `AdaptiveLayout` 阈值原样保留（决策 Q17） |
+| 首页/足迹分栏 | 内容宽 `≥700dp` **且** 宽 > 高 | `splitsMasterDetail` |
+
+### 一条最容易写错的规则（有专门的测试）
+
+**分栏必须同时满足"内容宽够"与"宽 > 高"**：竖屏即使 800dp 宽也保持单栏 ——
+因为竖屏的年/月/周三态 morph 交互是另一套，一旦宽屏竖屏分栏就会把整套手势改掉。
+`AdaptiveLayoutTest.portrait never splits even when wide enough` 就钉这一条。
+
+另外两条值得记的：
+
+1. **主栏公式在 750dp 内容宽下必须得到 345dp** —— 这正是设计稿横屏左栏的宽度，
+   测试直接断言 `0.46 × 750 = 345`，这样"公式被改成别的比例"会立刻红；
+2. **限宽不能把窄屏再缩一圈**：`contentColumn()` 是"上限 660 / 下限 240"，
+   竖屏 402dp 应当得到 370（402 − 2×16），而不是被算成 290 —— iOS 侧因为这个
+   叠了两次边距，日记页顶部卡片一度比下面的明显偏小。
+
+### 验证证据
+
+```
+./gradlew clean assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  323 个 JVM 单测通过（本轮 +17）
+    AdaptiveLayoutTest   17
+```
+
+`tools/verify_sqlite_schema.py`（18 条）与 `tools/verify_backup_interop.sh`（15 条，用 iOS 真实的
+`ZipArchive.swift` 读 Android 写出的 `.jdiary`）均通过。

@@ -20,6 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
@@ -72,6 +75,7 @@ import com.cov.justdiary.R
 import com.cov.justdiary.data.ImportMode
 import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.service.DateFormats
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.IconBadge
 import com.cov.justdiary.ui.components.PageHeader
@@ -198,8 +202,11 @@ private fun SettingsBody(
     var dayStartPickerVisible by remember { mutableStateOf(false) }
     var remindPickerVisible by remember { mutableStateOf(false) }
     val settings = state.settings
+    // 列数只随宽度变：1 列（<680dp）→ 2 列（≥680dp）→ 3 列（≥1000dp），与 iOS 一致
+    val columns = LocalAdaptiveLayout.current.settingsColumns
 
-    LazyColumn(
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(columns),
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = Spacing.page,
@@ -209,8 +216,11 @@ private fun SettingsBody(
             bottom = Spacing.page + 72.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(Spacing.card),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.card),
     ) {
-        item { PageHeader(title = stringResource(R.string.settings_title)) }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            PageHeader(title = stringResource(R.string.settings_title))
+        }
 
         // ---------------------------------------------------------- 通用
         item {

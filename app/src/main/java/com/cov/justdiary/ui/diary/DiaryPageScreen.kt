@@ -1,6 +1,10 @@
 package com.cov.justdiary.ui.diary
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -88,74 +92,77 @@ fun DiaryPageScreen(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        if (state.isRead) {
-            DiaryReadScreen(
-                dayTitle = formats.dayTitle(com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now()),
-                blocks = state.blocks.map { block ->
-                    ReadBlock(
-                        startTimeUtc = block.startTimeUtc,
-                        startLine = formats.startLine(
-                            formats.timeOf(java.time.Instant.ofEpochMilli(block.startTimeUtc)),
-                            block.locText,
-                        ),
-                        parts = ContentFlatten.parseContent(block.contentJson),
-                    )
-                },
-                keyword = if (state.showSearch) state.searchText else "",
-                currentMatch = state.hitIndex,
-                onSearchChange = viewModel::onSearchTextChange,
-                onSearchStep = viewModel::stepHit,
-                onToggleTodo = { blockIndex, itemIndex ->
-                    state.blocks.getOrNull(blockIndex)?.let { block ->
-                        // `DiaryReadScreen` 给的是"这一天里的第几个片段 + 待办项下标"
-                        viewModel.toggleTodo(block.id, partIndexOfFirstItems(block.contentJson), itemIndex)
-                    }
-                },
-                onShare = {
-                    viewModel.shareDiary(
-                        isDark = darkTheme,
-                        dateText = formats.dayTitle(
-                            com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
-                        ),
-                        startLine = formats.startLine(
-                            formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
-                            state.locationText,
-                        ),
-                    )
-                },
-                imageLoader = { part ->
-                    part.src?.let { src -> container.mediaStore.image(src)?.asImageBitmap() }
-                },
-            )
-        } else {
-            EditorScreen(
-                dayTitle = formats.dayTitle(
-                    com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
-                ),
-                initialParts = state.loadParts,
-                isNewBlock = !state.isEditingExistingBlock,
-                locText = state.locationText,
-                locPrecision = state.location?.locPrecision.orEmpty(),
-                locationState = editorLocationState(state),
-                autoTime = state.settings.autoTime,
-                startTimeUtc = state.startTimeUtc,
-                onRequestLocation = viewModel::beginLocate,
-                onPrecisionChange = viewModel::applyPrecision,
-                onSave = viewModel::save,
-                onDiscard = viewModel::close,
-                onImportImage = { uri ->
-                    viewModel.importImage(uri)?.let { src ->
-                        val bitmap = container.mediaStore.image(src)
-                        ImportedImage(
-                            src = src,
-                            width = bitmap?.width?.toDouble(),
-                            height = bitmap?.height?.toDouble(),
+        // 全屏路由没有外层 Scaffold，系统栏避让要自己做（对应 iOS 的 safeArea）
+        Box(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            if (state.isRead) {
+                DiaryReadScreen(
+                    dayTitle = formats.dayTitle(com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now()),
+                    blocks = state.blocks.map { block ->
+                        ReadBlock(
+                            startTimeUtc = block.startTimeUtc,
+                            startLine = formats.startLine(
+                                formats.timeOf(java.time.Instant.ofEpochMilli(block.startTimeUtc)),
+                                block.locText,
+                            ),
+                            parts = ContentFlatten.parseContent(block.contentJson),
                         )
-                    }
-                },
-                loadImage = { src -> container.mediaStore.image(src) },
-                onDirtyChange = { editorDirty = it },
-            )
+                    },
+                    keyword = if (state.showSearch) state.searchText else "",
+                    currentMatch = state.hitIndex,
+                    onSearchChange = viewModel::onSearchTextChange,
+                    onSearchStep = viewModel::stepHit,
+                    onToggleTodo = { blockIndex, itemIndex ->
+                        state.blocks.getOrNull(blockIndex)?.let { block ->
+                            // `DiaryReadScreen` 给的是"这一天里的第几个片段 + 待办项下标"
+                            viewModel.toggleTodo(block.id, partIndexOfFirstItems(block.contentJson), itemIndex)
+                        }
+                    },
+                    onShare = {
+                        viewModel.shareDiary(
+                            isDark = darkTheme,
+                            dateText = formats.dayTitle(
+                                com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
+                            ),
+                            startLine = formats.startLine(
+                                formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
+                                state.locationText,
+                            ),
+                        )
+                    },
+                    imageLoader = { part ->
+                        part.src?.let { src -> container.mediaStore.image(src)?.asImageBitmap() }
+                    },
+                )
+            } else {
+                EditorScreen(
+                    dayTitle = formats.dayTitle(
+                        com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
+                    ),
+                    initialParts = state.loadParts,
+                    isNewBlock = !state.isEditingExistingBlock,
+                    locText = state.locationText,
+                    locPrecision = state.location?.locPrecision.orEmpty(),
+                    locationState = editorLocationState(state),
+                    autoTime = state.settings.autoTime,
+                    startTimeUtc = state.startTimeUtc,
+                    onRequestLocation = viewModel::beginLocate,
+                    onPrecisionChange = viewModel::applyPrecision,
+                    onSave = viewModel::save,
+                    onDiscard = viewModel::close,
+                    onImportImage = { uri ->
+                        viewModel.importImage(uri)?.let { src ->
+                            val bitmap = container.mediaStore.image(src)
+                            ImportedImage(
+                                src = src,
+                                width = bitmap?.width?.toDouble(),
+                                height = bitmap?.height?.toDouble(),
+                            )
+                        }
+                    },
+                    loadImage = { src -> container.mediaStore.image(src) },
+                    onDirtyChange = { editorDirty = it },
+                )
+            }
         }
     }
 

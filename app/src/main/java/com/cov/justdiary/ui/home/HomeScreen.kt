@@ -54,6 +54,7 @@ import com.cov.justdiary.model.ContentPartStyle
 import com.cov.justdiary.model.DateUtil
 import com.cov.justdiary.model.EditBlock
 import com.cov.justdiary.service.DateFormats
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.Spacing
 import kotlinx.coroutines.launch
@@ -139,8 +140,10 @@ fun HomeScreen(
         val density = LocalDensity.current
         val availableW = maxWidth.value
         val availableH = maxHeight.value
-        val landscape = availableW >= LANDSCAPE_SPLIT_THRESHOLD_DP
-        val calendarW = if (landscape) LANDSCAPE_CALENDAR_W_DP else availableW
+        // 分栏与主栏宽度统一由 AdaptiveLayout 判定：
+        // iOS 在 750dp 内容宽下算出左栏 345dp（0.46×750），Android 内容宽更大时按同一公式放大
+        val landscape = LocalAdaptiveLayout.current.splitsMasterDetail
+        val calendarW = if (landscape) LocalAdaptiveLayout.current.masterWidth else availableW
 
         Row(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -474,8 +477,6 @@ private fun HomeHeader(
 
 // ---------------------------------------------------------------------- 内部
 
-private const val LANDSCAPE_SPLIT_THRESHOLD_DP = 700f
-private const val LANDSCAPE_CALENDAR_W_DP = 345f
 private const val DAY_EMPTY_LABEL = "这一天没有留下日记。"
 private const val DAY_FUTURE_LABEL = "这一天还没有到来。"
 private const val DAY_WRITE_LABEL = "写日记"

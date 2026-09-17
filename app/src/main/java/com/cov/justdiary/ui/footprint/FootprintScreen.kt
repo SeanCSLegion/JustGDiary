@@ -47,6 +47,7 @@ import com.cov.justdiary.data.FootprintNode
 import com.cov.justdiary.data.FootprintViewState
 import com.cov.justdiary.data.FootprintYearStat
 import com.cov.justdiary.data.YEAR_FILTER_ALL
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.EmptyState
 import com.cov.justdiary.ui.components.IconBadge
@@ -128,13 +129,19 @@ fun FootprintScreen(
                     .padding(horizontal = Spacing.page, vertical = Spacing.card),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.card),
             ) {
-                TrendCard(state.yearly, modifier = Modifier.weight(1f))
+                TrendCard(
+                    yearly = state.yearly,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(LocalAdaptiveLayout.current.footprintBlockHeight.dp),
+                )
                 PlaceTreeCard(
                     nodes = state.nodes,
                     expanded = expanded,
                     onToggle = onToggleExpand,
                     onDayClick = onDayClick,
-                    modifier = Modifier.width(PLACE_LIST_WIDTH),
+                    // 清单宽：iOS `min(320, max(240, contentWidth × 0.4))`
+                    modifier = Modifier.width(LocalAdaptiveLayout.current.footprintListWidth.dp),
                 )
             }
         } else {
@@ -148,7 +155,12 @@ fun FootprintScreen(
                 verticalArrangement = Arrangement.spacedBy(Spacing.card),
             ) {
                 item { StatsCard(state) }
-                item { TrendCard(state.yearly) }
+                item {
+                    TrendCard(
+                        yearly = state.yearly,
+                        height = LocalAdaptiveLayout.current.trendHeight.dp,
+                    )
+                }
                 item {
                     PlaceTreeCard(
                         nodes = state.nodes,
@@ -197,7 +209,12 @@ private fun StatCell(value: Int, label: String) {
 
 /** 年度记录天数柱状图（自绘）。 */
 @Composable
-private fun TrendCard(yearly: List<FootprintYearStat>, modifier: Modifier = Modifier) {
+private fun TrendCard(
+    yearly: List<FootprintYearStat>,
+    modifier: Modifier = Modifier,
+    /** 图表高度：竖屏 132dp、宽屏 200dp（并排时由外层给块高）。 */
+    height: androidx.compose.ui.unit.Dp = TREND_HEIGHT,
+) {
     DiaryCard(modifier = modifier) {
         Column {
             SectionTitle(TREND_TITLE)
@@ -212,7 +229,7 @@ private fun TrendCard(yearly: List<FootprintYearStat>, modifier: Modifier = Modi
                     yearly = yearly,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(TREND_HEIGHT),
+                        .height(height),
                 )
             }
         }
@@ -404,6 +421,5 @@ private const val BAR_WIDTH_RATIO = 0.55f
 private val BAR_MAX_WIDTH = 48.dp
 
 /** 横屏并排版式的度量（方案 §9.2）。 */
-private val PLACE_LIST_WIDTH = 280.dp
 private val INDENT_STEP = 16
 private val BADGE_SIZE = 32.dp

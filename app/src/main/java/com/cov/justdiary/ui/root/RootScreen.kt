@@ -1,6 +1,9 @@
 package com.cov.justdiary.ui.root
 
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -30,7 +34,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cov.justdiary.ui.adaptive.AdaptiveLayout
+import com.cov.justdiary.ui.adaptive.AdaptiveLayoutHost
+import com.cov.justdiary.ui.adaptive.rememberAdaptiveLayout
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.app.AppContainer
 import com.cov.justdiary.app.LaunchIntent
@@ -51,11 +61,11 @@ import com.cov.justdiary.ui.settings.SettingsScreen
  * 对应 iOS `Views/RootView.swift`（`TabView(.sidebarAdaptable)` + 设置/语言变更时整树重建）。
  *
  * **导航形态按 Google 自适应导航规范**（Q10 已确认，不照抄 iOS 的底部悬浮条）：
- *  - 紧凑宽度（手机竖屏）→ 底部 [NavigationBar]
- *  - 中等/扩展宽度（手机横屏、平板）→ 侧边 [NavigationRail]
+ *  - 紧凑宽度（<600dp）→ 底部 [NavigationBar]
+ *  - 中等/扩展宽度（≥600dp，含手机横屏）→ 侧边 [NavigationRail]
  *
- * 断点在 M8 阶段细化为 M3 窗口尺寸类（compact <600dp / medium 600–839dp / expanded ≥840dp）；
- * M0 先用 600dp 这一个阈值。
+ * 几何只在这里读一次，解析成 [AdaptiveLayout] 后经 [LocalAdaptiveLayout] 下发；
+ * 页面内部一律**不再自己读屏幕尺寸**（与 iOS 的 `adaptiveLayoutReader` 同一原则）。
  */
 @Composable
 fun RootScreen(modifier: Modifier = Modifier) {
@@ -80,20 +90,26 @@ fun RootScreen(modifier: Modifier = Modifier) {
     }
 
     if (openDayKey != null) {
-        DiaryPageScreen(
-            dayKey = openDayKey,
-            onClose = { openDayKey = null },
-            onDataChanged = { dataVersion++ },
-            modifier = modifier,
-        )
+        AdaptiveLayoutHost(modifier = modifier) {
+            DiaryPageScreen(
+                dayKey = openDayKey,
+                onClose = { openDayKey = null },
+                onDataChanged = { dataVersion++ },
+            )
+        }
         return
     }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val useRail = maxWidth >= 600.dp
+        val adaptive = rememberAdaptiveLayout(maxWidth.value, maxHeight.value)
+        val useRail = adaptive.navForm == AdaptiveLayout.NavForm.Rail
 
         if (useRail) {
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
+            ) {
                 NavigationRail {
                     AppTab.entries.forEach { tab ->
                         NavigationRailItem(
@@ -105,13 +121,15 @@ fun RootScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 VerticalDivider()
-                TabContent(
-                    tab = selected,
-                    container = container,
-                    dataVersion = dataVersion,
-                    onOpenDay = { openDayKey = it },
-                    modifier = Modifier.weight(1f),
-                )
+                CompositionLocalProvider(LocalAdaptiveLayout provides adaptive) {
+                    TabContent(
+                        tab = selected,
+                        container = container,
+                        dataVersion = dataVersion,
+                        onOpenDay = { openDayKey = it },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         } else {
             Scaffold(
@@ -128,15 +146,17 @@ fun RootScreen(modifier: Modifier = Modifier) {
                     }
                 },
             ) { innerPadding ->
-                TabContent(
-                    tab = selected,
-                    container = container,
-                    dataVersion = dataVersion,
-                    onOpenDay = { openDayKey = it },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
+                CompositionLocalProvider(LocalAdaptiveLayout provides adaptive) {
+                    TabContent(
+                        tab = selected,
+                        container = container,
+                        dataVersion = dataVersion,
+                        onOpenDay = { openDayKey = it },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
             }
         }
     }
@@ -186,17 +206,17 @@ private fun TabContent(
                 viewModel(factory = FootprintViewModel.factory(container))
             val state by viewModel.state.collectAsState()
             LaunchedEffect(dataVersion) { viewModel.reload() }
-            BoxWithConstraints(modifier = modifier) {
-                FootprintScreen(
-                    state = state.viewState,
-                    yearFilter = state.yearFilter,
-                    landscape = maxWidth >= 600.dp,
-                    expanded = state.expanded,
-                    onYearFilterChange = viewModel::setYearFilter,
-                    onToggleExpand = viewModel::toggleExpandNode,
-                    onDayClick = onOpenDay,
-                )
-            }
+            FootprintScreen(
+                state = state.viewState,
+                yearFilter = state.yearFilter,
+                // 并排由 AdaptiveLayout 统一判定（宽 ≥700 且宽 > 高）
+                landscape = LocalAdaptiveLayout.current.splitsMasterDetail,
+                expanded = state.expanded,
+                onYearFilterChange = viewModel::setYearFilter,
+                onToggleExpand = viewModel::toggleExpandNode,
+                onDayClick = onOpenDay,
+                modifier = modifier,
+            )
         }
 
         AppTab.Search -> {

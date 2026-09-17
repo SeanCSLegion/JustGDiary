@@ -17,8 +17,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.cov.justdiary.data.SearchFilterItem
 import com.cov.justdiary.data.SearchUiState
 import com.cov.justdiary.data.TimeRangeKind
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.model.LocFilter
 import com.cov.justdiary.model.SearchResultItem
 import com.cov.justdiary.service.SearchUtil
@@ -131,26 +132,28 @@ fun SearchScreen(
             }
         }
 
-        // 时间筛选
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.page),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            timeRangeOptions.forEach { (kind, label) ->
-                FilterChip(
-                    selected = state.timeKind == kind,
-                    onClick = { onTimeKindChange(kind) },
-                    label = { Text(label) },
+        // 时间 / 地点两组条件：横屏左右并排（省约 60dp 高度），竖屏上下堆叠
+        if (LocalAdaptiveLayout.current.filtersSideBySide) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.page),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.page),
+            ) {
+                TimeFilterRow(
+                    state = state,
+                    onTimeKindChange = onTimeKindChange,
+                    modifier = Modifier.weight(1f),
+                )
+                LocationFilterRow(
+                    state = state,
+                    onNoLocationChange = onNoLocationChange,
+                    modifier = Modifier.weight(1f),
                 )
             }
-            FilterChip(
-                selected = state.locFilter.noLoc,
-                onClick = { onNoLocationChange(!state.locFilter.noLoc) },
-                label = { Text(NO_LOCATION_LABEL_) },
-            )
+        } else {
+            TimeFilterRow(state = state, onTimeKindChange = onTimeKindChange)
+            LocationFilterRow(state = state, onNoLocationChange = onNoLocationChange)
         }
 
         // 生效条件摘要
@@ -230,6 +233,64 @@ fun SearchScreen(
     }
 }
 
+/** 时间档位的胶囊行（可横向滚动）。 */
+@Composable
+private fun TimeFilterRow(
+    state: SearchUiState,
+    onTimeKindChange: (TimeRangeKind) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.page),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        timeRangeOptions.forEach { (kind, label) ->
+            FilterChip(
+                selected = state.timeKind == kind,
+                onClick = { onTimeKindChange(kind) },
+                label = { Text(label) },
+            )
+        }
+    }
+}
+
+/** 地点条件的胶囊行。完整选择器（国家 + 一级地区）接仓库的地点候选，见 `SearchViewModel`。 */
+@Composable
+private fun LocationFilterRow(
+    state: SearchUiState,
+    onNoLocationChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.page),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        FilterChip(
+            selected = state.locFilter.noLoc,
+            onClick = { onNoLocationChange(!state.locFilter.noLoc) },
+            label = { Text(NO_LOCATION_LABEL_) },
+        )
+        if (state.locFilter.country.isNotEmpty()) {
+            FilterChip(
+                selected = true,
+                onClick = { onNoLocationChange(false) },
+                label = {
+                    Text(
+                        listOf(state.locFilter.country, state.locFilter.region1)
+                            .filter { it.isNotEmpty() }
+                            .joinToString(" · "),
+                    )
+                },
+                trailingIcon = { Icon(Icons.Filled.Clear, contentDescription = REMOVE_LABEL) },
+            )
+        }
+    }
+}
+
 @Composable
 private fun SearchResultRow(result: SearchResultItem, keyword: String, onClick: () -> Unit) {
     Row(
@@ -278,7 +339,7 @@ private fun SearchResultRow(result: SearchResultItem, keyword: String, onClick: 
             }
         }
         Icon(
-            imageVector = Icons.Filled.KeyboardArrowRight,
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
