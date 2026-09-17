@@ -247,8 +247,68 @@ effectiveMultiplier(size, fontScale) = min(ceiling(size), max(1, fontScale))
 **"下午 13:00"（中文）/ "13:00 PM"（英文）**。这里先把小时归一到 12 小时制再套模板，
 档位**区间**仍按原始小时判定（0 / 1–5 / 6–11 / 12 / 13–17 / 18–23）。
 
-### M3 起（下一轮）
+## M3 —— 首页日历与 morph ✅ 已完成
 
-按方案 §12 进入 **M3 首页日历与 morph**：布局常量（`CalendarLayout`）、月/年/周三种形态的
-Canvas 绘制、手势与翻页、morph 单进度插值、以及横屏左右分栏。
-`docs/migration-analysis/03-home-calendar-and-motion.md` 与方案 §6.4 已给出可直接当单测断言的数值。
+### 交付物
+
+| 文件 | 说明 |
+| --- | --- |
+| `ui/home/CalendarLayout.kt` | **纯数学层**（不依赖 Compose）：全部度量常量、`DayMetrics` 与插值、年/月/周三种度量、年历卡片几何、密度降级、命中测试、morph 插值（年↔月 / 月↔周）、翻页数学 |
+| `ui/home/CalendarGrid.kt` | 网格与键表：固定 6 行、尾部空行裁剪、**2412** 个月份键、**201** 个年份、**10488** 个周键（按 `weekStart` 缓存） |
+| `ui/home/CalendarCanvas.kt` | Compose 绘制：`MonthCanvas`（日号/农历/选中圆/今天圆环/有日记下划线/行分隔线）、`WeekRowCanvas`、`YearCanvas`（12 张迷你月） |
+| `ui/home/HomeScreen.kt` | 首页装配：三种形态、竖屏上下滑翻月、月↔周 morph、年月胶囊→年历 morph、减弱动态效果、横屏左右分栏（345dp 日历列） |
+| `service/Lunar.kt` | 农历：名称表 + 干支/生肖 + 可注入的日历提供者（真机用 `android.icu.util.ChineseCalendar`） |
+| `ui/root/RootScreen.kt` | 首页已接入真实实现（其余三页仍是占位） |
+
+### 验证证据
+
+```
+./gradlew assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  136 个 JVM 单测通过（本轮新增 31 个日历/农历测试）
+    CalendarMorphTest       13  ← morph 插值与翻页阈值
+    CalendarLayoutTest      10  ← 布局几何与命中测试
+    CalendarGridTest         8  ← 网格、键表、缓存
+    LunarTest                8  ← 名称表、干支、可注入换算
+```
+
+三个最关键的断言：
+
+1. **复现竖屏与横屏的两组实测值**：竖屏 402×874 → `cellW 57.43 / cellH 118 / dayFont 20 /
+   lunarFont 11 / contentH 40 / circleD 54`；横屏 750×330 → `rows6: cellH 45 / dayFont 15.3`、
+   `rows5: cellH 54 / dayFont 18.36`。
+2. **morph 落点与真实图层同源**：`yearMonthMorph(progress = 0)` 的 `cellH` 必须等于 118、
+   `dayFont` 必须等于 20 —— 这正是 iOS 侧"收尾不跳变"的守卫方式。
+   这里还纠正了一个易错点：`fullMonthGridRect` 接收的是**日历区**尺寸（高 810 = 874 − 64），
+   **不是整屏尺寸**；用 874 会算出 `cellH 128.67`，与真实图层差 10pt。
+3. **键表规模**：`MONTH_KEYS` 2412、`YEARS` 201、`weekKeys` 10488（周日起始从 1899-12-31 起算）。
+
+### 一处以**源码**为准、与既有分析报告不一致的地方
+
+分析报告 `03-home-calendar-and-motion.md` §10 把横屏 6 行的 `circleD` 写成 **34.3**，
+按源码公式（`CalendarGrids.swift:24-26, 76-84`）应为 **33.3**：
+`dayFont 15.3 + 4 = 19.3`，再 `min(cellW-3, 19.3+14, cellH-3) = 33.3`。
+横屏 5 行的 36.36 与报告一致，可反证公式本身没错，是报告那一格的数字笔误。
+**实现以源码为准**，并在测试注释里记录了这处差异。
+
+### 另一处语义坑（已用命名规避）
+
+农历的 `.year` 字段（Foundation 与 ICU 一致）是**六十甲子内的循环年（1..60）**，不是公历年。
+`sexagenary` 的 `(y-1) % 10 / % 12` 公式依赖这个语义：循环年 **43** 才是"丙午"（对应公历 2026），
+若误传 2026 会算出"己酉"（首页年历标题就会错）。Kotlin 侧字段命名为 `cycleYear`，
+并在 `LunarTest` 里**同时断言正确值与误用值**，把这个坑钉住。
+
+### Android 与 iOS 的实现差异（本里程碑）
+
+| 项 | iOS | Android |
+| --- | --- | --- |
+| 翻页手势 | 自写 `DragPagePager`（三页 ZStack + offset） | 同样的自写数学（[CalendarLayout.DragPagerMath]），手势用 `detectVerticalDragGestures` |
+| 「预测终点」 | SwiftUI 的 `predictedEndTranslation` | `translation + velocity × 0.2s`（UIKit 投影量级的近似）；**阈值 90 / 60 与 iOS 完全相同** |
+| 文字测量缓存 | 自建 LRU 24000 + 字号量化 0.5pt | `TextMeasurer(cacheSize = 512)` + 同样的 0.5 量化 |
+| morph 驱动 | 手写 `Animatable` 单进度（`MorphViews.swift`） | 同一个思路：`Animatable(0f)` + `CalendarLayout` 的纯函数插值（**不用** `SharedTransitionLayout`） |
+| 减弱动态效果 | `.linear(0.18)` | `ValueAnimator.areAnimatorsEnabled()` → `tween(180, LinearEasing)` |
+
+### M4 起（下一轮）
+
+**M4 日记阅读**：段落/行内样式渲染（`ContentPartStyle` 7 种 + `TextRun` 4 种 flag）、
+内联图片、位置行、条目内搜索、分享长图（第三套渲染管线，常量见方案 §8.3）。
+同时把首页右栏/日内容区接上真实片段列表。

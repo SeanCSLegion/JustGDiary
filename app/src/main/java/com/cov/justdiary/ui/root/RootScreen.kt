@@ -28,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.R
+import com.cov.justdiary.ui.home.HomeScreen
 
 /**
  * 根界面：主导航宿主。
@@ -91,11 +92,16 @@ fun RootScreen(modifier: Modifier = Modifier) {
 }
 
 /**
- * M0 占位屏：确认"导航切换 + 主题 + 动态取色 + 自适应"四条链路可用。
- * 五个真实页面在 M3–M7 阶段替换本组件。
+ * 页面宿主：首页已接入真实实现（[HomeScreen]），其余三个页面仍是占位，
+ * 分别在 M6（足迹/搜索）与 M7（设置）替换。
  */
 @Composable
 private fun SkeletonScreen(tab: AppTab, modifier: Modifier = Modifier) {
+    if (tab == AppTab.Home) {
+        HomeScreen(modifier = modifier)
+        return
+    }
+
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier
