@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 应用内可选语言（对应 iOS 的 CFBundleLocalizations: zh-Hans, en）。
+     Android 侧资源目录为 values/（en）与 values-zh-rCN/，故此处声明 zh-CN。 -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="zh-CN" />
+</locale-config>

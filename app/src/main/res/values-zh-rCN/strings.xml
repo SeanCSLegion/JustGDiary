@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 中文（简体）。iOS 侧语言标识为 zh-Hans；Android 资源目录用 values-zh-rCN，
+     localeConfig 与 AppCompatDelegate 相应使用 zh-CN（见方案 §8.4）。 -->
+<resources>
+    <string name="tab_home">日记</string>
+    <string name="tab_footprint">足迹</string>
+    <string name="tab_search">搜索</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="m0_placeholder_body">JustADiary 日记应用的 Android 版。\n当前是 M0 骨架：构建链路、Material 3 主题、动态取色与自适应导航。\n功能页面在 M1–M9 阶段迁移。</string>
+    <string name="m0_package_note">包名：com.cov.justdiary</string>
+</resources>

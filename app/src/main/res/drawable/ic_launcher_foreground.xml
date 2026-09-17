@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M0 占位图标：白色日记页 + 品牌色文字行。
+     M9 阶段替换为正式的 Material Symbols 图标资源（见方案 §7.5「明确不做的事」）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 页面 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M40,28 h20 a6,6 0 0 1 6,6 v40 a6,6 0 0 1 -6,6 h-20 a6,6 0 0 1 -6,-6 v-40 a6,6 0 0 1 6,-6 z" />
+
+    <!-- 文字行 -->
+    <path
+        android:fillColor="#FF2563EB"
+        android:pathData="M42,42 h20 v4 h-20 z" />
+    <path
+        android:fillColor="#FF2563EB"
+        android:pathData="M42,52 h20 v4 h-20 z" />
+    <path
+        android:fillColor="#FF2563EB"
+        android:pathData="M42,62 h12 v4 h-12 z" />
+</vector>

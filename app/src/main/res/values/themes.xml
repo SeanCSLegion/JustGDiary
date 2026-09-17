@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题：AppCompat DayNight（无 ActionBar）——Compose 负责实际配色，
+         这里只需要一个合法的宿主主题，让 AppCompatDelegate 的深色/语言切换正常工作。 -->
+    <style name="Theme.JustDiary" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

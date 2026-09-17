@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 默认语言（en）。中文在 values-zh-rCN/strings.xml。
+     完整 197 条 key 的迁移在 M2/M7 阶段完成（见 docs/android-migration-plan.md §16）。
+     注意：key 名保持与 iOS Localizable.xcstrings 一致，便于逐条核对。 -->
+<resources>
+    <!-- 应用名与 iOS 的 CFBundleDisplayName 保持一致（始终显示中文名），故不参与翻译 -->
+    <string name="app_name" translatable="false">一页时光</string>
+
+    <!-- 底部/侧边导航（M0 骨架；M2 起与 iOS AppTab 的文案 key 对齐） -->
+    <string name="tab_home">Journal</string>
+    <string name="tab_footprint">Footprint</string>
+    <string name="tab_search">Search</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- M0 占位 -->
+    <string name="m0_placeholder_title">JustGDiary</string>
+    <string name="m0_placeholder_body">Android port of the JustADiary journal app.\nThis is the M0 skeleton: build pipeline, Material 3 theme, dynamic color and adaptive navigation.\nFeature screens are migrated in M1–M9.</string>
+    <string name="m0_package_note">applicationId: com.cov.justdiary</string>
+</resources>
