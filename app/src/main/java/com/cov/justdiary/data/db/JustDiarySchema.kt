@@ -317,6 +317,26 @@ object JustDiarySchema {
         WHERE id = ? AND region1 = '';
     """
 
+    // ------------------------------------------------------------------ 备份合并
+
+    const val SELECT_BACKUP_DIARIES: String = "SELECT * FROM diary ORDER BY day_key ASC;"
+
+    const val SELECT_BACKUP_BLOCKS_OF_DIARY: String =
+        "SELECT * FROM edit_block WHERE diary_id = ? ORDER BY start_time_utc ASC;"
+
+    const val DELETE_BLOCKS_OF_DIARY: String = "DELETE FROM edit_block WHERE diary_id = ?;"
+
+    const val INSERT_DIARY: String =
+        "INSERT INTO diary(day_key, created_utc, updated_utc) VALUES (?, ?, ?);"
+
+    const val UPDATE_DIARY_TEXTS: String =
+        "UPDATE diary SET summary = ?, search_text = ? WHERE id = ?;"
+
+    const val SELECT_DIARY_ID_BY_DAY_FOR_MERGE: String = "SELECT id FROM diary WHERE day_key = ?;"
+
+    /** 把主库快照成备份包里的 `db/just_diary.db`；`VACUUM INTO` 等价于 iOS 的 `sqlite3_backup`。 */
+    fun vacuumInto(path: String): String = "VACUUM INTO '${path.replace("'", "''")}';"
+
     // ------------------------------------------------------------------ 设置项
 
     /** 与 iOS `DiaryRepository.searchIndexVersion` 一致。 */

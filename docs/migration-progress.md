@@ -93,7 +93,7 @@ targetSdkVersion:'36'
 
 ---
 
-## M1 —— 数据层（进行中）
+## M1 —— 数据层 ✅ 已完成
 
 计划见方案 §4 与 §4.7，`docs/migration-analysis/01-data-layer.md` 是逐行参考。
 
@@ -111,24 +111,40 @@ targetSdkVersion:'36'
 | `data/db/JustDiarySchema.kt` | 全部 DDL 与 SQL 常量（表/索引/FTS5/迁移/查询/重算/回填），44+ 条逐字对齐 iOS |
 | `data/db/JustDiaryOpenHelper.kt` | 打开与迁移链 v0→v1→v3、FTS5 建表与降级探测、WAL、`foreign_keys=OFF` |
 | `data/SearchSql.kt` | 搜索语句构造（纯函数，可单测 SQL 文本与**参数顺序**） |
-| `data/DiaryRepository.kt` | 读 / 写 / 搜索 / 索引重建 / 日期重算 / 地区回填 / 图片清理；单并发调度器 + `BEGIN IMMEDIATE` |
+| `data/DiaryRepository.kt` | 读 / 写 / 搜索 / 索引重建 / 日期重算 / 地区回填 / 图片清理 / **备份合并**；单并发调度器 + `BEGIN IMMEDIATE` |
+| `data/BackupModels.kt` | `BackupManifest` / `BackupImageRef` / `BackupStats` / `ImportMode` / `BackupException` |
+| `model/AppSettingsJson.kt` | `settingsJson` 的传输 DTO —— **只含 10 个业务 key**（数据版本刻意排除） |
+| `service/ZipArchive.kt` | `.jdiary` 的**流式**读写（`java.util.zip`），导入时强校验 CRC32 与长度 |
+| `service/BackupService.kt` | 导出（`VACUUM INTO` 快照 + 图片去重改名 + 清单）与导入（skip/overwrite 整天合并 + 图片 `imp_<stamp>_<n>.jpg`） |
+| `service/MediaStore.kt` | 图片导入（最长边 2048 / JPEG 85 / `img_<ms>.jpg`）与降采样解码（`ImageDecoder`，自动处理 EXIF 方向）+ LRU 缓存 |
+| `app/AppContainer.kt` | 数据层/服务层的进程级装配（全部 lazy） |
 | `app/src/test/resources/golden/*.json` | **真实 iOS 编码器产出的 golden file** |
-| `tools/verify_sqlite_schema.py` | 用宿主 SQLite 真执行 schema 与查询的验证脚本（18 项断言全通过） |
+| `tools/verify_sqlite_schema.py` | 用宿主 SQLite 真执行 schema 与查询的验证脚本（18 项断言） |
+| `tools/verify_backup_interop.sh` + `tools/cross_end_extract.swift` | 用 **iOS 真实的 `ZipArchive.swift`** 解 Android 产出的备份包（15 项断言） |
 
-### 验证证据
+### 验证证据（三层，全部实测）
 
 ```
-./gradlew testDebugUnitTest assembleDebug   →  BUILD SUCCESSFUL
-  ContentFormatTest   15 tests  （含与 iOS golden file 的字节级比对）
-  DateUtilTest        14 tests
-  SearchSqlTest       13 tests
-  FtsSegmentTest       7 tests
-  DesignTokensTest     5 tests
-  TOTAL: 54 tests, 0 failed
+1) ./gradlew clean assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+   70 个 JVM 单测通过
+     ContentFormatTest   15  （含与 iOS golden file 的字节级比对）
+     DateUtilTest        14
+     SearchSqlTest       13  （SQL 文本与绑定参数顺序）
+     BackupModelsTest     9  （manifest 字段名 / settingsJson 键集合 / 数据版本不被重置）
+     FtsSegmentTest       7
+     ZipArchiveTest       7  （含 CRC 损坏检测、store/deflate、1.5MB 流式往返）
+     DesignTokensTest     5
 
-python3 tools/verify_sqlite_schema.py       →  18 项断言全部 PASS
-  schema 表名/列名/索引名与 iOS 一致；FTS5 + CJK 切分可子串命中；snippet 产出 <hl>；
-  不分词则查不到（证明切分必要）；搜索/总数/足迹/未记录判定/day_key 两阶段重算 均可用
+2) python3 tools/verify_sqlite_schema.py            →  18 项断言全部 PASS
+   直接从 Kotlin 源码提取 DDL 灌进宿主 SQLite 真执行：
+   表名/列名/索引名与 iOS 一致 · FTS5+CJK 可子串命中 · snippet 产出 <hl> ·
+   不分词则查不到（证明切分必要）· 未记录判定 · 足迹 JOIN · day_key 两阶段重算
+
+3) tools/verify_backup_interop.sh                   →  15 项断言全部 PASS
+   编译 **iOS 真实的 ZipArchive.swift** 去解 Android 写出的 .jdiary：
+   entry 列表与长度正确 · manifest.json 能被 iOS 的 JSONDecoder 解码 ·
+   settingsJson 的 snake_case 键能被 iOS 的 AppSettings CodingKeys 解码 ·
+   db 是合法 SQLite · 图片字节未损坏
 ```
 
 ### golden file 是怎么来的（可复现）
@@ -157,11 +173,21 @@ swiftc -O /Users/cov/JustADiary/JustDiary/Models/ContentPart.swift main.swift -o
 
 > D1/D2 只影响搜索实现，D3 只影响本地文件清理 —— **库结构、`content_json`、FTS 文本、备份格式都不变**。
 
-### 尚未完成（下一轮）
+### 仍未验证的一层（**运行验证时的第一优先项**）
 
-1. **备份 / 导入（`BackupService` + zip）**：`.jdiary` 的流式导出与导入、
-   `manifest.json`、`settingsJson` 的 DTO、`VACUUM INTO` 快照、整天 skip/overwrite 合并；
-2. **媒体存储**：`BitmapFactory` 降采样（最长边 2048 / JPEG 85）、`img_<ms>.jpg` 命名、内存 + 磁盘缓存；
-3. **DB 执行层测试**：目前 schema 与查询已用宿主 SQLite 验证，但 `SQLiteOpenHelper`、
-   参数绑定、游标映射这三层还没有自动化测试（本机无 AVD；候选方案是 Robolectric 或
-   一台真机，届时与 M3 一起做一次运行验证）。
+schema 与查询 SQL 已用宿主 SQLite 真执行验证，但**这三层还没有自动化测试**：
+
+1. `SQLiteOpenHelper` 的 `onCreate/onUpgrade` 实际执行（含 `VACUUM INTO`、`beginTransactionNonExclusive`）；
+2. `execSQL`/`rawQuery` 的参数绑定与游标列映射（`blockFrom`/`diaryFrom`）；
+3. `mergeBackupDatabase` 的整天 skip/overwrite 行为与统计。
+
+它们都需要一台 Android 设备或模拟器（Robolectric 亦可，但需先确认其 SQLite 是否编入 FTS5）。
+按已确认的决策 Q8，本轮不做安装运行验证，因此与 M3 一起做一次运行验证时优先补这三层。
+
+### M2 起（下一轮）
+
+按方案 §12 进入 **M2 设计系统**：M3 主题（动态取色 + 品牌色回落）、动态字体与逐档上限
+（**需从 `DesignSystem.swift:124-136` 逐字核对**，见下）、M3 组件封装、日期格式化、自绘组件所需语义色。
+
+> 注意：`ui/theme/DesignTokens.kt` 里的缩放上限表目前是**由 AX5 实测值反推的近似值**，
+> M2 必须逐字核对后再固化；单测只断言"缩放后字阶严格递减"，所以换成精确值后测试依然有效。

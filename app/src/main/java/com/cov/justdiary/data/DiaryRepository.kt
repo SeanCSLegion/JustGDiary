@@ -617,6 +617,220 @@ class DiaryRepository(
     /** 写入 `content_json` 时统一走这里，保证图片路径与格式归一（与 iOS 的写出路径一致）。 */
     fun normalizeContent(raw: String): String = ImagePathUtil.normalizeContent(raw)
 
+    // ------------------------------------------------------------------ 备份支持
+
+    /**
+     * 把主库快照到 [target]。
+     *
+     * iOS 用 SQLite Online Backup API（`sqlite3_backup`，自动包含 WAL 未 checkpoint 的数据）；
+     * Android 没有公开等价物，改用 **`VACUUM INTO`**（SQLite 3.27+，minSdk 33 满足）。
+     * 注意 `VACUUM INTO` 要求目标文件**不存在**，且不能在事务里执行。
+     */
+    suspend fun snapshotDatabaseTo(target: File) = withContext(singleThread) {
+        target.parentFile?.mkdirs()
+        if (target.exists() && !target.delete()) {
+            throw BackupException.Database("无法删除旧的快照文件：${target.absolutePath}")
+        }
+        helper.writableDatabase.execSQL(JustDiarySchema.vacuumInto(target.absolutePath))
+    }
+
+    /** 导出备份用：全部片段的 `(id, content_json)`。 */
+    suspend fun rawBlocksForBackup(): List<Pair<Long, String>> = withContext(singleThread) {
+        helper.writableDatabase.rawQuery(JustDiarySchema.SELECT_BLOCKS_FOR_INDEX, null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getLong(0) to (c.getString(1) ?: "[]")) }
+        }
+    }
+
+    /**
+     * 把备份库整天合并进主库。对应 iOS `mergeBackupDatabase`。
+     *
+     * 粒度是**整天**：已存在的日期要么整天跳过（[ImportMode.SKIP]）、要么整天替换
+     * （[ImportMode.OVERWRITE]），**没有块级合并**。兼容老 schema：备份库缺
+     * `region1` / `loc_quality` / `country_code` 时分别回落 `province/city/district`、
+     * 由坐标是否全 0 推导质量、留空。
+     *
+     * 图片重命名与落盘由 [copyImage] 完成（它返回新的 `images/<name>` 键）。
+     * Kotlin 无法像 iOS 那样用 `inout` 回填统计，因此**以返回值给出**（见方案 §4.7.4）。
+     */
+    suspend fun mergeBackupDatabase(
+        backupDbPath: String,
+        mode: ImportMode,
+        copyImage: (String) -> String,
+    ): BackupStats {
+        val stats = writeMutex.withLock {
+            withContext(singleThread) {
+                val mainDb = helper.writableDatabase
+                val backupDb = SQLiteDatabase.openDatabase(backupDbPath, null, SQLiteDatabase.OPEN_READONLY)
+                try {
+                    val columns = tableColumnsOf(backupDb, JustDiarySchema.TABLE_EDIT_BLOCK)
+                    val hasRegion = "region1" in columns
+                    val hasQuality = "loc_quality" in columns
+                    val hasCountryCode = "country_code" in columns
+
+                    var importedDays = 0
+                    var skippedDays = 0
+                    var overwrittenDays = 0
+                    var importedBlocks = 0
+
+                    backupDb.rawQuery(JustDiarySchema.SELECT_BACKUP_DIARIES, null).use { diaryCursor ->
+                        while (diaryCursor.moveToNext()) {
+                            val dayKey = diaryCursor.stringOrNull("day_key") ?: ""
+                            val existingId = mainDb.rawQuery(
+                                JustDiarySchema.SELECT_DIARY_ID_BY_DAY_FOR_MERGE,
+                                arrayOf(dayKey),
+                            ).use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+
+                            if (mode == ImportMode.SKIP && existingId != null) {
+                                skippedDays += 1
+                                continue
+                            }
+
+                            val backupCreated = diaryCursor.longOrNull("created_utc")
+                            val backupUpdated = diaryCursor.longOrNull("updated_utc")
+                            val blocks = readBackupBlocks(
+                                backupDb,
+                                diaryCursor.longOrNull("id") ?: 0L,
+                                hasRegion = hasRegion,
+                                hasQuality = hasQuality,
+                                hasCountryCode = hasCountryCode,
+                            )
+
+                            mainDb.beginTransactionNonExclusive()
+                            try {
+                                if (existingId != null) {
+                                    mainDb.execSQL(JustDiarySchema.DELETE_BLOCKS_OF_DIARY, arrayOf<Any?>(existingId))
+                                    mainDb.execSQL(JustDiarySchema.DELETE_DIARY_BY_ID, arrayOf<Any?>(existingId))
+                                    mainDb.execSQL(JustDiarySchema.DELETE_DIARY_FLAG, arrayOf<Any?>(dayKey))
+                                    if (ftsSupported) {
+                                        mainDb.execSQL(JustDiarySchema.FTS_DELETE_BY_DIARY, arrayOf<Any?>(existingId))
+                                    }
+                                    overwrittenDays += 1
+                                } else {
+                                    importedDays += 1
+                                }
+
+                                val now = System.currentTimeMillis()
+                                mainDb.execSQL(
+                                    JustDiarySchema.INSERT_DIARY,
+                                    arrayOf<Any?>(dayKey, backupCreated ?: now, backupUpdated ?: now),
+                                )
+                                val newDiaryId = lastInsertRowId(mainDb)
+                                mainDb.execSQL(JustDiarySchema.INSERT_DIARY_FLAG_IF_ABSENT, arrayOf<Any?>(dayKey))
+
+                                val dayText = StringBuilder()
+                                for (block in blocks) {
+                                    val normalized = ImagePathUtil.normalizeContent(block.contentJson)
+                                    val rewritten = ContentFlatten.parseContent(normalized).map { part ->
+                                        part.src?.let { part.copy(src = copyImage(it)) } ?: part
+                                    }
+                                    val newJson = ContentFlatten.serializeContent(rewritten)
+                                    val text = ContentFlatten.flattenContent(newJson)
+                                    val locQuality = if (hasQuality) {
+                                        block.locQuality
+                                    } else if (block.latitude != 0.0 || block.longitude != 0.0) {
+                                        LocQuality.precise
+                                    } else {
+                                        LocQuality.coarse
+                                    }
+
+                                    mainDb.execSQL(
+                                        JustDiarySchema.INSERT_BLOCK,
+                                        arrayOf<Any?>(
+                                            newDiaryId, block.startTimeUtc, block.locText,
+                                            block.latitude, block.longitude, newJson, text,
+                                            block.locPrecision, locQuality, block.country,
+                                            block.countryCode, block.region1, block.region2, block.region3,
+                                            block.createdUtc, block.updatedUtc,
+                                        ),
+                                    )
+                                    importedBlocks += 1
+                                    dayText.append(text).append(' ')
+                                }
+
+                                val trimmed = dayText.toString().trim()
+                                if (trimmed.isNotEmpty()) {
+                                    mainDb.execSQL(
+                                        JustDiarySchema.UPDATE_DIARY_TEXTS,
+                                        arrayOf<Any?>(trimmed.take(40), trimmed, newDiaryId),
+                                    )
+                                }
+                                if (ftsSupported) {
+                                    mainDb.rawQuery(
+                                        JustDiarySchema.SELECT_DIARY_SUMMARY_FOR_FTS,
+                                        arrayOf(newDiaryId.toString()),
+                                    ).use { c ->
+                                        if (c.moveToFirst()) upsertFtsEntry(mainDb, c.getLong(0), c.getString(1) ?: "")
+                                    }
+                                }
+                                mainDb.setTransactionSuccessful()
+                            } finally {
+                                mainDb.endTransaction()
+                            }
+                        }
+                    }
+
+                    mainDb.execSQL(JustDiarySchema.CLEAR_DIARY_FLAGS)
+                    mainDb.execSQL(JustDiarySchema.REBUILD_DIARY_FLAGS)
+                    rebuildSearchIndex(mainDb)
+
+                    BackupStats(
+                        importedDays = importedDays,
+                        skippedDays = skippedDays,
+                        overwrittenDays = overwrittenDays,
+                        importedBlocks = importedBlocks,
+                    )
+                } finally {
+                    backupDb.close()
+                }
+            }
+        }
+        emitChange()
+        return stats
+    }
+
+    private fun readBackupBlocks(
+        backupDb: SQLiteDatabase,
+        diaryId: Long,
+        hasRegion: Boolean,
+        hasQuality: Boolean,
+        hasCountryCode: Boolean,
+    ): List<BackupBlockRow> = backupDb.rawQuery(
+        JustDiarySchema.SELECT_BACKUP_BLOCKS_OF_DIARY,
+        arrayOf(diaryId.toString()),
+    ).use { c ->
+        buildList {
+            while (c.moveToNext()) {
+                add(
+                    BackupBlockRow(
+                        startTimeUtc = c.longOrNull("start_time_utc") ?: 0L,
+                        locText = c.stringOrNull("loc_text") ?: "",
+                        latitude = c.doubleOrNull("latitude") ?: 0.0,
+                        longitude = c.doubleOrNull("longitude") ?: 0.0,
+                        contentJson = c.stringOrNull("content_json") ?: "[]",
+                        locPrecision = c.stringOrNull("loc_precision") ?: "none",
+                        locQuality = if (hasQuality) c.stringOrNull("loc_quality") ?: "" else "",
+                        country = c.stringOrNull("country") ?: "",
+                        countryCode = if (hasCountryCode) c.stringOrNull("country_code") ?: "" else "",
+                        region1 = if (hasRegion) c.stringOrNull("region1") ?: "" else c.stringOrNull("province") ?: "",
+                        region2 = if (hasRegion) c.stringOrNull("region2") ?: "" else c.stringOrNull("city") ?: "",
+                        region3 = if (hasRegion) c.stringOrNull("region3") ?: "" else c.stringOrNull("district") ?: "",
+                        createdUtc = c.longOrNull("created_utc") ?: 0L,
+                        updatedUtc = c.longOrNull("updated_utc") ?: 0L,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun tableColumnsOf(db: SQLiteDatabase, table: String): Set<String> =
+        db.rawQuery("PRAGMA table_info($table);", null).use { c ->
+            val index = c.getColumnIndex("name")
+            buildSet { while (c.moveToNext()) if (index >= 0) add(c.getString(index)) }
+        }
+
+    private fun lastInsertRowId(db: SQLiteDatabase): Long =
+        db.rawQuery("SELECT last_insert_rowid();", null).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+
     // ------------------------------------------------------------------ 内部工具
 
     private fun diaryIdOf(db: SQLiteDatabase, dayKey: String): Long =
@@ -715,4 +929,44 @@ class DiaryRepository(
         /** 地点候选上限（iOS 取前 20）。 */
         const val LOCATION_OPTION_LIMIT: Int = 20
     }
+}
+
+/**
+ * 备份库里一条片段的中间表示。
+ *
+ * 单列出来是因为备份库可能是**老 schema**：缺 `region1/2/3` 时要回落读
+ * `province/city/district`，缺 `loc_quality` 时要由坐标推导 —— 这些回落必须在
+ * 读取阶段就做完，后面的写入路径才能只面对一种形状。
+ */
+private data class BackupBlockRow(
+    val startTimeUtc: Long,
+    val locText: String,
+    val latitude: Double,
+    val longitude: Double,
+    val contentJson: String,
+    val locPrecision: String,
+    val locQuality: String,
+    val country: String,
+    val countryCode: String,
+    val region1: String,
+    val region2: String,
+    val region3: String,
+    val createdUtc: Long,
+    val updatedUtc: Long,
+)
+
+/** 列不存在或值为 NULL 时返回 null（老 schema 的兼容读取需要它）。 */
+private fun Cursor.stringOrNull(name: String): String? {
+    val index = getColumnIndex(name)
+    return if (index < 0 || isNull(index)) null else getString(index)
+}
+
+private fun Cursor.longOrNull(name: String): Long? {
+    val index = getColumnIndex(name)
+    return if (index < 0 || isNull(index)) null else getLong(index)
+}
+
+private fun Cursor.doubleOrNull(name: String): Double? {
+    val index = getColumnIndex(name)
+    return if (index < 0 || isNull(index)) null else getDouble(index)
 }
