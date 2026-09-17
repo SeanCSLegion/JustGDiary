@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 可暴露的路径：分享长图与备份包都放在缓存目录，图片本体在 filesDir。
+     只暴露必要目录，且从不暴露数据库文件本身（备份包里的 db 是快照副本）。 -->
+<paths>
+    <!-- 分享长图：cacheDir/share/*.png -->
+    <cache-path name="share" path="share/" />
+    <!-- 导出的备份包：cacheDir/*.jdiary -->
+    <cache-path name="exports" path="." />
+    <!-- 日记内联图片（仅用于“查看大图”一类的本地分享） -->
+    <files-path name="images" path="images/" />
+</paths>

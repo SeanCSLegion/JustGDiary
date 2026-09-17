@@ -307,8 +307,62 @@ effectiveMultiplier(size, fontScale) = min(ceiling(size), max(1, fontScale))
 | morph 驱动 | 手写 `Animatable` 单进度（`MorphViews.swift`） | 同一个思路：`Animatable(0f)` + `CalendarLayout` 的纯函数插值（**不用** `SharedTransitionLayout`） |
 | 减弱动态效果 | `.linear(0.18)` | `ValueAnimator.areAnimatorsEnabled()` → `tween(180, LinearEasing)` |
 
-### M4 起（下一轮）
+## M4 —— 日记阅读与分享长图 ✅ 已完成
 
-**M4 日记阅读**：段落/行内样式渲染（`ContentPartStyle` 7 种 + `TextRun` 4 种 flag）、
-内联图片、位置行、条目内搜索、分享长图（第三套渲染管线，常量见方案 §8.3）。
-同时把首页右栏/日内容区接上真实片段列表。
+### 交付物
+
+| 文件 | 说明 |
+| --- | --- |
+| `ui/diary/ReadLayout.kt` | 阅读渲染模型（段落 / 列表待办 / 图片三种形态 + 行内 span）、图片显示尺寸规则、在篇内搜索 [DiarySearch]（段落内匹配 + 上一个/下一个） |
+| `ui/diary/DiaryReadScreen.kt` | 阅读页：日期 + 分享、条目内搜索栏（关键词/序号/上下一个）、逐段落渲染（引用底色块、列表圆点、待办勾选框、内联图片）、命中高亮 |
+| `data/ShareLayout.kt` | **分享长图版式**（纯函数）：画布常量、各样式字号/行高、贪心换行、墨迹行高、图片高度、整张图的游标累加 |
+| `service/ImageShareRenderer.kt` | 用 `android.graphics.Canvas` 按 [ShareLayout] 的坐标绘制位图（背景渐变 + 光斑、发丝线、时间轴与节点、各段落、页脚），并写出 PNG |
+| `service/ShareIntents.kt` + `res/xml/file_paths.xml` + manifest `<provider>` | 通过 `FileProvider` 分享长图与备份包（`ACTION_SEND` + `FLAG_GRANT_READ_URI_PERMISSION`） |
+| `service/LocationResolver.kt` | 位置文案：由地区列重建地址、记录态/新建态的可选精度档、`exact` 档的地点名与街道去重 |
+
+### 验证证据
+
+```
+./gradlew clean assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  171 个 JVM 单测通过（本轮新增 35 个）
+    ReadLayoutTest          15  ← 渲染模型、图片尺寸规则、在篇内搜索
+    ShareLayoutTest         13  ← 分享图版式常量与游标累加
+    LocationResolverTest     7  ← 地址重建与精度档位
+```
+
+三个关键断言：
+
+1. **分享图常量逐项对齐**：`WIDTH 720 / BLOCK_LEFT 108 / SIDE 48 / TIMELINE_LINE_X 61 /
+   TIMELINE_LINE_W 3 / DATE_Y 64 / FOOTER_H 34`，以及由它们推出的 **`CONTENT_WIDTH 564`**；
+   各样式字号/行高（title 36/52、heading 32/46、quote 30/40、list+todo 30/55、body 31/50）。
+2. **整张图的高度可手算校验**：测试按 iOS 的游标算式独立算一遍总高，与实现一致
+   （`DATE_Y + DATE_ADVANCE + 起始行 + 发丝线 26 + 时间 56 + 地点 + 各段落 + 块间距 36 + 页脚 34`）。
+3. **图片尺寸两条规则**：显示宽 `min(可用宽-24, 343)`、显示高 `max(40, ratio × 宽)`、
+   解码目标 `max(storedW, storedH) × 3`；`ratio` 缺失时用 0.75。
+
+### 测试抓到的一处**实现抄错**（值得记）
+
+第一版我把"起始行高度"写成了 `wrappedHeight`（含墨迹与内边距）。iOS 的 `startLineHeight`
+其实只算 **行数 × 40**，不带墨迹 —— 于是整张分享图会高出 24pt。
+测试断言"总高 = 手算值"时把它抓了出来。**这类错误没有测试就只能靠肉眼看图**。
+
+顺带记录一处不是笔误的地方：iOS 的引用块高度用 `max(1, 行数 - 1) × 行高 + 墨迹 + 40`，
+**单行引用也会多留一行高**。这与实现一致，我把它写进了测试注释以免后人"顺手修掉"。
+
+### 有意不复制 iOS 的缺陷（D5–D7）
+
+| # | iOS 行为 | 这里 |
+| --- | --- | --- |
+| **D5** | 地点行固定按 34 前进，但它是**可换行**文本 → 长地址会与下一块重叠 | 按实际换行行数 × 34 前进（有测试断言块高随之变化） |
+| **D6** | 大标题/小标题固定 52+12 / 46+10，**不换行** → 长标题溢出框外 | 按实际行数 × 行高 + 内边距 |
+| **D7** | 逐字符用 `boundingRect` 实测量宽 | 把量宽抽象成注入接口：真机用 `Paint.measureText`，测试用墨迹比近似 → **换行结果确定、可断言** |
+
+> D7 是本里程碑唯一的近似：分享图是**本地生成物**，不属于跨端数据契约，
+> 因此"真机换行位置与 iOS 基本一致"即可，不追求逐像素一致。
+
+### M5 起（下一轮）
+
+**M5 富文本编辑器**（本项目最大的工作量）：`AndroidView` + `EditText` + `Spannable` 的编辑内核、
+`SpannableBridge`（`ContentPart` ↔ span）、格式栏、列表/待办重排、插入图片、
+位置胶囊与 5 条位置规则、放弃修改，以及方案 §5.4 列出的 5 个"静默数据损坏"暗坑
+（尤其是 IME 组合区与"不能用绘制字号反解块样式"）。

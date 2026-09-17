@@ -39,6 +39,17 @@
                     android:host="editor" />
             </intent-filter>
         </activity>
+
+        <!-- 分享长图与备份包：把私有目录里的文件暴露成可授权的 content:// URI -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>
