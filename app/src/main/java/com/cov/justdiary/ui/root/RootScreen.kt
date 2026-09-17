@@ -34,6 +34,7 @@ import com.cov.justdiary.data.YEAR_FILTER_ALL
 import com.cov.justdiary.ui.footprint.FootprintScreen
 import com.cov.justdiary.ui.home.HomeScreen
 import com.cov.justdiary.ui.search.SearchScreen
+import com.cov.justdiary.ui.settings.SettingsScreen
 
 /**
  * 根界面：主导航宿主。
@@ -99,11 +100,9 @@ fun RootScreen(modifier: Modifier = Modifier) {
 /**
  * 页面宿主。
  *
- * 首页、足迹、搜索已接入真实实现；**设置页仍是占位**（M7 接入）。
- *
- * 注意：这三个页面目前拿到的是**空状态**（足迹的聚合结果、搜索的结果集），
- * 数据接线（`DiaryRepository` → 页面状态）在 M7 与设置页一起做 —— 那时会把
- * `AppContainer` 里的单例接到 ViewModel 上，并把编辑页也打通。
+ * 四个页面都已接入真实实现；**足迹与搜索拿到的仍是空状态**
+ * （`DiaryRepository` → 页面状态的数据接线在 M7 剩余部分完成，
+ * 编辑页入口也在同一批里打通）。
  */
 @Composable
 private fun SkeletonScreen(tab: AppTab, modifier: Modifier = Modifier) {
@@ -131,7 +130,10 @@ private fun SkeletonScreen(tab: AppTab, modifier: Modifier = Modifier) {
             return
         }
 
-        AppTab.Settings -> Unit // 设置页在 M7 接入
+        AppTab.Settings -> {
+            SettingsScreen(modifier = modifier)
+            return
+        }
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {

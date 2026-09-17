@@ -139,4 +139,26 @@ object LocationRules {
     /** 地区列是否表达了任何地点信息。 */
     private fun LocRegion.hasAnyRegion(): Boolean =
         country.isNotEmpty() || region1.isNotEmpty() || region2.isNotEmpty() || region3.isNotEmpty()
+
+    /**
+     * **记录新位置**时的地区列（`LocationService.swift:99-107`）。
+     *
+     * 注意 `region1` 只取 `administrativeArea`、**不退到 `subAdministrativeArea`**；
+     * 回填历史片段时用的却是另一套规则（[RegionBackfiller.reversePlacemark] 会退）。
+     * 这两条差异都是 iOS 的既有行为，刻意各自保留，因此两个映射都做成纯函数以便对比断言。
+     */
+    fun regionFromLivePlacemark(placemark: PlacemarkText?, locQuality: String): LocRegion {
+        val hasBoth =
+            placemark != null && placemark.locality.isNotEmpty() && placemark.subAdministrativeArea.isNotEmpty()
+        return LocRegion(
+            country = placemark?.country.orEmpty(),
+            countryCode = placemark?.isoCountryCode.orEmpty(),
+            region1 = placemark?.administrativeArea.orEmpty(),
+            // region2 = subAdministrativeArea ?? locality
+            region2 = placemark?.subAdministrativeArea.orEmpty().ifEmpty { placemark?.locality.orEmpty() },
+            // region3 只在 locality 与 subAdministrativeArea 都存在时才取 subLocality
+            region3 = if (hasBoth) placemark.subLocality else "",
+            locQuality = locQuality,
+        )
+    }
 }

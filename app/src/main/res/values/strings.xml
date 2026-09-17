@@ -12,6 +12,90 @@
     <string name="tab_search">Search</string>
     <string name="tab_settings">Settings</string>
 
+    <!-- 每日提醒（文案与 iOS Localizable.xcstrings 的 reminder_title / reminder_content 一字不差） -->
+    <string name="reminder_title">Journal reminder</string>
+    <string name="reminder_content">You haven\'t written today — take a few minutes to record it.</string>
+    <!-- Android 通知渠道名（iOS 无对应概念） -->
+    <string name="reminder_channel_name">Journal reminder</string>
+    <string name="reminder_channel_description">Reminds you when you haven\'t written today</string>
+
+    <!-- ============================================================
+         设置页（M7）。key 与 iOS Localizable.xcstrings 同名同值。
+         iOS 的 %d 占位在 Android 里写成位置化的 %1$d。
+         ============================================================ -->
+    <string name="settings_title">Settings</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+
+    <string name="settings_section_general">General</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_sub">Display language of the app</string>
+    <string name="settings_lang_system">Follow system</string>
+    <string name="settings_lang_zh">中文</string>
+    <string name="settings_lang_en">English</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_sub">Light, dark, or follow the system</string>
+    <string name="settings_theme_system">Follow system</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <!-- Android 专有（Material You 动态取色；不进 settingsJson） -->
+    <string name="settings_dynamic_color">Dynamic color</string>
+    <string name="settings_dynamic_color_sub">Match colors to your wallpaper</string>
+
+    <string name="settings_section_rules">Diary rules</string>
+    <string name="settings_day_start">Start of a new day</string>
+    <string name="settings_day_start_sub">Entries before this time belong to the previous day</string>
+    <string name="settings_day_recalc_title">Recompute dates</string>
+    <string name="settings_day_recalc_msg">%1$d entries kept their original date due to the rule change.</string>
+    <string name="settings_week_start">Start of the week</string>
+    <string name="settings_week_start_sub">Choose whether calendars begin on Monday or Sunday</string>
+    <string name="settings_week_monday">Monday</string>
+    <string name="settings_week_sunday">Sunday</string>
+    <string name="settings_auto_time">Auto-insert time</string>
+    <string name="settings_auto_time_sub">Record start time when the editor opens</string>
+    <string name="settings_auto_loc">Auto-insert location</string>
+    <string name="settings_auto_loc_sub">Requires location permission</string>
+    <string name="settings_loc_permission">Location permission</string>
+    <string name="settings_loc_permission_sub">Location stays on this device only</string>
+    <string name="settings_loc_none">Not granted</string>
+    <string name="settings_loc_exact">Precise</string>
+    <string name="settings_loc_fuzzy">Approximate</string>
+    <string name="settings_history_edit">Edit past entries</string>
+    <string name="settings_history_edit_sub">Modify or delete existing blocks only; new blocks can\'t be added to past days</string>
+
+    <string name="settings_section_remind">Reminders</string>
+    <string name="settings_remind_enabled">Journal reminder</string>
+    <string name="settings_remind_enabled_sub">Remind me when I haven\'t written today</string>
+    <string name="settings_remind_time">Reminder time</string>
+    <string name="settings_remind_time_sub">Once a day</string>
+    <string name="settings_notif_permission">Notification permission</string>
+    <string name="settings_notif_permission_sub">Reminders won\'t arrive when off</string>
+    <string name="settings_notif_on">On</string>
+    <string name="settings_notif_off">Off</string>
+
+    <string name="settings_section_data">Data</string>
+    <string name="settings_export">Export all entries</string>
+    <string name="settings_export_sub">Generate a .jdiary backup</string>
+    <string name="settings_export_data_only">Entries only</string>
+    <string name="settings_export_data_settings">Entries + Settings</string>
+    <string name="settings_export_busy">Generating backup…</string>
+    <string name="settings_export_failed_title">Export failed</string>
+    <string name="settings_export_failed_msg">Something went wrong while generating or saving the backup. Please try again.</string>
+    <string name="settings_import">Import backup</string>
+    <string name="settings_import_sub">Restore entries from another device</string>
+    <string name="settings_import_mode_title">Import mode</string>
+    <string name="settings_import_skip">Skip existing</string>
+    <string name="settings_import_overwrite">Overwrite existing</string>
+    <string name="settings_import_busy">Importing backup…</string>
+    <string name="settings_import_success_title">Import complete</string>
+    <string name="settings_import_success_msg">Added %1$d days, skipped %2$d, overwritten %3$d (%4$d blocks, %5$d images).</string>
+    <string name="settings_import_failed_title">Import failed</string>
+    <string name="settings_import_failed_msg">The backup file is invalid or the import failed. Please try again.</string>
+    <string name="settings_settings_restored">App settings were restored as well.</string>
+
+    <string name="settings_section_about">About</string>
+    <string name="settings_version">Version</string>
+
     <!-- M0 占位 -->
     <string name="m0_placeholder_title">JustGDiary</string>
     <string name="m0_placeholder_body">Android port of the JustADiary journal app.\nThis is the M0 skeleton: build pipeline, Material 3 theme, dynamic color and adaptive navigation.\nFeature screens are migrated in M1–M9.</string>

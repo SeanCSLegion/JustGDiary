@@ -543,3 +543,75 @@ Android 侧对应的是 `android.icu.text.Collator.setNumericCollation(true)`（
 按方案 §12 进入 **M7 设置 + 服务**：5 张卡的设置页与 14 个设置行、语言即时切换
 （`AppCompatDelegate.setApplicationLocales`）、主题、周起始、开始时间重算、提醒（`WorkManager`）、
 备份导入导出（SAF + M1 的流式 zip）、定位服务（GMS 探测）、以及**把数据层接到各页面的 ViewModel**。
+
+---
+
+## M7 —— 设置 + 服务（**进行中**：平台服务层已完成）
+
+本轮完成"**设置能改、服务能跑**"的一层：定位、提醒、地区回填、设置副作用执行器，
+以及设置页本身（含 15 个设置行）。**数据层接线（`DiaryRepository` → 各页面 ViewModel）
+与编辑页入口仍未接**，见文末。
+
+### 交付物
+
+| 文件 | 说明 |
+| --- | --- |
+| `service/LocationService.kt` | 定位 + 反地理编码。**运行时探测 GMS**：有 Play services 走 `FusedLocationProviderClient`，否则退原生 `LocationManager.getCurrentLocation`；两者都在 **8 秒超时**内（与 iOS `Task.sleep(for: .seconds(8))` 竞速一致）。反地理编码用平台 `Geocoder`（API 33+ 的异步回调版），`PlacemarkText` → `Address` 字段映射成扩展函数 |
+| `service/RegionBackfiller.kt` | 历史片段的地区列回填（iOS `DiaryRepository.backfillBlockRegions` + `ReverseGeocoder`）：每轮 30 条、`region1 = ''` 保证幂等、失败 id 记入 2000 条上限的跳过名单 |
+| `service/ReminderScheduler.kt` | 每日提醒。`WorkManager` 一次性任务 + 投递后自排下一天；`DailyReminderWorker` 到点**再确认一次**（今天没写、且确实过了提醒时刻）再发通知，避免 Doze 延后到第二天仍然推送 |
+| `app/AppSettingsApplier.kt` | 设置副作用的**平台执行器**：外观（`AppCompatDelegate.setDefaultNightMode`）、语言（`setApplicationLocales`）、`day_key` 重算、地区回填、提醒重排，外加进程启动序列 `bootstrap()` 与回前台的 `onForeground()` |
+| `app/MainActivity.kt` | 主题/动态取色由**设置驱动**（观察 `SettingsViewModel.state`），启动序列挂起执行不阻塞首帧，回前台重排提醒 |
+| `ui/settings/SettingsViewModel.kt` | 设置页 ViewModel：状态、15 个设置项的写入口（全部经 `AppSettingsApplier.commit`）、SAF 导入导出的落盘、权限事件 |
+| `ui/settings/SettingsScreen.kt` | 设置页：**通用 / 日记规则 / 提醒 / 数据 / 关于** 五张卡，行的条件显示规则照搬 iOS；额外一行 Android 专有的**动态取色** |
+| `res/values*/strings.xml` | 设置页 60+ 条文案，key 与 iOS `Localizable.xcstrings` 同名同值（`%d` → 位置化 `%1$d`） |
+
+### 验证证据
+
+```
+./gradlew clean assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  306 个 JVM 单测通过（本轮 +10）
+    RegionBackfillerTest   9
+```
+
+### 一条"两套映射"的坑（新增测试专门盯住它）
+
+iOS 对 `region1` 有**两套不同规则**，且都在生产路径上：
+
+| 路径 | `region1` |
+| --- | --- |
+| 记录新位置（`LocationResolver.resolve`） | `administrativeArea ?? ""` |
+| 回填历史片段（`ReverseGeocoder.reverse`） | `administrativeArea ?? subAdministrativeArea ?? ""` |
+
+回填时把 `region1` 统一成"记录新位置"的规则看起来更"干净"，但会让**同一份备份在两端回填出不同的列值**，
+进而让搜索的地区筛选与足迹的层级出现跨端差异。因此两套映射都保留，并且都抽成纯函数：
+
+- `LocationRules.regionFromLivePlacemark(placemark, quality)`
+- `RegionBackfiller.reversePlacemark(placemark)`
+
+`RegionBackfillerTest` 里有一条测试**同时断言两者**：同一条 placemark（缺 `administrativeArea`）下，
+回填给"南山区"、记录新位置给 `""` —— 谁把其中一条"顺手统一"掉，测试立刻红。
+
+### 与 iOS 的落地差异（都是平台事实，不是取舍）
+
+| iOS | Android | 为什么 |
+| --- | --- | --- |
+| `UNCalendarNotificationTrigger` 精确触发 | `WorkManager` 一次性任务（±数分钟） | 精确闹钟要 `SCHEDULE_EXACT_ALARM`（用户可撤销）；`USE_EXACT_ALARM` 只对闹钟/日历类应用开放，日记提醒用它会违反 Play 政策（决策 Q7） |
+| `CLLocationManager.requestWhenInUseAuthorization()` 随处可调 | 必须回到 Activity 的 `ActivityResultLauncher` | 因此 ViewModel 只发 `SettingsUiEvent`，由 Composable 持有 launcher 执行，结果回投 ViewModel |
+| 系统会自动抑制 `region1` 已空的重复回填 | 更新语句带 `AND region1 = ''` | 与 iOS 的 SQL 一字不差，保证幂等 |
+| iOS 在 `requestPermission()` 之后**立刻**发起回填（存在竞态，首轮多半空跑） | 只在**已有授权**时回填 | 否则首轮 30 条会全被记进"放弃重试"名单，之后再也补不上（这是一处**修正**，记为 D10） |
+| `Menu` / 滚轮 `Picker` / `UIDocumentPicker`+`ShareLink` | `DropdownMenu` / 滚动列表对话框 + M3 `TimePicker` / SAF `CreateDocument`+`OpenDocument` | 平台原生等价物 |
+| app 版本号取自 `Info.plist` | `PackageManager.getPackageInfo().versionName` | 同上 |
+
+### 有意"暂时不完美"的一处：行图标
+
+设置页的 15 个行图标目前取 `material-icons-core` 里**语义最近**的图标（同一张卡内不重复），
+不是 iOS 的 SF Symbol 对应物。没有改用 `material-icons-extended`：那个 aar 有 **35.7 MB**，
+而 release 的 `isMinifyEnabled = false`，为十几个图标把整包打进 APK 不划算。
+真正的 Material Symbols 图标（矢量 XML，按需引入）留在 M9，与方案 §M9 一致。
+
+### 尚未接线（记在 M7 剩余部分）
+
+1. `DiaryRepository` → 首页 / 足迹 / 搜索三个页面的 ViewModel（现在仍喂空状态）；
+2. 首页的"当日内容"面板（横屏分栏里目前是占位）；
+3. 点日记卡片 → 阅读页 → 编辑页的整条路径；
+4. 通知点开后直达当天编辑页（深链 `justdiary://editor?dayKey=…` 已在 Manifest 里，未消费）。

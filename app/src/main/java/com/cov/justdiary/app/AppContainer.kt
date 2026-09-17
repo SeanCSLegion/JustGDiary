@@ -3,7 +3,9 @@ package com.cov.justdiary.app
 import android.content.Context
 import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.service.BackupService
+import com.cov.justdiary.service.LocationService
 import com.cov.justdiary.service.MediaStore
+import com.cov.justdiary.service.ReminderScheduler
 import com.cov.justdiary.service.SettingsStore
 
 /**
@@ -33,4 +35,22 @@ class AppContainer(context: Context) {
     val mediaStore: MediaStore by lazy { MediaStore(appContext) }
 
     val backupService: BackupService by lazy { BackupService(appContext, repository, settings) }
+
+    /**
+     * 定位（对应 iOS `LocationService`）。
+     *
+     * 与 iOS 不同：Android 需要**运行时权限**，所以这里只是个薄封装，
+     * 真正的授权流程在 UI 层（`rememberLauncherForActivityResult`）触发，见方案 §8.1。
+     */
+    val locationService: LocationService by lazy { LocationService(appContext) }
+
+    /** 每日提醒（对应 iOS `ReminderService`），内部用 WorkManager 排期。 */
+    val reminderScheduler: ReminderScheduler by lazy {
+        ReminderScheduler(appContext, settings, repository)
+    }
+
+    /** 设置变更的平台侧执行器（外观 / 语言 / day_key 重算 / 回填 / 提醒重排）。 */
+    val appSettingsApplier: AppSettingsApplier by lazy {
+        AppSettingsApplier(appContext, settings, repository, locationService, reminderScheduler)
+    }
 }
