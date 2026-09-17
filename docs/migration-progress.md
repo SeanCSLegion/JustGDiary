@@ -786,3 +786,28 @@ Robolectric 运行时要下载 `android-all-instrumented`（约 100MB）；直�
 于是 `partsToLines` 走的是"普通段落"分支 —— 文本为空 → 空白行被丢弃 → 断言 5 段变 4 段。
 真正的规则是**图片段落必须 `style = image`**（iOS 的 `ContentPartStyle.image`）。
 这条如果只靠阅读代码很难发现，是 Robolectric 宿主把它逼出来的。
+
+### M9 续（四）：备份链路的端到端运行时验证（Robolectric，5 条）
+
+`tools/verify_backup_interop.sh` 证明的是"**单测构造的**样例包能被 iOS 的 `ZipArchive.swift` 读懂"；
+这一轮补的是"**真的走一遍导出、真的走一遍导入**"（`BackupServiceRobolectricTest`）：
+
+| 断言 | 说明 |
+| --- | --- |
+| 导出包结构 = `manifest.json` + `db/just_diary.db`（+ `images/<name>`），manifest 字段齐全 | 跨端契约的写入侧 |
+| `settingsJson` **只含 10 个业务设置项**，`search_index_version` / `content_format_version` 不在其中 | 这两个是数据版本而非偏好，恢复备份不能重置它们（Q3） |
+| 被引用的图片真的进了包 | `collectImageRefs` 的按 src 去重与改名 |
+| 导入 `SKIP`：已存在的日期整天跳过，`skippedDays` 计上、本机内容不变 | `mergeBackupDatabase` 的 skip 分支 |
+| 导入 `OVERWRITE`：已存在的日期被整天替换（内容变了、片段换新） | overwrite 分支 |
+| 带设置的包导入后设置被恢复（`settingsRestored`）、不带设置的包**不碰**本地设置 | 与 iOS 一致的"仅数据 / 数据+设置"两种导出 |
+| 图片导入后按 `imp_<stamp>_<n>.<ext>` **改名落盘**，且 `content_json` 里的 src 被同步重写、字节逐一致 | 直接覆盖同名文件会让"两个片段共用一张图"的备份互相踩到（iOS 侧踩过这个坑） |
+
+**过程中抓到的两处"测试自己写错"**（都值得记，因为它们都是很容易误判成实现 bug 的地方）：
+
+1. `assertEquals(0, skipped.skippedDays)` —— 在 OVERWRITE 之后又断言了 SKIP 那一次的结果对象；
+2. 断言导入后的图片文件名与原来相同 —— 实现**故意改名**（避免共用图片互相覆盖），
+   正确断言是"落盘恰好一张 `imp_*` + 内容逐字节一致 + `content_json` 指向新文件名"。
+
+到本轮为止，`docs/migration-progress.md` 里原先列的"三件需要设备才能验证的事"**全部有自动化覆盖了**：
+建表/迁移、参数绑定与游标映射、`mergeBackupDatabase` 的整天 skip/overwrite。
+仍然只有"安装到真机、看动画帧率、跑 TalkBack"这类事需要设备。
