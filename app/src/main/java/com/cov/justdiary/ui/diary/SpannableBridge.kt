@@ -58,6 +58,8 @@ object SpannableBridge {
     fun toSpannable(
         lines: List<EditorLine>,
         imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
+        /** 可用宽度（像素）：图片按"自然宽度但不超宽"显示，见 [ImageDisplaySize]。 */
+        containerWidthPx: Int = 0,
     ): SpannableStringBuilder {
         val builder = SpannableStringBuilder()
         val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
@@ -75,7 +77,15 @@ object SpannableBridge {
                 } else {
                     android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
                 }
-                drawable.setBounds(0, 0, IMAGE_PLACEHOLDER_PX, IMAGE_PLACEHOLDER_PX)
+                // 与 iOS `DiaryImageView` 同规则：自然宽度、不超可用宽度、不小于 40，高度按比例
+                val (imageW, imageH) = ImageDisplaySize.fit(
+                    containerWidthPx = containerWidthPx,
+                    storedWidth = line.imageWidth,
+                    storedHeight = line.imageHeight,
+                    fallbackWidth = bitmap?.width ?: IMAGE_PLACEHOLDER_PX,
+                    fallbackHeight = bitmap?.height ?: IMAGE_PLACEHOLDER_PX,
+                )
+                drawable.setBounds(0, 0, imageW, imageH)
                 builder.setSpan(
                     ImagePayloadSpan(line.imageSrc, line.imageWidth, line.imageHeight, drawable),
                     start,

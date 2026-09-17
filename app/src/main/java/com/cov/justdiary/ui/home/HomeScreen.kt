@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import com.cov.justdiary.R
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -36,6 +37,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -60,6 +64,8 @@ import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.Spacing
+import com.cov.justdiary.app.DebugFlags
+import com.cov.justdiary.service.Log
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -114,10 +120,15 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     val collapsed = weekProgress.value <= 0.01f
     val animatorsEnabled = remember { runCatching { ValueAnimator.areAnimatorsEnabled() }.getOrDefault(true) }
-    val morphSpec = remember(animatorsEnabled) {
+    // 调试开关：`-slow-morph` / `SLOW_MORPH=1` 把 morph 放慢到 3s（方案 §6.2）
+    val morphSpec = remember(animatorsEnabled, DebugFlags.slowMorph) {
         if (animatorsEnabled) {
             tween<Float>(
-                durationMillis = CalendarLayout.MORPH_DURATION_MS,
+                durationMillis = if (DebugFlags.slowMorph) {
+                    DebugFlags.SLOW_MORPH_DURATION_MS
+                } else {
+                    CalendarLayout.MORPH_DURATION_MS
+                },
                 easing = CubicBezierEasing(
                     CalendarLayout.MORPH_EASING[0],
                     CalendarLayout.MORPH_EASING[1],
@@ -126,12 +137,29 @@ fun HomeScreen(
                 ),
             )
         } else {
+            // 减弱动效优先于调试开关：这两者同时开时以"减弱"为准
             tween(durationMillis = CalendarLayout.REDUCED_MORPH_DURATION_MS, easing = LinearEasing)
         }
     }
 
     // 选中日与年份变化要上报给上层：前者决定"当日内容"面板，后者决定标记的读取区间
     LaunchedEffect(selectedKey) { onSelectDay(selectedKey) }
+
+    // morph 帧率日志（`-morph-log`）：iOS 侧写逐帧日志，这里在结束时汇总一行
+    val morphing = yearProgress.value > 0.01f || weekProgress.value > 0.01f
+    if (DebugFlags.morphLog) {
+        LaunchedEffect(morphing) {
+            if (!morphing) return@LaunchedEffect
+            var frames = 0
+            val start = System.nanoTime()
+            while (yearProgress.value > 0.01f || weekProgress.value > 0.01f) {
+                withFrameNanos { frames++ }
+            }
+            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            val average = if (frames > 0) elapsedMs.toDouble() / frames else 0.0
+            Log.app.d("morph: %d 帧 / %d ms（平均 %.1f ms/帧）".format(frames, elapsedMs, average))
+        }
+    }
 
     val monthFirst = remember(monthKey) { CalendarGrid.monthFirstOfMonthKey(monthKey) }
     val displayedWeeks = remember(monthKey, weekStart) { CalendarGrid.displayedWeeks(monthFirst, weekStart) }
@@ -140,6 +168,31 @@ fun HomeScreen(
     val selectedDate = remember(selectedKey) { DateUtil.parseDayKey(selectedKey) ?: monthFirst }
 
     val context = LocalContext.current
+
+    /**
+     * 翻月：选中日跟到新月份的同一天，月末按当月天数夹住（与 iOS 一致）。
+     *
+     * 分页器、无障碍的"上/下个月"与"上/下一年"都走这一份逻辑，不再各写一遍。
+     */
+    fun pageMonth(delta: Int) {
+        val keys = CalendarGrid.MONTH_KEYS
+        val index = keys.indexOf(monthKey)
+        val target = index + delta
+        if (target !in keys.indices) return
+        monthKey = keys[target]
+        val first = CalendarGrid.monthFirstOfMonthKey(keys[target])
+        val day = (DateUtil.parseDayKey(selectedKey) ?: today).dayOfMonth
+        val clamped = if (day < first.lengthOfMonth()) day else first.lengthOfMonth()
+        selectedKey = DateUtil.dayKeyOf(first.withDayOfMonth(clamped))
+    }
+
+    fun jumpYear(delta: Int) = pageMonth(delta * 12)
+
+    // 无障碍动作的标签要在组合期取好（`semantics` 的 lambda 不是 @Composable）
+    val a11yPrevMonth = stringResource(R.string.a11y_prev_month)
+    val a11yNextMonth = stringResource(R.string.a11y_next_month)
+    val a11yPrevYear = stringResource(R.string.a11y_prev_year)
+    val a11yNextYear = stringResource(R.string.a11y_next_year)
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -154,7 +207,16 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .width(calendarW.dp)
-                    .fillMaxSize(),
+                    .fillMaxSize()
+                    // 年月切换的无障碍入口：iOS 侧这里没有标签，Android 一并补上（方案 §6.3）
+                    .semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction(a11yPrevMonth) { pageMonth(-1); true },
+                            CustomAccessibilityAction(a11yNextMonth) { pageMonth(1); true },
+                            CustomAccessibilityAction(a11yPrevYear) { jumpYear(-1); true },
+                            CustomAccessibilityAction(a11yNextYear) { jumpYear(1); true },
+                        )
+                    },
             ) {
                 HomeHeader(
                     title = dateFormats?.year(year) ?: stringResource(R.string.date_year, year),
@@ -215,18 +277,7 @@ fun HomeScreen(
                             onOpenDay(date)
                         }
                     },
-                    onPageMonth = { delta ->
-                        val keys = CalendarGrid.MONTH_KEYS
-                        val index = keys.indexOf(monthKey)
-                        val target = index + delta
-                        if (target in keys.indices) {
-                            monthKey = keys[target]
-                            // 翻月后选中日跟到新月份的同一天（月末按当月天数夹住）
-                            val day = selectedDate.dayOfMonth
-                            val first = CalendarGrid.monthFirstOfMonthKey(keys[target])
-                            selectedKey = DateUtil.dayKeyOf(first.withDayOfMonth(minOf(day, first.lengthOfMonth())))
-                        }
-                    },
+                    onPageMonth = { delta -> pageMonth(delta) },
                 )
             }
 

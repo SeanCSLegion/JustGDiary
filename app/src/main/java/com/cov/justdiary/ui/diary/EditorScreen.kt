@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -132,7 +132,7 @@ fun EditorScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { if (hasChanges(state, initialLines, history)) showDiscardConfirm else onDiscard() }) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = BACK_LABEL)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = BACK_LABEL)
             }
             Text(
                 text = dayTitle,

@@ -178,4 +178,8 @@
     <string name="editor_location_precision">精度</string>
     <string name="editor_discard_revert_msg">将回到进入编辑时的内容。</string>
     <string name="loc_precision_none">未设置</string>
+    <string name="a11y_prev_month">上个月</string>
+    <string name="a11y_next_month">下个月</string>
+    <string name="a11y_prev_year">上一年</string>
+    <string name="a11y_next_year">下一年</string>
 </resources>

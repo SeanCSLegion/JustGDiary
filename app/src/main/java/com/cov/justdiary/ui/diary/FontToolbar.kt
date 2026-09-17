@@ -7,9 +7,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -114,7 +114,7 @@ fun FontToolbar(
                 onClick = { if (enabled) onToggleList() },
                 enabled = enabled,
                 label = { Text(LIST_LABEL) },
-                leadingIcon = { Icon(Icons.Filled.List, contentDescription = null) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
             )
             FilterChip(
                 selected = isTodo,

@@ -4,6 +4,7 @@ import android.text.Editable
 import android.text.Spanned
 import android.text.TextWatcher
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
@@ -55,7 +56,9 @@ fun EditorTextArea(
 ) {
     val density = LocalDensity.current
 
-    Box(modifier = modifier) {
+    BoxWithConstraints(modifier = modifier) {
+        // 图片按可用宽度等比缩放（不再画成写死的正方形，否则非正方形图片会被拉伸）
+        val imageWidthPx = with(density) { maxWidth.toPx().toInt() }
         if (state.lines.all { it.text.isEmpty() }) {
             Text(
                 text = placeholder,
@@ -78,7 +81,7 @@ fun EditorTextArea(
                         android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                         android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                     // 平台撤销（API 23+）与 IME 的自动大小写都保留默认行为
-                    setText(SpannableBridge.toSpannable(state.lines, imageProvider))
+                    setText(SpannableBridge.toSpannable(state.lines, imageProvider, imageWidthPx))
                     setSelection(text?.length ?: 0)
                     addTextChangedListener(
                         object : TextWatcher {
@@ -105,7 +108,7 @@ fun EditorTextArea(
                         state.selection.start,
                     )
                     state.suppressWatcher = true
-                    view.setText(SpannableBridge.toSpannable(state.lines, imageProvider))
+                    view.setText(SpannableBridge.toSpannable(state.lines, imageProvider, imageWidthPx))
                     val safe = caret.coerceIn(0, view.text?.length ?: 0)
                     view.setSelection(safe)
                     state.suppressWatcher = false

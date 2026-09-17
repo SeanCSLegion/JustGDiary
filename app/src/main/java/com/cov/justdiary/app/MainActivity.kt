@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         LaunchIntent.consume(intent)
+        DebugFlags.consume(intent)
 
         // 启动序列是挂起的（开库/迁移/索引/排期），不阻塞首帧：界面先按当前设置渲染。
         lifecycleScope.launch {
@@ -78,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         LaunchIntent.consume(intent)
+        DebugFlags.consume(intent)
     }
 
     override fun onStart() {

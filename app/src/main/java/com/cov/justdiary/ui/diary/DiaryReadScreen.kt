@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -298,10 +299,13 @@ private fun ReadPart(
                     contentScale = ContentScale.FillWidth,
                 )
             } else {
+                // 占位块按库里存的宽高比撑开，图片加载完后版面不会跳（iOS 同一思路）。
+                // 高度走 `ReadLayout.imageDisplayHeight`：纯函数，已有单测覆盖。
+                val displayWidth = ReadLayout.imageDisplayWidth(320.0)
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .size(120.dp)
+                        .width(displayWidth.dp)
+                        .height(ReadLayout.imageDisplayHeight(part, displayWidth).dp)
                         .clip(RoundedCornerShape(Radius.image))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center,

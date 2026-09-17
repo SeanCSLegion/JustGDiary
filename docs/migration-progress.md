@@ -743,3 +743,15 @@ iOS 的 `DiaryViewModel.handleBack` 问的是 `controller.isEmpty()`；Android �
 | morph 帧率实测 | 同上：无设备/无 AVD（本机 `adb devices` 为空） |
 | TalkBack 走查、年月切换的 `customActions` | 需要 TalkBack；`a11y_*` 文案已在资源里备好 |
 | 运行时验证（建表/迁移/参数绑定/编辑器往返） | 需要设备或 Robolectric 宿主；已在 `docs/migration-progress.md` 里列为"有设备后的第一件事" |
+
+### M9 续：内联图片不再变形、调试开关、无障碍入口
+
+| 项 | 内容 |
+| --- | --- |
+| 内联图片尺寸 | 新增纯函数 [ImageDisplaySize]（`ui/diary/ImageDisplaySize.kt`）：**按自然宽度显示、不超可用宽度、不小于 40，高度按原始宽高比**。原先 `ImageSpan` 的边界是写死的正方形（64×64），任何非正方形图片都会被**拉伸变形**。编辑器通过 `BoxWithConstraints` 拿到可用宽度传给 `toSpannable`，转屏/分栏变化时重建；阅读页的占位块改用已有的 `ReadLayout.imageDisplayHeight` 按比例撑开，图片加载完不会跳版 |
+| 调试开关 | 新增 `app/DebugFlags.kt`：`-slow-morph` / `SLOW_MORPH=1` 把 morph 放慢到 3s（对应 iOS 的同一开关），`-morph-log` 在 morph 结束时打一行"帧数 / 总时长 / 平均帧时长"。判定逻辑是纯函数 `resolve(extra, env)`，有单测 |
+| 无障碍入口 | 日历容器挂 `customActions`：上/下个月、上/下一年（`a11y_prev_month` 等 4 条新文案）。iOS 侧此处**只有手势没有标签**，Android 一并补全（方案 §6.3）；翻月逻辑抽成 `pageMonth(delta)`，分页器与无障碍动作共用一份，"选中日跟到新月份同一天、月末夹住"只有一处实现 |
+| 图标 RTL | `ArrowBack` / `List` 换成 `Icons.AutoMirrored`（`supportsRtl="true"` 下方向才正确） |
+
+本轮新增测试 14 条：`ImageDisplaySizeTest`（8，含"竖构图不设高度上限""小图不缩到 40 以下""缺 w/h 时回落到位图"）
+与 `DebugFlagsTest`（6，含"环境变量只认 1"这种静默失效点）。

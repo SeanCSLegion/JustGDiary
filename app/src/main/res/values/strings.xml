@@ -189,4 +189,8 @@
     <string name="editor_location_precision">Precision</string>
     <string name="editor_discard_revert_msg">Your edits revert to how the block was when you opened it.</string>
     <string name="loc_precision_none">Not set</string>
+    <string name="a11y_prev_month">Previous month</string>
+    <string name="a11y_next_month">Next month</string>
+    <string name="a11y_prev_year">Previous year</string>
+    <string name="a11y_next_year">Next year</string>
 </resources>
