@@ -28,7 +28,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.R
+import com.cov.justdiary.data.FootprintViewStateBuilder
+import com.cov.justdiary.data.SearchUiState
+import com.cov.justdiary.data.YEAR_FILTER_ALL
+import com.cov.justdiary.ui.footprint.FootprintScreen
 import com.cov.justdiary.ui.home.HomeScreen
+import com.cov.justdiary.ui.search.SearchScreen
 
 /**
  * 根界面：主导航宿主。
@@ -92,14 +97,41 @@ fun RootScreen(modifier: Modifier = Modifier) {
 }
 
 /**
- * 页面宿主：首页已接入真实实现（[HomeScreen]），其余三个页面仍是占位，
- * 分别在 M6（足迹/搜索）与 M7（设置）替换。
+ * 页面宿主。
+ *
+ * 首页、足迹、搜索已接入真实实现；**设置页仍是占位**（M7 接入）。
+ *
+ * 注意：这三个页面目前拿到的是**空状态**（足迹的聚合结果、搜索的结果集），
+ * 数据接线（`DiaryRepository` → 页面状态）在 M7 与设置页一起做 —— 那时会把
+ * `AppContainer` 里的单例接到 ViewModel 上，并把编辑页也打通。
  */
 @Composable
 private fun SkeletonScreen(tab: AppTab, modifier: Modifier = Modifier) {
-    if (tab == AppTab.Home) {
-        HomeScreen(modifier = modifier)
-        return
+    when (tab) {
+        AppTab.Home -> {
+            HomeScreen(modifier = modifier)
+            return
+        }
+
+        AppTab.Footprint -> {
+            FootprintScreen(
+                state = FootprintViewStateBuilder.build(emptyList()),
+                yearFilter = YEAR_FILTER_ALL,
+                modifier = modifier,
+            )
+            return
+        }
+
+        AppTab.Search -> {
+            SearchScreen(
+                state = SearchUiState(total = 0),
+                filterItems = emptyList(),
+                modifier = modifier,
+            )
+            return
+        }
+
+        AppTab.Settings -> Unit // 设置页在 M7 接入
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {

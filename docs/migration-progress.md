@@ -482,8 +482,64 @@ iOS 的 `shouldBlockNewline` 在"空段落 + 居中"时**直接吞掉 Enter**，
    `src` 会正常落库，接上 `MediaStore` 后即显示真实图片；
 3. 编辑器内的图片行**不做行内排版**（iOS 是正文里的文本附件）：M9 可以补上 `ImageSpan` 的实际尺寸。
 
-### M6 起（下一轮）
+## M6 —— 足迹 + 搜索 ✅ 已完成
 
-按方案 §12 进入 **M6 足迹 + 搜索**：`FootprintDataService` 三级聚合（纯集合运算）、
-自绘年度柱状图、地点清单树；FTS 搜索的 SQL 已在 M1 完成，这里接 ViewModel 与搜索页 UI
-（关键词胶囊、时间/地点筛选、高亮、分页）。
+### 交付物
+
+| 文件 | 说明 |
+| --- | --- |
+| `data/FootprintAggregator.kt` | **纯聚合**：三级路径的塌缩规则、`\u0001` 去重统计、树的计数与排序、年度趋势、自然序排序 |
+| `data/FootprintViewState.kt` | 足迹页的完整视图状态（统计 / 树 / 趋势 / 已标注 / 未记录 / 年份候选）+ 年份与时间范围筛选 |
+| `data/SearchFilters.kt` | 时间范围四档换算、关键词胶囊（提交/移除/清除）、生效条件摘要、分页累积 |
+| `ui/footprint/FootprintScreen.kt` | 足迹页：页头 + 摘要、年份胶囊、5 格统计卡、**自绘年度柱状图**、可展开的地点树、横屏并排版式 |
+| `ui/search/SearchScreen.kt` | 搜索页：搜索框、关键词胶囊行、时间/地点筛选、生效条件摘要、结果列表（`<hl>` 高亮）、三态空状态、加载更多 |
+| `ui/root/RootScreen.kt` | 首页 / 足迹 / 搜索接入真实实现（设置页仍占位，M7 接） |
+
+### 验证证据
+
+```
+./gradlew assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  272 个 JVM 单测通过（本轮 +33）
+    SearchFiltersTest          18
+    FootprintAggregatorTest    15
+```
+
+几个值得记的断言：
+
+1. **三级路径的塌缩**：直辖市（只有 `country`+`region1`+`region2`）自然塌缩为"中国/北京市/北京市"；
+   三者全空但 `loc_text` 非空时用 `loc_text` 当一级节点；**`region3` 永不进路径**。
+2. **树的计数是"经过该节点的行数"**：父节点 ≥ 子节点之和，排序为 `count` 降序 + 名称自然序；
+   测试用"反向字典序"当注入的排序策略，证明排序确实可替换。
+3. **"未记录"的计数不受筛选影响**（iOS 注释明确的行为）：选中某一年后，
+   `unlocatedCount` 与年份候选都不变 —— 否则选中一年后其它年份会从胶囊里消失。
+4. **时间范围到"今天"为止**（不是月末/年末）；自定义范围两端会排序，
+   用户先点后一个日期也不会得到空结果。
+5. **自然序**：`第2章` 排在 `第10章` 之前（[FootprintAggregator.NaturalPlaceOrder]）。
+
+### 与 iOS 的一处平台差异（已隔离）
+
+iOS 用 `localizedStandardCompare` 排序，它是**区域感知 + 数字自然序**。
+Android 侧对应的是 `android.icu.text.Collator.setNumericCollation(true)`（平台 API 24+），
+但它是 Android framework API、**在 JVM 单测里不可用**。因此这里把排序抽成可注入的
+[PlaceOrder]：默认实现用 `java.text.Collator`（JVM 与 Android 都有，区域感知、无数字序），
+另提供一个不依赖平台的 [NaturalPlaceOrder] 用于"数字自然序"这条规则本身的断言；
+真机接线时换成 ICU 版本即可（方案 §4.7.5 已记录该结论）。
+
+### 图表：自绘而不是引库
+
+全 app 只有这一张柱状图（年度记录天数），自绘约 100 行：
+单色柱 + 4dp 圆角、左侧 Y 轴三档网格与数值（0 / 中值 / 最大值）、X 轴年份、柱顶数值。
+按方案 §11.2 的结论，不值得为此引入 Vico / MPAndroidChart。
+
+### 尚未接线（记在 M7）
+
+1. 三个页面目前拿到的是**空状态** —— `DiaryRepository` → 页面状态的接线在 M7 与设置页一起做；
+2. 搜索的地点筛选目前只有"全部 / 未记录"两档，国家+一级地区的完整选择器待接
+   （模型层的 `LocFilter` 与国家/地区选项查询在 M1/M6 已完成）；
+3. 编辑页仍未接入应用壳（点日记卡片 → 打开编辑页）。
+
+### M7 起（下一轮）
+
+按方案 §12 进入 **M7 设置 + 服务**：5 张卡的设置页与 14 个设置行、语言即时切换
+（`AppCompatDelegate.setApplicationLocales`）、主题、周起始、开始时间重算、提醒（`WorkManager`）、
+备份导入导出（SAF + M1 的流式 zip）、定位服务（GMS 探测）、以及**把数据层接到各页面的 ViewModel**。
