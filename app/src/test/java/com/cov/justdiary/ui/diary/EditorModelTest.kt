@@ -457,4 +457,107 @@ class EditorModelTest {
         assertEquals(EditorBlockStyle.Body, EditorBlockStyle.fromPartStyle(ContentPartStyle.image))
         assertEquals(EditorBlockStyle.Body, EditorBlockStyle.fromPartStyle("monospaced"))
     }
+    // ------------------------------------------------------------------ 图片行（数据不能丢）
+
+    @Test
+    fun `an image line persists as an image part with its src and size`() {
+        val lines = listOf(
+            EditorLine(text = "正文"),
+            EditorLine(imageSrc = "images/img_1.jpg", imageWidth = 1200.0, imageHeight = 900.0),
+        )
+        val parts = EditorModel.linesToParts(lines)
+        assertEquals(2, parts.size)
+        assertEquals(ContentPartStyle.image, parts[1].style)
+        assertEquals("images/img_1.jpg", parts[1].src)
+        assertEquals(1200.0, parts[1].w!!, 1e-6)
+        assertEquals(900.0, parts[1].h!!, 1e-6)
+    }
+
+    @Test
+    fun `image parts survive a lines round trip`() {
+        val parts = listOf(
+            ContentPart(style = ContentPartStyle.body, text = "正文"),
+            ContentPart(style = ContentPartStyle.image, src = "images/a.jpg", w = 800.0, h = 600.0),
+        )
+        val lines = EditorModel.partsToLines(parts)
+        assertEquals(2, lines.size)
+        assertTrue(lines[1].isImage)
+        assertEquals("images/a.jpg", lines[1].imageSrc)
+
+        val back = EditorModel.linesToParts(lines)
+        // 图片段的 src 与宽高必须原样保留 —— 否则用户插入的图片会在下一次编辑时丢失
+        assertEquals(parts[1], back[1])
+        // 但纯文本段落会被**规范化成 runs**：与 iOS 的编辑器一致（编辑器只生产 runs，
+        // `text` 是留给手写/导入内容的紧凑形式）
+        assertEquals(ContentPartStyle.body, back[0].style)
+        assertEquals(listOf("正文"), back[0].runs?.map { it.text })
+        assertEquals(null, back[0].text)
+    }
+
+    @Test
+    fun `inserting an image line carries the source`() {
+        val lines = listOf(EditorLine(text = "正文"))
+        val inserted = EditorModel.insertImageLine(lines, 0, src = "images/new.jpg", width = 400.0, height = 300.0)
+        assertEquals(2, inserted.size)
+        assertEquals("images/new.jpg", inserted[1].imageSrc)
+        assertEquals("", inserted[1].text)
+        // 图片行不参与列表分组
+        val withList = listOf(EditorLine(text = "甲", marker = EditorLine.MarkerKind.Bullet))
+        val listPlusImage = EditorModel.insertImageLine(withList, 0, src = "images/x.jpg")
+        val parts = EditorModel.linesToParts(listPlusImage)
+        assertEquals(2, parts.size)
+        assertEquals(ContentPartStyle.list, parts[0].style)
+        assertEquals(ContentPartStyle.image, parts[1].style)
+    }
+
+    // ------------------------------------------------------------------ D9：回车继承标记
+
+    @Test
+    fun `pressing enter inside a list keeps the list going`() {
+        val before = listOf(EditorLine(text = "甲", marker = EditorLine.MarkerKind.Bullet))
+        // EditText 只会插入换行，新行没有标记
+        val parsed = listOf(
+            EditorLine(text = "甲", marker = EditorLine.MarkerKind.Bullet),
+            EditorLine(text = ""),
+        )
+        val fixed = EditorModel.inheritMarkersForNewLines(parsed, previous = before)
+        assertEquals(EditorLine.MarkerKind.Bullet, fixed[1].marker)
+        // 落库仍是一条 list，且多了一个空条目
+        val parts = EditorModel.linesToParts(fixed)
+        assertEquals(1, parts.size)
+        assertEquals(listOf("甲", ""), parts[0].items)
+    }
+
+    @Test
+    fun `pressing enter inside a todo inherits an unchecked item`() {
+        val before = listOf(EditorLine(text = "做", marker = EditorLine.MarkerKind.Todo, done = true))
+        val parsed = listOf(
+            EditorLine(text = "做", marker = EditorLine.MarkerKind.Todo, done = true),
+            EditorLine(text = ""),
+        )
+        val fixed = EditorModel.inheritMarkersForNewLines(parsed, previous = before)
+        assertEquals(EditorLine.MarkerKind.Todo, fixed[1].marker)
+        assertEquals("新条目必须未勾选", false, fixed[1].done)
+    }
+
+    @Test
+    fun `pressing enter in a plain paragraph does not invent a marker`() {
+        val before = listOf(EditorLine(text = "正文"))
+        val parsed = listOf(EditorLine(text = "正文"), EditorLine(text = ""))
+        val fixed = EditorModel.inheritMarkersForNewLines(parsed, previous = before)
+        assertEquals(null, fixed[1].marker)
+    }
+
+    @Test
+    fun `marker inheritance only applies when lines were added`() {
+        // 行数没变（普通编辑）→ 不做任何修补
+        val lines = listOf(EditorLine(text = ""), EditorLine(text = ""))
+        assertEquals(lines, EditorModel.inheritMarkersForNewLines(lines, previous = lines))
+        // 行数变少（删除）→ 同样不动
+        val fewer = listOf(EditorLine(text = "甲", marker = EditorLine.MarkerKind.Bullet))
+        assertEquals(
+            fewer,
+            EditorModel.inheritMarkersForNewLines(fewer, previous = listOf(EditorLine(text = "甲"), EditorLine(text = "乙"))),
+        )
+    }
 }

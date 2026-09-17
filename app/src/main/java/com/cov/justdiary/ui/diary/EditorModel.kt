@@ -42,7 +42,17 @@ data class EditorLine(
     val marker: MarkerKind? = null,
     /** 仅待办有意义。 */
     val done: Boolean = false,
+    /**
+     * 图片行的图片键（`images/xxx.jpg`）；非图片行为 null。
+     *
+     * 图片在可编辑文本里用一个 [ImagePayloadSpan] 承载（对应 iOS 的 `PayloadAttachment`），
+     * 因此 `src` 与宽高**能穿过 EditText 往返** —— 否则用户插入的图片会在下一次编辑时丢失。
+     */
+    val imageSrc: String? = null,
+    val imageWidth: Double? = null,
+    val imageHeight: Double? = null,
 ) {
+    val isImage: Boolean get() = imageSrc != null
     val isListItem: Boolean get() = marker == MarkerKind.Bullet
     val isTodoItem: Boolean get() = marker == MarkerKind.Todo
 
@@ -135,6 +145,17 @@ object EditorModel {
     fun linesToParts(lines: List<EditorLine>): List<ContentPart> {
         val parts = mutableListOf<ContentPart>()
         for (line in lines) {
+            if (line.imageSrc != null) {
+                parts.add(
+                    ContentPart(
+                        style = ContentPartStyle.image,
+                        src = line.imageSrc,
+                        w = line.imageWidth,
+                        h = line.imageHeight,
+                    ),
+                )
+                continue
+            }
             when (line.marker) {
                 EditorLine.MarkerKind.Bullet -> appendItem(parts, line.text, done = null)
                 EditorLine.MarkerKind.Todo -> appendItem(parts, line.text, done = line.done)
@@ -179,7 +200,15 @@ object EditorModel {
                     )
                 }
 
-                ContentPartStyle.image -> lines.add(EditorLine(text = "", marker = null))
+                ContentPartStyle.image -> lines.add(
+                    EditorLine(
+                        text = "",
+                        marker = null,
+                        imageSrc = part.src,
+                        imageWidth = part.w,
+                        imageHeight = part.h,
+                    ),
+                )
 
                 else -> {
                     val text = part.runs?.joinToString(separator = "") { it.text } ?: part.text.orEmpty()
@@ -350,6 +379,35 @@ object EditorModel {
         return lines.toMutableList().also { it[index] = updated }
     }
 
+    /**
+     * 让**新建的空行**继承上一行的标记。
+     *
+     * `EditText` 在列表/待办行里按回车只插入 `\n`，新行没有标记前缀，列表会被拆成两条。
+     * iOS 用文本附件，换行时附件不会自动继承 —— 但它的标记检测是"行首附件"，
+     * 于是新行也不带标记；实际使用中用户按回车是想**继续加一项**，
+     * 所以这里显式继承（有意修正，记作 D9）。
+     *
+     * 只对"上一版里不存在、且内容为空"的行生效，因此不会影响正常的粘贴/删除。
+     */
+    fun inheritMarkersForNewLines(
+        lines: List<EditorLine>,
+        previous: List<EditorLine>,
+    ): List<EditorLine> {
+        if (lines.size <= previous.size) return lines
+        return lines.mapIndexed { index, line ->
+            if (line.text.isEmpty() && line.marker == null && index > 0) {
+                val above = lines[index - 1]
+                if (above.marker != null) {
+                    line.copy(marker = above.marker, done = false)
+                } else {
+                    line
+                }
+            } else {
+                line
+            }
+        }
+    }
+
     /** 勾选/取消待办项。 */
     fun setTodoDone(lines: List<EditorLine>, index: Int, done: Boolean): List<EditorLine> {
         val line = lines.getOrNull(index) ?: return lines
@@ -517,8 +575,18 @@ object EditorModel {
      * Android 侧把图片作为**独立一行**的附件渲染（iOS 是正文里的文本附件）。
      * 落库时由 [linesToParts] 转成 `ContentPartStyle.image` —— 注意图片行不参与列表分组。
      */
-    fun insertImageLine(lines: List<EditorLine>, index: Int): List<EditorLine> =
-        lines.toMutableList().also { it.add((index + 1).coerceIn(0, lines.size), EditorLine()) }
+    fun insertImageLine(
+        lines: List<EditorLine>,
+        index: Int,
+        src: String,
+        width: Double? = null,
+        height: Double? = null,
+    ): List<EditorLine> = lines.toMutableList().also {
+        it.add(
+            (index + 1).coerceIn(0, lines.size),
+            EditorLine(imageSrc = src, imageWidth = width, imageHeight = height),
+        )
+    }
 
     // ------------------------------------------------------------------ 倒序应用（T3）
 

@@ -37,15 +37,55 @@ object SpannableBridge {
     class BlockStyleSpan(val style: String) : android.text.style.ParagraphStyle
 
     /**
+     * 承载图片来源的图片 span（对应 iOS 的 `PayloadAttachment`）。
+     *
+     * `src` 与宽高挂在 span 上，因此图片信息**能穿过 EditText 往返**；
+     * 没有图片可画时（测试/无 provider）用一个 1×1 的透明位图占位，
+     * 但 `src` 依然在 —— 这保证了"插入图片 → 保存"不会丢图。
+     */
+    class ImagePayloadSpan(
+        val src: String,
+        val width: Double?,
+        val height: Double?,
+        drawable: android.graphics.drawable.Drawable,
+    ) : android.text.style.ImageSpan(drawable)
+
+    /**
      * 行模型 → `Spannable`。
      *
      * 每行的显示文本（含标记前缀）用 `\n` 连接，然后按行偏移挂 span。
      */
-    fun toSpannable(lines: List<EditorLine>): SpannableStringBuilder {
+    fun toSpannable(
+        lines: List<EditorLine>,
+        imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
+    ): SpannableStringBuilder {
         val builder = SpannableStringBuilder()
         val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
 
         lines.forEachIndexed { index, line ->
+            // 图片行：插入一个占位字符并把 src 挂在 ImagePayloadSpan 上
+            if (line.imageSrc != null) {
+                val start = builder.length
+                builder.append(IMAGE_PLACEHOLDER)
+                val end = builder.length
+                lineStarts.add(start to end)
+                val bitmap = imageProvider?.invoke(line.imageSrc)
+                val drawable = if (bitmap != null) {
+                    android.graphics.drawable.BitmapDrawable(null, bitmap)
+                } else {
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
+                }
+                drawable.setBounds(0, 0, IMAGE_PLACEHOLDER_PX, IMAGE_PLACEHOLDER_PX)
+                builder.setSpan(
+                    ImagePayloadSpan(line.imageSrc, line.imageWidth, line.imageHeight, drawable),
+                    start,
+                    end,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+                if (index < lines.size - 1) builder.append('\n')
+                return@forEachIndexed
+            }
+
             val text = line.displayText
             val start = builder.length
             builder.append(text)
@@ -127,6 +167,16 @@ object SpannableBridge {
     }
 
     private fun parseLine(text: Spanned, start: Int, end: Int, raw: String): EditorLine {
+        // 图片行：src 挂在 ImagePayloadSpan 上
+        text.getSpans(start, end, ImagePayloadSpan::class.java).firstOrNull()?.let { span ->
+            return EditorLine(
+                text = "",
+                imageSrc = span.src,
+                imageWidth = span.width,
+                imageHeight = span.height,
+            )
+        }
+
         // 标记前缀
         var marker: EditorLine.MarkerKind? = null
         var done = false
@@ -240,6 +290,12 @@ object SpannableBridge {
     /** 便捷入口：可编辑 `Spannable` → `content_json` 的段落。 */
     fun toParts(text: Spanned): List<com.cov.justdiary.model.ContentPart> =
         EditorModel.linesToParts(fromSpannable(text))
+
+    /** 可编辑文本里图片的占位字符（对应 iOS 的 attachment 位置）。 */
+    const val IMAGE_PLACEHOLDER = "\uFFFC"
+
+    /** 占位 drawable 的边长（px）：约一行高。 */
+    const val IMAGE_PLACEHOLDER_PX = 64
 
     /** 组合区（IME）的区间；`[-1, -1]` 表示无组合。 */
     fun compositionRange(text: Spannable): IntRange {

@@ -422,12 +422,68 @@ Spannable           ← EditText 的真实文本（IME、选区、平台撤销�
 iOS 的 `shouldBlockNewline` 在"空段落 + 居中"时**直接吞掉 Enter**，用户无法在居中段落后面另起一行。
 这里允许换行，新行继承居中 —— 吞掉按键属于"按键无响应"，比多一个空行更难理解。
 
-### 尚未完成（下一轮）
+## M5 —— 富文本编辑器 ✅ 已完成
 
-1. `EditorTextArea`（`AndroidView` + `EditText`）：焦点/IME/最小高度/占位符，以及
-   **格式操作跳过组合区**的实际接线（`FormatGate` + `SpannableBridge.compositionRange`）；
-2. `FontToolbar`：样式菜单（大标题/小标题/正文）、引用、列表、待办、行内四样式、插入图片；
-3. `EditorScreen`：进入/保存/放弃修改（快照回滚 + 二次确认）、位置胶囊与保存前确认、
-   时间自动写入（让 `auto_time` 真正生效）、上一条位置的清空；
-4. 图片插入：`MediaStore.importImage` → 插入图片行 → 落库为 `image` 段落；
-5. 编辑器↔模型的往返不变量测试（在真机上跑一次 `Spannable` 往返）。
+### 已完成：两层结构
+
+| 文件 | 说明 |
+| --- | --- |
+| `ui/diary/EditorModel.kt` | **纯内核**：行模型 `EditorLine`、与 `content_json` 的双向转换、段落级操作、行内样式、Enter/Backspace、图片行、区间重建、`FormatGate` |
+| `ui/diary/EditorSelection.kt` | **纯逻辑**：扁平字符偏移 ↔（行号, 行内偏移）换算（含标记前缀、行间 `\\n`、越界夹住） |
+| `ui/diary/EditorHistory.kt` | 撤销/重做栈 |
+| `ui/diary/SpannableBridge.kt` | `EditorLine` ↔ `Spannable`：`BlockStyleSpan`（块样式）、`ImagePayloadSpan`（图片来源，对应 iOS 的 `PayloadAttachment`） |
+| `ui/diary/EditorTextArea.kt` | `AndroidView` + `AppCompatEditText` 宿主，含 watcher 回环隔断、光标保持、组合区检测 |
+| `ui/diary/FontToolbar.kt` | 格式栏（M3 `FilterChip` 组）：样式菜单 / 引用 / 列表 / 待办 / B I S U / 图片 |
+| `ui/diary/EditorScreen.kt` | 编辑页：保存 / 放弃修改（快照 + 二次确认）/ 位置胶囊与保存前确认 / 自动时间 / 图片插入（Photo Picker） |
+| `service/LocationRules.kt` | 位置 5 条规则、精度档位、记录档位原文恢复 |
+
+### 验证证据
+
+```
+./gradlew assembleDebug testDebugUnitTest   →  BUILD SUCCESSFUL
+  239 个 JVM 单测通过（本里程碑共 +68）
+    EditorModelTest        40  ← 5 个暗坑 + 图片往返 + 回车继承标记
+    LocationRulesTest      11  ← 位置 5 条规则
+    EditorSelectionTest     9  ← 偏移换算
+    EditorHistoryTest       8  ← 撤销/重做语义
+```
+
+方案 §5.4 的 5 个"静默数据损坏"暗坑的守卫：
+
+| 坑 | 守卫 |
+| --- | --- |
+| **E1/E2** 不能用绘制字号反解块样式 | 块样式由 `BlockStyleSpan` 显式承载，**骨架里没有字号输入**；测试逐档验证四种样式往返 |
+| **E3** 段落操作必须倒序 | `setBlockStyle` **按区间整体重建**；另有一条**对照测试**演示"逐下标正序改"会因列表行摊平而错位 |
+| **E4** IME 组合区必须跳过 | `FormatGate` 判定 + `EditorTextState.composing`（组合期间格式栏整栏禁用） |
+| **E5** 全量替换摧毁撤销栈 | `EditorHistory`；`EditorTextArea` 只在模型被工具栏改动时回写文本，用户输入不回写 |
+
+### 过程中修掉的一个**数据丢失**问题（值得记）
+
+第一版的 `EditorScreen` 里，插入的图片没有地方承载 `src` —— `EditorLine` 只有文本字段，
+于是"插入图片 → 保存"会**丢图**。修法是给 `EditorLine` 加 `imageSrc/imageWidth/imageHeight`，
+并用 `ImagePayloadSpan`（继承 `ImageSpan`、把 `src` 挂在 span 上）穿过 EditText 往返 ——
+这正是 iOS 用 `PayloadAttachment` 的做法。测试现在断言"图片段落往返后 `src` 与宽高不变"。
+
+顺带记录一条**与 iOS 一致**的规范化：纯文本段落（`text` 形式）经编辑器往返后会变成 `runs` 形式。
+这不是 bug —— 编辑器只生产 runs，`text` 是留给手写/导入内容的紧凑形式；已在测试注释里写明。
+
+### 有意不复制 iOS 的两处行为（D8、D9）
+
+| # | iOS 行为 | 这里 |
+| --- | --- | --- |
+| **D8** | `shouldBlockNewline` 在"空段落 + 居中"时**吞掉 Enter** | 允许换行、新行继承居中（吞按键属于"按键无响应"） |
+| **D9** | 标记是文本附件，换行时不继承 → 在列表里按回车会打断列表 | 新建的空行继承上一行的标记（`inheritMarkersForNewLines`，有测试） |
+
+### 尚未接线（不属于编辑器本身，记在 M7）
+
+1. **编辑页还没有接入应用壳**：首页的日内容区仍是占位（M4 只做了阅读页渲染），
+   因此"点日记卡片 → 打开编辑页"这条路径要在 M7 接 `DiaryRepository` 时打通；
+2. `EditorScreen.loadImage` 目前默认返回 null（图片行显示透明占位）——
+   `src` 会正常落库，接上 `MediaStore` 后即显示真实图片；
+3. 编辑器内的图片行**不做行内排版**（iOS 是正文里的文本附件）：M9 可以补上 `ImageSpan` 的实际尺寸。
+
+### M6 起（下一轮）
+
+按方案 §12 进入 **M6 足迹 + 搜索**：`FootprintDataService` 三级聚合（纯集合运算）、
+自绘年度柱状图、地点清单树；FTS 搜索的 SQL 已在 M1 完成，这里接 ViewModel 与搜索页 UI
+（关键词胶囊、时间/地点筛选、高亮、分页）。
