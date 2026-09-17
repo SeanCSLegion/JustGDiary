@@ -29,7 +29,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.cov.justdiary.model.LocOption
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
 import com.cov.justdiary.R
 import androidx.compose.ui.Alignment
@@ -66,8 +75,9 @@ import androidx.compose.material.icons.filled.Search
  *  - 结果分页 `limit 200` + "加载更多"；
  *  - 三态空状态：索引中 / 有条件无结果 / 无条件。
  *
- * 地点筛选目前提供"全部 / 未记录"两档；国家+一级地区的完整选择器在 M7 接仓库后补
- * （模型层 [LocFilter] 与国家/地区选项查询在 M1/M6 已完成）。
+ * 地点筛选：**未记录 / 国家 + 一级地区**。完整选择器是一个对话框，
+ * 选项来自 `DiaryRepository.getLocationOptions`（按条数降序、带本地搜索、标注"仅国家"），
+ * 与 iOS 的 `showLocSheet` 等价。
  */
 @Composable
 fun SearchScreen(
@@ -82,7 +92,32 @@ fun SearchScreen(
     onNoLocationChange: (Boolean) -> Unit = {},
     onLoadMore: () -> Unit = {},
     onOpenDiary: (String) -> Unit = {},
+    /** 地点选择器的候选（打开时由 `SearchViewModel.loadLocationOptions` 拉取）。 */
+    locOptions: List<LocOption> = emptyList(),
+    noLocCount: Int = 0,
+    locLoading: Boolean = false,
+    locSearch: String = "",
+    onLocSearchChange: (String) -> Unit = {},
+    onOpenLocPicker: () -> Unit = {},
+    onSelectLocation: (country: String, region1: String) -> Unit = { _, _ -> },
+    onResetLocation: () -> Unit = {},
 ) {
+    var showLocPicker by remember { mutableStateOf(false) }
+    if (showLocPicker) {
+        LocationPickerDialog(
+            options = locOptions,
+            noLocCount = noLocCount,
+            loading = locLoading,
+            keyword = locSearch,
+            selected = state.locFilter,
+            onKeywordChange = onLocSearchChange,
+            onPick = { country, region -> onSelectLocation(country, region); showLocPicker = false },
+            onPickNoLoc = { onNoLocationChange(true); showLocPicker = false },
+            onPickAll = { onResetLocation(); showLocPicker = false },
+            onDismiss = { showLocPicker = false },
+        )
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         PageHeader(
             title = TITLE,
@@ -151,11 +186,26 @@ fun SearchScreen(
                     state = state,
                     onNoLocationChange = onNoLocationChange,
                     modifier = Modifier.weight(1f),
+                    onResetLocation = onResetLocation,
+                    onOpenLocPicker = {
+                        onLocSearchChange("")
+                        onOpenLocPicker()
+                        showLocPicker = true
+                    },
                 )
             }
         } else {
             TimeFilterRow(state = state, onTimeKindChange = onTimeKindChange)
-            LocationFilterRow(state = state, onNoLocationChange = onNoLocationChange)
+            LocationFilterRow(
+                state = state,
+                onNoLocationChange = onNoLocationChange,
+                onResetLocation = onResetLocation,
+                onOpenLocPicker = {
+                    onLocSearchChange("")
+                    onOpenLocPicker()
+                    showLocPicker = true
+                },
+            )
         }
 
         // 生效条件摘要
@@ -236,6 +286,142 @@ fun SearchScreen(
 }
 
 /** 时间档位的胶囊行（可横向滚动）。 */
+/** 地点选择器：本地搜索 + "未记录地点" + 按条数降序的国家/地区列表。 */
+@Composable
+private fun LocationPickerDialog(
+    options: List<LocOption>,
+    noLocCount: Int,
+    loading: Boolean,
+    keyword: String,
+    selected: LocFilter,
+    onKeywordChange: (String) -> Unit,
+    onPick: (country: String, region1: String) -> Unit,
+    onPickNoLoc: () -> Unit,
+    onPickAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val trimmed = keyword.trim().lowercase()
+    val filtered = if (trimmed.isEmpty()) {
+        options
+    } else {
+        options.filter {
+            it.country.lowercase().contains(trimmed) || it.region1.lowercase().contains(trimmed)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(LOC_TITLE) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = keyword,
+                    onValueChange = onKeywordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text(LOC_SEARCH_PLACEHOLDER) },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                )
+                Text(
+                    text = LOC_SORT_HINT,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                if (loading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        Text(PREPARING_LABEL, style = MaterialTheme.typography.bodySmall)
+                    }
+                    return@Column
+                }
+                LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                    item {
+                        LocOptionRow(
+                            label = LOC_ALL,
+                            count = null,
+                            selected = selected.country.isEmpty() && !selected.noLoc,
+                            onClick = onPickAll,
+                        )
+                    }
+                    item {
+                        LocOptionRow(
+                            label = NO_LOCATION_LABEL_,
+                            count = noLocCount,
+                            selected = selected.noLoc,
+                            onClick = onPickNoLoc,
+                        )
+                    }
+                    if (filtered.isEmpty()) {
+                        item {
+                            Text(
+                                text = LOC_EMPTY,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 12.dp),
+                            )
+                        }
+                    }
+                    items(filtered, key = { it.country + "\u0001" + it.region1 }) { option ->
+                        LocOptionRow(
+                            label = if (option.region1.isEmpty()) {
+                                "\${option.country} · \$LOC_COUNTRY_ONLY"
+                            } else {
+                                "\${option.country} · \${option.region1}"
+                            },
+                            count = option.count,
+                            selected = selected.country == option.country && selected.region1 == option.region1,
+                            onClick = { onPick(option.country, option.region1) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(CANCEL_LABEL) }
+        },
+    )
+}
+
+@Composable
+private fun LocOptionRow(label: String, count: Int?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (count != null) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun TimeFilterRow(
     state: SearchUiState,
@@ -264,6 +450,8 @@ private fun LocationFilterRow(
     state: SearchUiState,
     onNoLocationChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onResetLocation: () -> Unit = {},
+    onOpenLocPicker: () -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -272,14 +460,22 @@ private fun LocationFilterRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         FilterChip(
+            selected = state.locFilter.country.isEmpty() && !state.locFilter.noLoc,
+            onClick = {
+                onNoLocationChange(false)
+                onResetLocation()
+            },
+            label = { Text(ALL_LOC_LABEL) },
+        )
+        FilterChip(
             selected = state.locFilter.noLoc,
-            onClick = { onNoLocationChange(!state.locFilter.noLoc) },
+            onClick = { onNoLocationChange(true) },
             label = { Text(NO_LOCATION_LABEL_) },
         )
         if (state.locFilter.country.isNotEmpty()) {
             FilterChip(
                 selected = true,
-                onClick = { onNoLocationChange(false) },
+                onClick = onResetLocation,
                 label = {
                     Text(
                         listOf(state.locFilter.country, state.locFilter.region1)
@@ -288,6 +484,13 @@ private fun LocationFilterRow(
                     )
                 },
                 trailingIcon = { Icon(Icons.Filled.Clear, contentDescription = REMOVE_LABEL) },
+            )
+        } else if (!state.locFilter.noLoc) {
+            FilterChip(
+                selected = false,
+                onClick = onOpenLocPicker,
+                label = { Text(PICK_LOC_LABEL) },
+                leadingIcon = { Icon(Icons.Filled.Place, contentDescription = null) },
             )
         }
     }
@@ -383,6 +586,24 @@ private fun timeRangeOptions(): List<Pair<TimeRangeKind, String>> = listOf(
     TimeRangeKind.ThisYear to stringResource(R.string.search_time_year),
 )
 
+private val ALL_LOC_LABEL: String
+    @Composable get() = stringResource(R.string.search_all_loc)
+private val PICK_LOC_LABEL: String
+    @Composable get() = stringResource(R.string.search_loc_picker)
+private val LOC_TITLE: String
+    @Composable get() = stringResource(R.string.search_loc_title)
+private val LOC_SEARCH_PLACEHOLDER: String
+    @Composable get() = stringResource(R.string.search_loc_search)
+private val LOC_SORT_HINT: String
+    @Composable get() = stringResource(R.string.search_loc_sort_hint)
+private val LOC_ALL: String
+    @Composable get() = stringResource(R.string.search_all_loc)
+private val LOC_COUNTRY_ONLY: String
+    @Composable get() = stringResource(R.string.search_loc_country_only)
+private val LOC_EMPTY: String
+    @Composable get() = stringResource(R.string.search_loc_empty)
+private val CANCEL_LABEL: String
+    @Composable get() = stringResource(R.string.cancel)
 private val TITLE: String
     @Composable get() = stringResource(R.string.search_title)
 private val PLACEHOLDER: String

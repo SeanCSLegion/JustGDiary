@@ -234,6 +234,14 @@ private fun TabContent(
                 onNoLocationChange = viewModel::setNoLocation,
                 onLoadMore = viewModel::loadMore,
                 onOpenDiary = onOpenDay,
+                locOptions = state.locOptions,
+                noLocCount = state.noLocCount,
+                locLoading = state.locLoading,
+                locSearch = state.locSearch,
+                onLocSearchChange = viewModel::setLocSearch,
+                onOpenLocPicker = { viewModel.loadLocationOptions() },
+                onSelectLocation = viewModel::selectLocation,
+                onResetLocation = viewModel::resetLocationFilter,
             )
         }
 

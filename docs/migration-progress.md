@@ -811,3 +811,17 @@ Robolectric 运行时要下载 `android-all-instrumented`（约 100MB）；直�
 到本轮为止，`docs/migration-progress.md` 里原先列的"三件需要设备才能验证的事"**全部有自动化覆盖了**：
 建表/迁移、参数绑定与游标映射、`mergeBackupDatabase` 的整天 skip/overwrite。
 仍然只有"安装到真机、看动画帧率、跑 TalkBack"这类事需要设备。
+
+### M9 续（五）：搜索页的完整地点选择器
+
+M6 留下的最后一个缺口：搜索的地点筛选当时只有"全部 / 未记录"两档，
+而 `SearchViewModel` 里的候选查询（`getLocationOptions`）与 `LocOption` 模型从 M1 起就有，
+UI 一直没接。本轮补上：
+
+- 筛选行变成 **全部地点 / 未记录地点 / 已选地点（可点掉） / 选择地点…** 四枚胶囊；
+- 点"选择地点…"打开对话框：本地搜索框 + "按日记数量排序"提示 + 候选列表
+  （`国家 · 一级地区`，右侧是条数；只有国家的项标注"仅国家"）；标题与空态都有文案；
+- 选项来自 `DiaryRepository.getLocationOptions(keyword, from, to)` —— 与当前时间范围联动，
+  因此"选了今年"再挑地点时，候选条数就是今年的条数（与 iOS 一致）。
+
+至此四个页面的交互都与 iOS 对齐，`SearchViewModel` 里不再有"写了但没界面"的状态。
