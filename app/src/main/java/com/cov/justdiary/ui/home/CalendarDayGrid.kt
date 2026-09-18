@@ -1,0 +1,329 @@
+package com.cov.justdiary.ui.home
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.cov.justdiary.R
+import com.cov.justdiary.model.DateUtil
+import com.cov.justdiary.service.DateFormats
+import com.cov.justdiary.service.Lunar
+import com.cov.justdiary.ui.theme.DynamicTypeMetrics
+import com.cov.justdiary.ui.theme.Radius
+import java.time.LocalDate
+import java.util.Locale
+
+/**
+ * 日历的**月格 / 周条**：每个日期都是一个真实的 Compose 组件。
+ *
+ * ## 为什么不再用 Canvas（首轮迁移最大的缺陷）
+ *
+ * 首轮把 iOS 的 `Canvas` 绘制逐字搬了过来。iOS 那边用
+ * `.accessibilityRepresentation` / `accessibilityAdjustableAction` 单独补语义；
+ * Android 的 `Canvas` 是**一个**节点，所有日期在无障碍树里根本不存在 ——
+ * TalkBack 只能读到月份标题，日历完全不可用（实测 `uiautomator dump` 里
+ * 一个日期都没有）。
+ *
+ * 改成组件之后一次解决三件事：
+ *  1. **无障碍**：每格一个可聚焦节点，带完整日期、今天/选中/有日记状态与点击动作；
+ *  2. **版面**：格子高度就是布局值，居中交给 Compose，不再靠"把圆画在哪"；
+ *  3. **点击**：不再需要把 px 反算成 dp 的命中测试（[CalendarLayout.dayAt] 仍保留，
+ *     给纯数学单测用）。
+ *
+ * 几何参数（格宽、格高、字号）依然来自 [CalendarLayout] 的纯函数，所以
+ * `CalendarLayoutTest` / `CalendarMorphTest` 仍守着这套版面的数值。
+ */
+@Composable
+fun CalendarDayGrid(
+    rows: List<List<LocalDate>>,
+    anchorMonth: LocalDate,
+    metrics: CalendarLayout.DayMetrics,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    onDayClick: (LocalDate) -> Unit,
+    modifier: Modifier = Modifier,
+    showAdjacent: Boolean = true,
+    showLunar: Boolean = true,
+    /** 月 ↔ 周 morph：每一行的 y 偏移（dp，绝对行 y）与透明度；null 表示等距排布。 */
+    rowOffsets: FloatArray? = null,
+    rowAlphas: FloatArray? = null,
+    /** 行之间是否画分隔线（周条不画）。 */
+    showDividers: Boolean = true,
+    /** 每格的高度（dp）。由调用方从 [CalendarLayout] 算出。 */
+    cellHeight: Dp = CalendarLayout.PORTRAIT_CELL_H.dp,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    val dayFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
+    val lunarFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.lunarFont.dp, fontScale)
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        rows.forEachIndexed { row, week ->
+            if (row > 0 && showDividers && metrics.dividerAlpha > 0.01f) {
+                val rowHasMonthDay = !showAdjacent || week.any {
+                    it.year == anchorMonth.year && it.monthValue == anchorMonth.monthValue
+                }
+                if (rowHasMonthDay) {
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = outlineVariant.copy(alpha = 0.35f * metrics.dividerAlpha),
+                    )
+                }
+            }
+            val offsetY = rowOffsets?.getOrNull(row)?.let { absY -> absY - metrics.cellH * row } ?: 0f
+            val rowAlpha = rowAlphas?.getOrNull(row) ?: 1f
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(cellHeight)
+                    .graphicsLayer {
+                        translationY = offsetY * density
+                        alpha = rowAlpha
+                    },
+            ) {
+                week.forEach { date ->
+                    CalendarDayCell(
+                        date = date,
+                        anchorMonth = anchorMonth,
+                        showAdjacent = showAdjacent,
+                        showLunar = showLunar,
+                        isSelected = DateUtil.dayKeyOf(date) == selectedKey,
+                        isToday = DateUtil.dayKeyOf(date) == todayKey,
+                        hasDiary = flags.contains(DateUtil.dayKeyOf(date)),
+                        todayKey = todayKey,
+                        dayFontSize = dayFontSize,
+                        lunarFontSize = lunarFontSize,
+                        cellHeight = cellHeight,
+                        enabled = rowAlpha > 0.01f,
+                        onClick = { onDayClick(date) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 单个日期格。
+ *
+ * 视觉规格（`docs/design-spec.md` §5.2）：
+ *  - 选中 → `primary` 实心圆 + `onPrimary` 日号；
+ *  - 今天 → `primary` 描边圆环；
+ *  - 有日记 → 日号下方 2dp 圆角短横线；
+ *  - 相邻月 / 未来 → 降透明度（**仍可点**）。
+ *
+ * 圆的直径由 [cellHeight] 派生（`cellHeight - 16dp`，夹在 28…48dp）：
+ * 原来写死 40dp，一旦行高被压到 40dp 以下，圆就会和相邻格相碰。
+ */
+@Composable
+private fun CalendarDayCell(
+    date: LocalDate,
+    anchorMonth: LocalDate,
+    showAdjacent: Boolean,
+    showLunar: Boolean,
+    isSelected: Boolean,
+    isToday: Boolean,
+    hasDiary: Boolean,
+    todayKey: String,
+    dayFontSize: TextUnit,
+    lunarFontSize: TextUnit,
+    cellHeight: Dp,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val key = DateUtil.dayKeyOf(date)
+    val inMonth = date.year == anchorMonth.year && date.monthValue == anchorMonth.monthValue
+    val isFuture = key > todayKey
+    val contentAlpha = when {
+        !inMonth && !showAdjacent -> CalendarLayout.ADJACENT_MONTH_ALPHA
+        !inMonth -> 0.55f
+        isFuture -> CalendarLayout.FUTURE_ALPHA
+        else -> 1f
+    }
+
+    val dateLabel = DateFormats.dayTitleFor(date)
+    val todayLabel = stringResource(R.string.index_today)
+    val selectedLabel = stringResource(R.string.index_selected)
+    val hasDiaryLabel = stringResource(R.string.index_has_diary)
+    val noDiaryLabel = stringResource(R.string.index_no_diary)
+
+    val stateLabel = buildList {
+        if (isToday) add(todayLabel)
+        if (isSelected) add(selectedLabel)
+        add(if (hasDiary) hasDiaryLabel else noDiaryLabel)
+    }.joinToString(" · ")
+
+    val dayColor = when {
+        isSelected -> MaterialTheme.colorScheme.onPrimary
+        isToday -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val markColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+    val interaction = remember { MutableInteractionSource() }
+    val circleDiameter = (cellHeight - 16.dp).coerceIn(28.dp, 48.dp)
+
+    Box(
+        modifier = modifier
+            .height(cellHeight)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            // 日格里只有装饰性内容（日号、农历、标记点），真正的语义全在**这一个**节点上：
+            // 用 `clearAndSetSemantics` 把子节点的文本全部清掉，再挂上日期、状态与点击动作
+            // （点击动作来自外层 `clickable`，会保留下来）。这样一屏只读到 35 个日期节点，
+            // 实测 `uiautomator dump` 里每格是 `Button + clickable="true"`。
+            //
+            // 状态**同时**写进 contentDescription 与 stateDescription：uiautomator 与部分
+            // 朗读器只认 contentDescription，实测 stateDescription 不会被 dump 出来。
+            .clearAndSetSemantics {
+                contentDescription = "$dateLabel · $stateLabel"
+                stateDescription = stateLabel
+                selected = isSelected
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier.size(circleDiameter),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    )
+                } else if (isToday) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .border(
+                                CalendarLayout.TODAY_RING_WIDTH.dp,
+                                MaterialTheme.colorScheme.primary,
+                                CircleShape,
+                            ),
+                    )
+                }
+                Text(
+                    text = date.dayOfMonth.toString(),
+                    fontSize = dayFontSize,
+                    color = dayColor.copy(alpha = contentAlpha),
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (showLunar) {
+                Text(
+                    text = Lunar.dayLabelOf(date),
+                    fontSize = lunarFontSize,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        .copy(alpha = contentAlpha * 0.75f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            if (hasDiary) {
+                DiaryMark(color = markColor.copy(alpha = contentAlpha))
+            }
+        }
+    }
+}
+
+/** "有日记"标记：2dp 高、1dp 圆角的短横线（对应 iOS 的 `Radius.hairline`）。 */
+@Composable
+private fun DiaryMark(color: Color) {
+    Box(
+        modifier = Modifier
+            .padding(top = 1.dp)
+            .size(width = 14.dp, height = 2.dp)
+            .background(color, RoundedCornerShape(Radius.hairline)),
+    )
+}
+
+/**
+ * 星期栏。M3 规范：`labelMedium` + `onSurfaceVariant` + 居中。
+ *
+ * 与 iOS 一致地走"半速动态字体"（格子尺寸由屏幕决定，星期名不能全速放大，
+ * 否则会撑破固定高度的条带）。
+ */
+@Composable
+fun CalendarWeekdayHeader(
+    weekStart: String,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    val labels = remember(weekStart) {
+        DateFormats.weekdayNames(Locale.getDefault(), weekStart)
+    }
+    val height =
+        if (compact) CalendarLayout.COMPACT_WEEKDAY_HEADER_H else CalendarLayout.WEEKDAY_HEADER_H
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        labels.forEach { label ->
+            Text(
+                text = label,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
+                fontSize = DynamicTypeMetrics.calendarSp(11.dp, fontScale),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** 日格网格的高度（dp）：`行数 × 行高`。让这条公式只有一个实现。 */
+fun calendarGridHeight(rows: Int, cellHeight: Float = CalendarLayout.PORTRAIT_CELL_H): Dp =
+    (rows.coerceAtLeast(1) * cellHeight).dp

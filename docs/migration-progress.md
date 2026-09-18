@@ -825,3 +825,73 @@ UI 一直没接。本轮补上：
   因此"选了今年"再挑地点时，候选条数就是今年的条数（与 iOS 一致）。
 
 至此四个页面的交互都与 iOS 对齐，`SearchViewModel` 里不再有"写了但没界面"的状态。
+
+---
+
+## R1 —— 首次上机实测与首页返工 ✅ 已完成
+
+**背景**：M0–M9 全部在"没有设备"的前提下完成，几何靠 JVM 单测守住。装上模拟器后，
+单测测不到的那一类问题（**可用空间的真实假设**与**无障碍树**）集中暴露出来。
+本轮先补了一份界面规范 [`docs/design-spec.md`](design-spec.md)，再按它返工首页。
+
+### 环境（本轮实测）
+
+| 项 | 实测值 |
+| --- | --- |
+| 模拟器 | Pixel 10 Pro AVD，`1280 × 2856 @ 480dpi` = **426.7 × 952dp**，fontScale 1.0 |
+| 系统 | API 37（Android 17） |
+
+> 单测里一直用的参考尺寸是 iOS 的 `402 × 874`。Android 这台机器**更高**（952dp），
+> 而首轮的竖屏日历数学是照搬 iOS 的 `max(320, screenH - 64)` —— 这就是缺陷的温床。
+
+### 修掉的 8 个问题
+
+| # | 现象 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 月历每行 ~126dp，日号之间隔一整屏空白 | `portraitAreaHeight` 照搬 iOS，行高被屏幕高度拉大，而格子内容只有 40dp | 行高固定 `PORTRAIT_CELL_H = 56dp`，区高 = `星期栏 + 行数 × 56` 并封顶 |
+| 2 | 月历占满整屏，选中日内容无处可放 | 同上 + iOS 靠整屏 morph 把内容推到下一屏 | 竖屏改「月历 + 选中日面板」两段，面板 `weight(1f)` |
+| 3 | **日历在无障碍树里完全不存在** | `MonthCanvas` / `WeekRowCanvas` 是 Canvas 手绘，一个节点都没有 | 新建 `CalendarDayGrid.kt`，日格改成真实 Compose 组件（每格一个可聚焦节点） |
+| 4 | 年历的迷你月日号互相叠住 | 照搬 iOS 的"完整 6 行日号"，Android 年历卡片只有 ~36dp 高 | 年历改「月份名 + 记录圆点」，`YEAR_MIN_AREA_H = 470dp` |
+| 5 | 点日期要**点两次**才进日记 | 照搬 iOS 的"点日期 → 整屏 morph 到周态" | 点日期 = 选中 + 换下方面板；**周态整体移除**（信息与面板重复） |
+| 6 | 顶栏层级语义不对（`AssistChip` 装标题） | 照搬 iOS 的玻璃胶囊 | M3 顶栏：`titleLarge` + `TextButton(今天)` + 可点标题块 |
+| 7 | **横屏旋转直接崩屏** | `portraitAreaHeight` 的 `coerceIn` 区间在矮窗口反转（`max 217 < min 240`） | 上下界由构造保证 `floor ≤ preferred ≤ available`，并加回归断言 |
+| 8 | 硬编码 `TODAY_LABEL`、`monthValue + "月"` | 迁移时漏了资源化 | 全部进 `strings.xml`（`values` + `values-zh-rCN`），补 12 条键 |
+| 9 | 日格**能读不能点**（`clickable=false`），整屏 100+ 碎片节点 | `clickable` 与 `semantics(mergeDescendants)` 的顺序生成了两个节点 | `clickable` + `clearAndSetSemantics`：每格一个 `Button`，35 格全部可点 |
+| 10 | **空日记页没有写入口**（只有搜索框和分享） | `DiaryReadScreen.onWrite` 有参数但从没接线 | `DiaryPageScreen` 传 `onWrite = if (canEditToday) viewModel::enterWrite else null` |
+
+### 交付物
+
+| 文件 | 说明 |
+| --- | --- |
+| `docs/design-spec.md` | **新增**：界面设计规范（令牌、组件、自适应、首页规范、无障碍、缺陷清单） |
+| `ui/home/CalendarDayGrid.kt` | **新增**：日格 / 星期栏的真实组件实现（替代 `MonthCanvas` / `WeekRowCanvas`） |
+| `ui/home/HomeScreen.kt` | 重写：M3 顶栏 + 月历 + 当日面板；周态移除；两个 v1 bug 修掉 |
+| `ui/home/CalendarCanvas.kt` | 只保留年历；年历卡片层 + 圆点渲染 + 12 个可聚焦卡片节点 |
+| `ui/home/CalendarLayout.kt` | `portraitAreaHeight` / `cellHeightFor` / `yearAreaHeight` 三条新的纯函数；`YEAR_TITLE_H` 62 → 44 |
+| `service/DateFormats.kt` | `dayTitleFor`：日格无障碍文案（不查资源，35+ 格共用） |
+| `app/src/test/**/CalendarLayoutTest.kt` | 竖屏版面按新公式重写；补 0/h 极矮窗口、单调性、年历区高四条回归 |
+| `app/src/test/**/CalendarMorphTest.kt` | morph 端点改为与各自真实图层同源（月用月区高、年用年区高） |
+
+### 验收证据
+
+```
+> Task :app:testDebugUnitTest
+356 tests completed, 0 failed          # 原 352 + 本轮新增/改写 4 条
+
+python3 tools/verify_sqlite_schema.py  # 全部 SQL 验证通过
+bash    tools/verify_backup_interop.sh # Android 写出的备份包可被 iOS 的 ZipArchive 完整读取
+```
+
+模拟器实测（逐条见 `design-spec.md` §8）：竖屏 6 行 × 56dp、**35 个日格全部是可点的
+`Button` 无障碍节点**、点日期换内容、上下滑翻月、今天、年历 12 卡片、横屏分栏不崩、
+深色跟随 M3；并跑通一条端到端链：面板「写日记」→ 编辑器输入 → 保存（含"未获取到位置"
+的二次确认）→ 阅读页 → 返回首页后**面板显示该片段、日格状态变为「有日记」**。
+
+### 与方案的偏差（有意）
+
+- **周态整屏 morph 移除**。iOS 的"点日期 → 整屏 morph 到周条"在 Android 上同时是
+  「交互不符合平台共识」与「信息与当日面板重复」两个问题；几何数学
+  （`monthWeekMorph`）仍保留在 `CalendarLayout` 并有单测，重新需要时可直接接上。
+- **年历区高与月历区高解耦**（470 vs 366）。年历要放 12 张卡片 × 6 行圆点，
+  比月历吃高；两者各用各的高度，morph 的两个端点分别取各自真实图层，收尾仍然不跳。
+- 未验证项收窄为：morph 帧率实测、TalkBack 真人走读、其余三屏的横屏/深色逐条断言。

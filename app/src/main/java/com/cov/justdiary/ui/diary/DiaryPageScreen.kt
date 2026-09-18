@@ -135,6 +135,11 @@ fun DiaryPageScreen(
                     imageLoader = { part ->
                         part.src?.let { src -> container.mediaStore.image(src)?.asImageBitmap() }
                     },
+                    // "写日记"入口：与 iOS `DiaryPageView` 的 `if vm.canEditToday`
+                    // （`square.and.pencil` 图标）等价。**这里原先漏了接线** ——
+                    // `DiaryReadScreen` 有 `onWrite` 参数且默认 null，日记页从未传，
+                    // 于是空日记页只有搜索框和分享，没有任何写入口（本轮实测发现并修掉）。
+                    onWrite = if (state.canEditToday) viewModel::enterWrite else null,
                 )
             } else {
                 EditorScreen(

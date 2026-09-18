@@ -18,15 +18,21 @@ import java.time.LocalDate
 class CalendarMorphTest {
 
     private val portraitW = 402f
-    private val portraitH = 874f
-    private val areaH = CalendarLayout.portraitAreaHeight(portraitH)
 
-    // 关键：`fullMonthGridRect` 接收的是**日历区**尺寸（高 810 = 874 - 64），
-    // 不是整屏尺寸。只有用 810，(810-102)/6 才等于真实图层的 118 ——
-    // 这正是 morph 收尾不跳变的前提。
-    private val fullGrid = CalendarLayout.fullMonthGridRect(portraitW, areaH)
+    /** Pixel 10 Pro AVD 的首页内容区可用高度（见 `CalendarLayoutTest`）。 */
+    private val portraitH = 796f
+    private val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)
+
+    // 关键：`fullMonthGridRect` 接收的是**日历区**尺寸，且 header 只含星期栏
+    // （竖屏标题已经移到 M3 顶栏，不在日历区里了 —— 见 docs/design-spec.md §5.1）。
+    // 只有和真实图层用同一份「区高 + header」，morph 收尾才不会跳变。
+    private val fullGrid = CalendarLayout.fullMonthGridRect(
+        portraitW,
+        areaH,
+        headerH = CalendarLayout.WEEKDAY_HEADER_H,
+    )
     private val miniGrid = CalendarLayout.miniGridRect(
-        CalendarLayout.yearCardRect(1, portraitW, portraitH),
+        CalendarLayout.yearCardRect(1, portraitW, areaH),
     )
 
     // ------------------------------------------------------------------ 年 ↔ 月
@@ -40,9 +46,10 @@ class CalendarMorphTest {
         assertEquals(fullGrid.y, state.grid.y, 1e-3f)
         assertEquals(fullGrid.w, state.grid.w, 1e-3f)
         assertEquals(fullGrid.h, state.grid.h, 1e-3f)
-        // 落点必须与真实图层同源：cellH 118、dayFont 20
-        assertEquals(118f, state.metrics.cellH, 1e-3f)
-        assertEquals(20f, state.metrics.dayFont, 1e-3f)
+        // 落点必须与真实图层同源：cellH / dayFont 与 monthMetrics 完全一致
+        val real = CalendarLayout.monthMetrics(portraitW, areaH, showLunar = true)
+        assertEquals(real.cellH, state.metrics.cellH, 1e-3f)
+        assertEquals(real.dayFont, state.metrics.dayFont, 1e-3f)
         assertEquals(1f, state.lunarAlpha, 1e-6f)
         assertEquals(1f, state.dividerAlpha, 1e-6f)
         // 年历层完全隐藏

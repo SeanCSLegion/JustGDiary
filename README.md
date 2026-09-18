@@ -2,10 +2,13 @@
 
 日记应用 **[JustADiary](../JustADiary)** 的 Android 版本。数据层与 iOS 版**严格互通**：同一套表名/列名/字符串取值/`content_json`/备份包格式，`.jdiary` 备份可以双向互导。
 
-> **当前状态：M0–M9 的代码工作已完成**（详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)）。
-> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**352 个 JVM 单测**全绿，
-> 另有 2 个脚本做跨端与 SQL 的独立校验。**尚未在真机/模拟器上安装运行过**（本机无设备与 AVD，
-> 见文末"已验证 / 未验证"）。
+> **当前状态：M0–M9 的代码工作已完成，并已在模拟器上实测通过一轮界面返工**
+> （详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)，
+> 界面规范见 [`docs/design-spec.md`](docs/design-spec.md)）。
+> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**356 个 JVM 单测**全绿，
+> 另有 2 个脚本做跨端与 SQL 的独立校验。首页已按 Material 3 重新设计并在
+> Pixel 10 Pro AVD 上验证（竖屏 / 横屏分栏 / 深色 / TalkBack 语义，
+> 证据见 `docs/design-spec.md` §8）。
 
 ## 关键约定
 
@@ -79,17 +82,25 @@ JustGDiary/
 **已验证**（都有可复现的命令）
 
 - 编译：`clean assembleDebug` 通过；
-- 单元测试：352 条全绿，覆盖日历/morph 数学、编辑模型、`content_json` 与 iOS 的字节级一致、
+- 单元测试：356 条全绿，覆盖日历/morph 数学、编辑模型、`content_json` 与 iOS 的字节级一致、
   跨端 zip 布局、搜索筛选、足迹聚合、提醒排期、设置副作用、版面判定的临界值、内联图片尺寸规则；
 - **运行时**（Robolectric）：真开一次 SQLite 跑完 v0→v1→v3 迁移链、写入/读回/编辑/删除/搜索、
   `day_key` 重算幂等、`EditorLine` ↔ `Spannable` 往返不丢图、导出→导入的 SKIP/OVERWRITE 两种模式；
 - 跨端：用 iOS 真实的 `ZipArchive.swift` 读 Android 写出的 `.jdiary`（15 条断言）。
 
-**未验证**（需要设备，按已确认的验收口径本轮不做）
+**已在模拟器上实测**（Pixel 10 Pro AVD，1280 × 2856 @ 480dpi）
 
-- 安装、启动、真机交互；
-- morph 动画的帧率实测（调试开关 `-slow-morph` / `-morph-log` 已就位，等有设备时直接可用）；
-- TalkBack 走查（`a11y_*` 文案与日历的"上/下个月、上/下一年"自定义动作已接）；
+- 安装、启动、竖屏 / 横屏 / 深色三种形态的首页版面；
+- 日历无障碍：`uiautomator dump` 里 31 个日格节点，`content-desc` 为完整日期，
+  `today`/`selected` 状态与 `onClick` 标签齐全；
+- 交互：点日期换当日内容、再点已选中日期进日记、上下滑翻月、年历 / 今天 /
+  横屏分栏。逐条证据见 [`docs/design-spec.md`](docs/design-spec.md) §8。
+
+**仍未验证**
+
+- morph 动画的**帧率实测**（调试开关 `-slow-morph` / `-morph-log` 已就位）；
+- TalkBack **真人走查**（语义已实测存在，但朗读顺序与提示语尚未逐条听）；
+- 其余三屏（足迹 / 搜索 / 设置）的横屏与深色只做了目视核对，没有逐条断言；
 - 设置页行图标目前取 `material-icons-core` 里语义最近的图标 —— 换成真正的 Material Symbols
   需要 `material-icons-extended`（35.7MB aar，`isMinifyEnabled = false` 下不划算），
   已集中在一处映射里，将来替换只改一个对象。
@@ -98,6 +109,7 @@ JustGDiary/
 
 | 文件 | 内容 |
 | --- | --- |
+| [`docs/design-spec.md`](docs/design-spec.md) | **界面设计规范**（iOS 设计意图 → Material 3 的对应、首页规范、首轮上机的缺陷清单与修法） |
 | [`docs/android-migration-plan.md`](docs/android-migration-plan.md) | 迁移方案（含所有已确认的决策与理由、逐页迁移清单、风险清单） |
 | [`docs/migration-progress.md`](docs/migration-progress.md) | 逐里程碑的交付物、验证证据、与 iOS 的差异（含**有意不复制**的 iOS 缺陷清单） |
 | [`docs/migration-analysis/`](docs/migration-analysis) | 数据层 / 编辑器 / 首页日历 / 服务与平台的逐行源码分析报告 |

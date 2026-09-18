@@ -106,6 +106,17 @@
     <string name="index_future_empty">This day hasn\'t arrived yet.</string>
     <string name="index_write">Write</string>
     <string name="index_continue_write">Continue writing</string>
+    <string name="index_year_view">Year</string>
+    <string name="index_month_view">Month</string>
+    <string name="index_week_view">Week</string>
+    <string name="index_future_toast">This day hasn\'t arrived yet</string>
+    <string name="index_day_heading">Day content</string>
+    <string name="index_has_diary">Has entry</string>
+    <string name="index_no_diary">No entry</string>
+    <string name="index_selected">Selected</string>
+    <string name="a11y_month_grid">%1$s calendar</string>
+    <string name="a11y_back_to_month">Back to month</string>
+    <string name="a11y_scroll_to_today">Back to today</string>
     <string name="footprint_title">Footprint</string>
     <string name="footprint_time_all">All</string>
     <string name="footprint_empty">No places recorded yet</string>

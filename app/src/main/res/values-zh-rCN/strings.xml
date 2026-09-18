@@ -95,6 +95,17 @@
     <string name="index_future_empty">这一天还没有到来。</string>
     <string name="index_write">写日记</string>
     <string name="index_continue_write">继续写日记</string>
+    <string name="index_year_view">年历</string>
+    <string name="index_month_view">月历</string>
+    <string name="index_week_view">周历</string>
+    <string name="index_future_toast">这一天还没有到来</string>
+    <string name="index_day_heading">当日内容</string>
+    <string name="index_has_diary">有日记</string>
+    <string name="index_no_diary">无日记</string>
+    <string name="index_selected">已选中</string>
+    <string name="a11y_month_grid">%1$s 的月历</string>
+    <string name="a11y_back_to_month">返回月历</string>
+    <string name="a11y_scroll_to_today">回到今天</string>
     <string name="footprint_title">足迹</string>
     <string name="footprint_time_all">全部</string>
     <string name="footprint_empty">还没有地点记录</string>

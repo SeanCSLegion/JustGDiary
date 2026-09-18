@@ -227,5 +227,26 @@ class DateFormats(
                 first.plusDays(offset.toLong()).dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
             }
         }
+
+        /**
+         * 日历日格的无障碍文案（月+日+星期）：zh `9月15日 周二` / en `Tue, Sep 15`。
+         *
+         * 这里**不复用** [DateFormats.dayTitle] 的模板资源，原因有两个：
+         *  1. 日历一屏有 35–42 个格子，每个都去查一次资源没必要；
+         *  2. `Modifier.semantics` 的内容描述只需要"能被读出来"，语义槽位（`date_day_title`）
+         *     在标题行已经用过了，两者取值本来就相同，重复一次不会带来不一致。
+         *
+         * 语言取 `Locale.getDefault()`：应用内语言通过
+         * `AppCompatDelegate.setApplicationLocales` 生效后，它就是应用语言。
+         */
+        fun dayTitleFor(date: LocalDate, locale: Locale = Locale.getDefault()): String {
+            val month = date.month.getDisplayName(TextStyle.SHORT, locale)
+            val weekday = date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
+            return if (locale.language == Locale.CHINESE.language) {
+                "$month${date.dayOfMonth}日 $weekday"
+            } else {
+                "$weekday, $month ${date.dayOfMonth}"
+            }
+        }
     }
 }
