@@ -103,6 +103,9 @@
     <string name="index_has_diary">有日记</string>
     <string name="index_no_diary">无日记</string>
     <string name="index_selected">已选中</string>
+    <string name="index_toggle_week">周视图</string>
+    <string name="index_toggle_month">月视图</string>
+    <string name="a11y_week_grid">%1$s 那一周</string>
     <string name="a11y_month_grid">%1$s 的月历</string>
     <string name="a11y_back_to_month">返回月历</string>
     <string name="a11y_scroll_to_today">回到今天</string>

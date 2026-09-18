@@ -105,14 +105,22 @@ object CalendarLayout {
     const val PORTRAIT_MIN_AREA_H = 240f
 
     /**
-     * 日历区最多占可用高度的比例。
+     * 月格行高的上限（dp）。
      *
-     * 剩下的高度留给「选中日面板」（竖屏）或右栏（横屏）。iOS 把整屏都给日历、靠
-     * 整屏 morph 把内容推到下一屏；Android 单屏内就应该看到选中日的内容。
+     * **这是本轮返工的关键数字。** iOS 的竖屏月历是**整屏**的：`cellH` 由屏幕高度反算
+     * （iPhone 402×874 上是 `(874 − 72 − 30) / 6 ≈ 129`，日志里更早的版本实测 118），
+     * 而且 iOS 没有"月态下方面板"这回事 —— 日记预览只在周态里。
      *
-     * 这是**月历**的上限；年历不受它约束，见 [YEAR_MIN_AREA_H]。
+     * Android 照这个意图做：月 / 年两态都占满屏幕，行高由**可用高度**反算。
+     * [MAX_CELL_H] 只是上限，防的是"平板竖屏上一格 200dp"这种退化，不是给下方面板让位
+     * （首轮把它当成"要留给面板的比例"，方向就错了 —— 面板只在周态与横屏分栏里出现）。
      */
-    const val CALENDAR_MAX_HEIGHT_RATIO = 0.62f
+    const val MAX_CELL_H = 96f
+
+    /**
+     * 月格行高的下限（dp）。低于它就要走周条降级（横屏/矮窗口）。
+     */
+    const val MIN_CELL_H = 44f
 
     /**
      * 年历区的最小高度（dp）。
@@ -122,16 +130,7 @@ object CalendarLayout {
      * 因此年历区不共用月历的 62% 上限 —— 它需要的垂直空间比月历多，
      * 而两者用的是**各自**的高度，morph 的两个端点分别与各自真实图层同源，收尾仍然不跳。
      */
-    /**
-     * 年历区的最小高度。
-     *
-     * 4 行卡片 × 卡片高 + 3 × 行距 + 标题槽 + 上下内缩，低于 470 时第 4 行会被下方面板压住
-     * （首轮上机实测：430 时 10/11/12 月与本日标题重叠）。
-     */
-    const val YEAR_MIN_AREA_H = 470f
 
-    /** 竖屏时留给下方「选中日面板」的最小高度（dp）。 */
-    const val DAY_PANEL_MIN_H = 200f
 
     /** 未选中的相邻月日期的不透明度。 */
     const val ADJACENT_MONTH_ALPHA = 0.35f
@@ -211,35 +210,25 @@ object CalendarLayout {
     fun monthCellH(areaH: Float, rows: Int = MONTH_ROWS): Float = PORTRAIT_CELL_H
 
     /**
-     * 竖屏日历区可用高度 = 星期栏 + 月格区，**按内容派生**。
+     * 月态的日历区高度（dp）：整屏视图，占用除顶栏外的全部可用高。
      *
-     * 旧实现 `max(320, screenH - 64)` 逐字照搬 iOS，在 Android 竖屏长宽比下会把
-     * 月格拉到 126dp 高。现在：`星期栏 + 行数 × 56`，再夹在
-     * `[max(PORTRAIT_MIN_AREA_H × 0.6, 可用高 - DAY_PANEL_MIN_H), 可用高]` 之间。
+     * 与旧版 `portraitAreaHeight` 的**方向性差别**：
+     *  - 旧版把它当"留给下方面板之后剩下的高度"，所以要按比例收缩；
+     *  - 新版里月/年态都是整屏（日记预览只在**周态**和**横屏分栏**出现），
+     *    所以这里有**多少给多少**，行高由上方的 [cellHeightFor] 反算、按 [MAX_CELL_H] 封顶。
      *
-     * 两条边界的理由：
-     *  - **上界**是可用高本身，且内容更多时日历要**让位**给下方面板 —— 所以真正参与夹取
-     *    的上界是 `可用高 - DAY_PANEL_MIN_H`（矮窗口如横屏只有 ~350dp，日历必须收窄）；
-     *  - **下界**是区高下限的 60% 与可用高本身的双重封顶，保证既不会把日历压没，
-     *    也不会让下界超过上界（那会让 `coerceIn` 抛 `IllegalArgumentException` 直接崩屏 ——
-     *    这正是首轮横屏旋转时崩溃的原因，现已用 `coerceAtLeast`/`maxOf` 双重兜住）。
-     *
-     * @param availableH 首页内容区的可用高度（dp，已扣掉顶栏与系统占位）。
-     * @param rows 该月实际跨的周数（5 或 6）。
+     * 下限 [PORTRAIT_MIN_AREA_H] 只在极矮窗口（多窗口拖到最小）里生效，
+     * 且不超过可用高 —— 保证返回的区间永不反转（首轮横屏崩溃就出在这里）。
      */
-    fun portraitAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float {
+    fun monthAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float {
         val safeAvailable = availableH.coerceAtLeast(0f)
-        val content = WEEKDAY_HEADER_H + rows.coerceAtLeast(1) * PORTRAIT_CELL_H
-        // 面板下限：矮窗口（横屏 ~350dp）里按 40% 收缩，否则日历会被压得只剩一两行。
-        val panelMin = minOf(DAY_PANEL_MIN_H, safeAvailable * 0.4f)
-        val ceiling = maxOf(0f, safeAvailable - panelMin)
-        val preferred = minOf(content, ceiling)
-        // 日历自身的下限取「区高下限的 60%」，但**不得超过内容需要的行数** ——
-        // 否则 5 行的月份也会被抬到 6 行的高度，凭空多出一条空白。
-        val floor = minOf(PORTRAIT_MIN_AREA_H * 0.6f, preferred)
-        // floor ≤ preferred ≤ safeAvailable 由构造保证，coerceIn 不会遇到反向区间
-        return preferred.coerceIn(floor, safeAvailable)
+        val floor = minOf(PORTRAIT_MIN_AREA_H, safeAvailable)
+        return safeAvailable.coerceAtLeast(floor)
     }
+
+    /** 旧名保留（单测与旧调用点仍可用），语义等同 [monthAreaHeight]。 */
+    fun portraitAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float =
+        monthAreaHeight(availableH, rows)
 
     /**
      * 月格的行高：默认 [PORTRAIT_CELL_H]，矮窗口里按可用高度等比压缩（下限 36dp）。
@@ -247,21 +236,42 @@ object CalendarLayout {
      * 压缩只发生在"窗口比日历还矮"的极端情形（分屏、横屏未分栏），此时宁可让格子
      * 小一点，也不要把下面的内容挤出屏幕。
      */
-    fun cellHeightFor(areaH: Float, rows: Int, preferred: Float = PORTRAIT_CELL_H): Float {
-        val gridH = areaH - WEEKDAY_HEADER_H
+    /**
+     * 竖屏月格行高：**按可用高度反算**，夹在 [MIN_CELL_H] 与 [MAX_CELL_H] 之间。
+     *
+     * @param areaH 月态日历区的总高（含星期栏）。
+     * @param headerH 区里除网格之外的固定高度（竖屏 = 星期栏 30；带紧凑标题的面板 = 60）。
+     * @param preferred 常规下限：可用高够时至少给这么高，避免小屏上格子偏挤。
+     */
+    fun cellHeightFor(
+        areaH: Float,
+        rows: Int,
+        headerH: Float = WEEKDAY_HEADER_H,
+        preferred: Float = PORTRAIT_CELL_H,
+    ): Float {
         val safeRows = rows.coerceAtLeast(1)
-        return min(preferred, max(36f, gridH / safeRows))
+        val gridH = areaH - headerH
+        // [preferred] 是**内容下限**（够高时至少这么大），但它不参与夹取 ——
+        // 可用高不足时行高必须能压到 MIN_CELL_H，否则矮窗口里月历会把内容挤出屏幕。
+        return max(MIN_CELL_H, min(gridH / safeRows, MAX_CELL_H))
     }
 
     /**
-     * 年历区高度：至少 [YEAR_MIN_AREA_H]，但必须给下方面板留出 [DAY_PANEL_MIN_H]。
+     * 把给定的网格高度**均分**给若干行（不做任何夹取）。
      *
-     * 年历比月历"吃高"（12 张卡片，每张里还有一个 6 行的迷你网格），所以不共用
-     * [CALENDAR_MAX_HEIGHT_RATIO]。两个区各用各的高度，morph 的两个端点分别与各自
-     * 真实图层同源，收尾依然不跳。
+     * 横屏分栏的日历面板用这个：面板高度本身就是稀缺资源，必须铺满、不能留白，
+     * 也没有"矮到要降级"的余地（[CalendarLayout.resolveDensity] 已经决定过要不要降级）。
      */
-    fun yearAreaHeight(availableH: Float): Float =
-        min(YEAR_MIN_AREA_H, max(0f, availableH - DAY_PANEL_MIN_H)).coerceAtLeast(0f)
+    fun fitCellHeight(gridH: Float, rows: Int): Float = gridH / rows.coerceAtLeast(1)
+
+    /**
+     * 年历区高度：整屏（除顶栏外的全部可用高），与月历一致。
+     *
+     * 早期版本给年历设了一个 470dp 的下限、并给它留出 `DAY_PANEL_MIN_H` ——
+     * 那是"月态下方面板"还在时的遗留。现在日记预览只在**周态**与**横屏分栏**出现，
+     * 年历也跟月历一样占满屏幕，12 张卡片随可用高均匀铺开（卡片高 = `yearCardSize` 公式）。
+     */
+    fun yearAreaHeight(availableH: Float): Float = availableH.coerceAtLeast(0f)
 
     /**
      * morph 起点/终点用的月格度量。
@@ -280,7 +290,7 @@ object CalendarLayout {
         headerH: Float = WEEKDAY_HEADER_H,
     ): DayMetrics = monthPaneMetrics(
         cellW = monthCellW(width),
-        cellH = cellHeightFor(areaH - headerH + WEEKDAY_HEADER_H, rows),
+        cellH = cellHeightFor(areaH, rows, headerH),
         showLunar = showLunar,
     )
 
@@ -555,6 +565,10 @@ object CalendarLayout {
      * @param weekMetrics 周条度量
      * @param stripBottom 周条下方内容区的目标 y（iOS 用 98）
      * @param dayTitleH 周态日期标题行高度（40），内容区上移量含它 + 20
+     * @param stripTopY 选中行在**自己容器里的落点**。
+     *   iOS 的周条容器在星期栏**之后**，所以落点是 `WEEKDAY_HEADER_H`（30）；
+     *   Android 的周条容器紧跟在（会淡出的）星期栏下方，落点是 **0** ——
+     *   用 30 会让选中行在动画中段从星期栏文字上穿过去（实测"日号叠在周一上"）。
      */
     fun monthWeekMorph(
         progress: Float,
@@ -564,13 +578,14 @@ object CalendarLayout {
         weekMetrics: DayMetrics,
         stripBottom: Float = 98f,
         dayTitleH: Float = DAY_TITLE_H,
+        stripTopY: Float = WEEKDAY_HEADER_H,
     ): MonthWeekMorphState {
         val p = clamp01(progress)
         val rowAboveAlpha = 1f - clamp01(p * 1.4f)
         val contentT = clamp01((p - 0.25f) / 0.75f)
 
         return MonthWeekMorphState(
-            selectedRowY = lerp(baseRowY, WEEKDAY_HEADER_H, p),
+            selectedRowY = lerp(baseRowY, stripTopY, p),
             metrics = monthMetrics.lerp(weekMetrics, p),
             selectedRowAlpha = 1f,
             rowAboveY = baseRowY - p * (baseRowY + monthMetrics.cellH),

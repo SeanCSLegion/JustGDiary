@@ -114,6 +114,9 @@
     <string name="index_has_diary">Has entry</string>
     <string name="index_no_diary">No entry</string>
     <string name="index_selected">Selected</string>
+    <string name="index_toggle_week">Week view</string>
+    <string name="index_toggle_month">Month view</string>
+    <string name="a11y_week_grid">%1$s week</string>
     <string name="a11y_month_grid">%1$s calendar</string>
     <string name="a11y_back_to_month">Back to month</string>
     <string name="a11y_scroll_to_today">Back to today</string>

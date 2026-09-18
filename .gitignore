@@ -11,6 +11,10 @@ gradle-app.setting
 .gradletasknamecache
 # 本地 Gradle 缓存/配置
 .gradle-cache/
+# Gradle daemon 的 JVM 工具链选择：由 `updateDaemonJvm` / Android Studio 按**本机**
+# 装了哪些 JDK 生成，路径与厂商都因机器而异。提交它会把某台机器的 JDK 选择强加给别人，
+# 而 README 里约定的是"用 Android Studio 自带的 JBR 编译"（见"环境要求"）。
+gradle/gradle-daemon-jvm.properties
 
 # ---------- Android Studio / IntelliJ ----------
 .idea/

@@ -21,18 +21,23 @@ class CalendarMorphTest {
 
     /** Pixel 10 Pro AVD 的首页内容区可用高度（见 `CalendarLayoutTest`）。 */
     private val portraitH = 796f
-    private val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)
+    /** 月度整屏区高：可用高 − 顶栏 52（与 `HomeScreen` 一致）。 */
+    private val monthAreaH = CalendarLayout.monthAreaHeight(portraitH - 52f, rows = 6)
+    /** 月层**实际**网格高 = 行数 × 行高（行高被 MAX_CELL_H 封顶后）。 */
+    private val gridH = 6 * CalendarLayout.cellHeightFor(monthAreaH, 6)
+    /** 年历层高度 = 顶栏之外的全部可用高（月 / 年都是整屏视图）。 */
+    private val yearHeight = portraitH - 52f
 
     // 关键：`fullMonthGridRect` 接收的是**日历区**尺寸，且 header 只含星期栏
     // （竖屏标题已经移到 M3 顶栏，不在日历区里了 —— 见 docs/design-spec.md §5.1）。
     // 只有和真实图层用同一份「区高 + header」，morph 收尾才不会跳变。
     private val fullGrid = CalendarLayout.fullMonthGridRect(
         portraitW,
-        areaH,
+        CalendarLayout.WEEKDAY_HEADER_H + gridH,
         headerH = CalendarLayout.WEEKDAY_HEADER_H,
     )
     private val miniGrid = CalendarLayout.miniGridRect(
-        CalendarLayout.yearCardRect(1, portraitW, areaH),
+        CalendarLayout.yearCardRect(1, portraitW, yearHeight),
     )
 
     // ------------------------------------------------------------------ 年 ↔ 月
@@ -47,7 +52,9 @@ class CalendarMorphTest {
         assertEquals(fullGrid.w, state.grid.w, 1e-3f)
         assertEquals(fullGrid.h, state.grid.h, 1e-3f)
         // 落点必须与真实图层同源：cellH / dayFont 与 monthMetrics 完全一致
-        val real = CalendarLayout.monthMetrics(portraitW, areaH, showLunar = true)
+        val real = CalendarLayout.monthMetrics(
+            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
+        )
         assertEquals(real.cellH, state.metrics.cellH, 1e-3f)
         assertEquals(real.dayFont, state.metrics.dayFont, 1e-3f)
         assertEquals(1f, state.lunarAlpha, 1e-6f)
@@ -118,7 +125,9 @@ class CalendarMorphTest {
 
     @Test
     fun `month week morph starts at the month layout`() {
-        val metrics = CalendarLayout.monthMetrics(portraitW, areaH, showLunar = true)
+        val metrics = CalendarLayout.monthMetrics(
+            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
+        )
         val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
         val baseRowY = metrics.cellH * 2
         val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
@@ -140,7 +149,9 @@ class CalendarMorphTest {
 
     @Test
     fun `month week morph ends at the week strip layout`() {
-        val metrics = CalendarLayout.monthMetrics(portraitW, areaH, showLunar = true)
+        val metrics = CalendarLayout.monthMetrics(
+            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
+        )
         val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
         val baseRowY = metrics.cellH * 2
         val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
@@ -163,7 +174,9 @@ class CalendarMorphTest {
 
     @Test
     fun `month week morph interpolates monotonically`() {
-        val metrics = CalendarLayout.monthMetrics(portraitW, areaH, showLunar = true)
+        val metrics = CalendarLayout.monthMetrics(
+            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
+        )
         val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
         val baseRowY = metrics.cellH * 2
         val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
