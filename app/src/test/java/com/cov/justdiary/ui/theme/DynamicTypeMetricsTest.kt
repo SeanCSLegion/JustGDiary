@@ -147,14 +147,15 @@ class DynamicTypeMetricsTest {
 
     @Test
     fun `editor ladder ceilings are the ones quoted in the plan`() {
+        // 28 → Title1 1.40；22 → Title2 1.45；16 → Callout 1.55；14 → Footnote 1.65
         assertEquals(1.40f, DynamicTypeMetrics.ceilingForSize(TypeSize.editorTitle.value), 1e-6f)
         assertEquals(1.45f, DynamicTypeMetrics.ceilingForSize(TypeSize.editorHeading.value), 1e-6f)
-        assertEquals(1.50f, DynamicTypeMetrics.ceilingForSize(TypeSize.editorBody.value), 1e-6f)
-        assertEquals(1.60f, DynamicTypeMetrics.ceilingForSize(TypeSize.editorQuote.value), 1e-6f)
+        assertEquals(1.55f, DynamicTypeMetrics.ceilingForSize(TypeSize.editorBody.value), 1e-6f)
+        assertEquals(1.65f, DynamicTypeMetrics.ceilingForSize(TypeSize.editorQuote.value), 1e-6f)
     }
 
     @Test
-    fun `type size tokens match the ios type scale`() {
+    fun `type size tokens follow the platform scales`() {
         assertEquals(32f, TypeSize.display.value, 1e-6f)
         assertEquals(24f, TypeSize.pageTitle.value, 1e-6f)
         assertEquals(17f, TypeSize.sheetTitle.value, 1e-6f)
@@ -164,18 +165,50 @@ class DynamicTypeMetricsTest {
         assertEquals(13f, TypeSize.rowSub.value, 1e-6f)
         assertEquals(14f, TypeSize.chip.value, 1e-6f)
         assertEquals(12f, TypeSize.badge.value, 1e-6f)
+        // 编辑器段落梯级 = M3 角色：headlineMedium / titleLarge / bodyLarge / bodyMedium
+        // （iOS 侧是 Apple HIG 的 Title1 28 / Title2 22 / Body 17 / Subheadline 15 —— 两端有意不同）
         assertEquals(28f, TypeSize.editorTitle.value, 1e-6f)
         assertEquals(22f, TypeSize.editorHeading.value, 1e-6f)
-        assertEquals(listOf(28f, 22f, 17f, 15f), TypeSize.editorLadder.map { it.value })
+        assertEquals(listOf(28f, 22f, 16f, 14f), TypeSize.editorLadder.map { it.value })
     }
 
     @Test
-    fun `editor line and paragraph spacing ratios match ios`() {
-        assertEquals(0.13f, EditorTypography.lineSpacingRatio("body"), 1e-6f)
-        assertEquals(0.5f, EditorTypography.lineSpacingRatio("quote"), 1e-6f)
-        assertEquals(0.4f, EditorTypography.paragraphSpacingRatio("title"), 1e-6f)
-        assertEquals(0.3f, EditorTypography.paragraphSpacingRatio("heading"), 1e-6f)
-        assertEquals(0.4f, EditorTypography.paragraphSpacingRatio("quote"), 1e-6f)
-        assertEquals(0f, EditorTypography.paragraphSpacingRatio("body"), 1e-6f)
+    fun `m3 component roles keep the official type scale at fontScale 1`() {
+        // 官方基线（material3 1.4.0 的 Typography() 默认值）。
+        // 这条守住"顶栏 / 对话框 / 输入框 / 按钮用的是 Google 的字号，不是本项目自定的梯级"。
+        assertEquals(28f, JustDiaryTypography.headlineMedium.fontSize.value, 1e-3f)
+        assertEquals(24f, JustDiaryTypography.headlineSmall.fontSize.value, 1e-3f)
+        assertEquals(22f, JustDiaryTypography.titleLarge.fontSize.value, 1e-3f)
+        assertEquals(16f, JustDiaryTypography.titleMedium.fontSize.value, 1e-3f)
+        assertEquals(14f, JustDiaryTypography.titleSmall.fontSize.value, 1e-3f)
+        assertEquals(16f, JustDiaryTypography.bodyLarge.fontSize.value, 1e-3f)
+        assertEquals(14f, JustDiaryTypography.bodyMedium.fontSize.value, 1e-3f)
+        assertEquals(12f, JustDiaryTypography.bodySmall.fontSize.value, 1e-3f)
+        assertEquals(14f, JustDiaryTypography.labelLarge.fontSize.value, 1e-3f)
+        assertEquals(12f, JustDiaryTypography.labelMedium.fontSize.value, 1e-3f)
+        assertEquals(11f, JustDiaryTypography.labelSmall.fontSize.value, 1e-3f)
+        // 行高也用官方值（不再自算比例）
+        assertEquals(24f, JustDiaryTypography.bodyLarge.lineHeight.value, 1e-3f)
+        assertEquals(28f, JustDiaryTypography.titleLarge.lineHeight.value, 1e-3f)
+    }
+
+    @Test
+    fun `editor paragraph ladder equals the material role sizes`() {
+        assertEquals(TypeSize.editorTitle.value, JustDiaryTypography.headlineMedium.fontSize.value, 1e-3f)
+        assertEquals(TypeSize.editorHeading.value, JustDiaryTypography.titleLarge.fontSize.value, 1e-3f)
+        assertEquals(TypeSize.editorBody.value, JustDiaryTypography.bodyLarge.fontSize.value, 1e-3f)
+        assertEquals(TypeSize.editorQuote.value, JustDiaryTypography.bodyMedium.fontSize.value, 1e-3f)
+    }
+
+    @Test
+    fun `editor paragraph ladder maps onto material roles`() {
+        // 行高不再自算比例，直接用 M3 角色的官方 lineHeight（见 EditorTypography 注释）；
+        // 这里守住"样式 → 设计字号"的一一对应，角色映射在 EditorTypography.textStyleFor。
+        assertEquals(TypeSize.editorTitle, EditorTypography.designSizeForStyle("title"))
+        assertEquals(TypeSize.editorHeading, EditorTypography.designSizeForStyle("heading"))
+        assertEquals(TypeSize.editorBody, EditorTypography.designSizeForStyle("body"))
+        assertEquals(TypeSize.editorQuote, EditorTypography.designSizeForStyle("quote"))
+        // 未知样式兜底成正文（不能默默变成大标题）
+        assertEquals(TypeSize.editorBody, EditorTypography.designSizeForStyle("whatever"))
     }
 }

@@ -1009,20 +1009,49 @@ Pixel 10 Pro AVD（1280 × 2856 @480dpi = 426.7 × 952dp）上逐屏实测。
 > （`largeIncreased`，M3 Expressive 新增），不是违规；真正不在梯级上的是 26 / 14 / 14。
 > 已在规范 §3.7 里写明。
 
-### 有意偏离（写在规范 §3.8，可复核）
+### 平台分工：两端各按自己的规范（R3 追加）
 
-1. **编辑器段落梯级 28/22/17/15** 保留 Apple 的数值 —— 它是**跨端阅读体验的契约**
-   （`content_json` 存的是语义样式，字号由样式在渲染端推导）。按 M3 应改成 28/22/**16**/**14**，
-   那会让 Android 与 iOS 的阅读版式出现可见差异。
-2. **首页分栏阈值 700dp**（M3 建议 840dp 起分栏）：日历 7 列至少 280dp + 正文列至少 320dp
+**iOS 按 Apple HIG，Android 按 Material 3** —— 已确认，并已在两边文档里写明，
+免得以后被当作 bug"修"回去。
+
+iOS 侧的依据（`../JustADiary`）：编辑器段落样式「字号取 Apple 的」
+（`RichTextEngine.swift:9` 明确写 Title 1 = 28 / Title 2 = 22 / Body = 17 / Subheadline = 15，出自
+HIG › Typography）；动态字体走 `UIFontMetrics(forTextStyle:)`；README 也写明
+「照 Apple 备忘录的做法管理字体」。它对得起来。
+
+因此**编辑器段落梯级按 M3 改了**（原先按 iOS 保留了 Apple 数值）：
+
+| 段落样式 | iOS（Apple HIG） | Android（Material 3） |
+| --- | --- | --- |
+| 大标题 | Title 1 = **28** | `headlineMedium` = **28** |
+| 小标题 | Title 2 = **22** | `titleLarge` = **22** |
+| 正文 | Body = **17** | `bodyLarge` = **16** |
+| 引用 | Subheadline = **15** | `bodyMedium` = **14** |
+
+同时修掉一个连带问题：阅读页原先把大标题映射到 `displayMedium` ——
+在 M3 基线里那是 **45sp**，不是段落标题该用的角色。现在映射到 `headlineMedium`（28sp），
+样式 → 角色只有 `EditorTypography.textStyleFor` 一个映射点。
+
+**行高也不再自算比例**：首轮沿用 iOS 的 `lineSpacing = 0.13 × 字号`（Apple 的 `lineSpacing` 是
+"额外"行距，不是行高），在 Compose 里被近似成 `fontSize × 1.13`，既不是 Apple 的语义也不是
+Material 的。现在直接用 M3 角色的官方行高（36 / 28 / 24 / 20）。
+
+**互通不受影响**：`content_json` 存的是**语义样式**（`title`/`heading`/`body`/`quote`）与行内标志，
+**字号从不落库**，各端渲染时按自己的规范推导。golden 字节级断言（Android 的
+`app/src/test/resources/golden/`）与 `tools/verify_backup_interop.sh` 全部照常通过。
+
+### 仍然偏离的点（规范 §3.8）
+
+1. **首页分栏阈值 700dp**（M3 建议 840dp 起分栏）：日历 7 列至少 280dp + 正文列至少 320dp
    ≈ 700dp，手机横屏可用宽 750dp 正好落进分栏一侧；按 840dp 则手机横屏永不分栏，与 iOS 版不一致。
-3. 周起始日 / 农历 / 干支生肖属区域设置内容，Material 无对应规范。
+2. 周起始日 / 农历 / 干支生肖属区域设置内容，Material 无对应规范。
 
 ### 验证
 
-- `./gradlew clean assembleDebug testDebugUnitTest`：**355 条全绿**
+- `./gradlew clean assembleDebug testDebugUnitTest`：**357 条全绿**
   （`DesignTokensTest` 改成断言 M3 梯级与 48dp；`CalendarLayoutTest` 的顶栏高度与
-  行高期望值随 64dp 更新）；
+  行高期望值随 64dp 更新；新增两条把"`MaterialTheme.typography` 的 11 个角色 == M3 官方字号"
+  与"编辑器梯级 == M3 角色字号"钉住 —— 这比截图更能防回归）；
 - `tools/verify_sqlite_schema.py`、`tools/verify_backup_interop.sh` 均通过；
 - 上机复测：月 / 周 / 年三态、点日期 morph、`‹ 九月` 回月态、年历 12 张卡可点、
   深色、设置页与其余三屏无溢出。

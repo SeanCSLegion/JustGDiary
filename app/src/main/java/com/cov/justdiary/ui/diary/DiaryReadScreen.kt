@@ -389,13 +389,10 @@ private fun ReadPart(
 
 @Composable
 private fun ParagraphText(render: ReadLayout.PartRender.Paragraph, keyword: String) {
-    val style = EditorTypography.designSizeForStyle(render.style)
-    val textStyle = when (render.style) {
-        "title" -> MaterialTheme.typography.displayMedium
-        "heading" -> MaterialTheme.typography.headlineMedium
-        "quote" -> MaterialTheme.typography.bodyMedium
-        else -> MaterialTheme.typography.bodyLarge
-    }
+    // 段落样式 → M3 角色（唯一映射点），行高直接用角色的官方值。
+    // 首轮这里是 displayMedium（45sp！）/ headlineMedium / bodyMedium / bodyLarge ——
+    // 大标题被映射到了 displayMedium，那是 M3 的 45sp 档，不是段落标题该用的角色。
+    val textStyle = EditorTypography.textStyleFor(render.style)
     val annotated = buildAnnotatedString {
         render.spans.forEach { span ->
             withStyle(
@@ -428,7 +425,6 @@ private fun ParagraphText(render: ReadLayout.PartRender.Paragraph, keyword: Stri
                 modifier = Modifier.padding(Spacing.card),
                 style = textStyle,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = (style.value * (1f + EditorTypography.lineSpacingRatio("quote"))).sp,
             )
         }
     } else {
@@ -438,7 +434,6 @@ private fun ParagraphText(render: ReadLayout.PartRender.Paragraph, keyword: Stri
             style = textStyle,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = if (render.alignCenter) TextAlign.Center else TextAlign.Start,
-            lineHeight = (style.value * (1f + EditorTypography.lineSpacingRatio(render.style))).sp,
         )
     }
 }

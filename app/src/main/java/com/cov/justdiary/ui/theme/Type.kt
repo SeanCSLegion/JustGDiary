@@ -1,6 +1,8 @@
 package com.cov.justdiary.ui.theme
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -67,29 +69,42 @@ fun justDiaryTypography(fontScale: Float): Typography {
  */
 val JustDiaryTypography: Typography = justDiaryTypography(fontScale = 1f)
 
-/** 编辑器段落样式 → 设计字号（与 `ContentPartStyle` 的语义一一对应）。 */
+/**
+ * 编辑器段落的**内容层排版**：段落样式 → Material 3 的排版角色（规范 §3.2、§6.3）。
+ *
+ * Android 侧按 **Material 3** 来（iOS 侧按 Apple HIG，两端有意不同，见 [TypeSize] 的注释）：
+ *
+ * | 段落样式 | M3 角色 | 字号 / 行高 |
+ * | --- | --- | --- |
+ * | `title`（大标题） | `headlineMedium` | 28 / 36 |
+ * | `heading`（小标题） | `titleLarge` | 22 / 28 |
+ * | `body`（正文） | `bodyLarge` | 16 / 24 |
+ * | `quote`（引用） | `bodyMedium` | 14 / 20 |
+ *
+ * **行高直接用角色的官方值**，不再自己算比例：首轮沿用了 iOS 的
+ * `lineSpacing = 0.13 × 字号`（Apple 的 `lineSpacing` 是"额外"行距，不是行高），
+ * 在 Compose 里被近似成 `fontSize × 1.13`，既不是 Apple 的语义也不是 Material 的。
+ *
+ * 段后距 Material **没有规范**（M3 不定义富文本段距），由阅读区的
+ * `Arrangement.spacedBy` 统一给节奏，不在这一层编造数值。
+ */
 object EditorTypography {
+
+    /** 段落样式 → M3 排版角色。**这是样式与字号的唯一映射点。** */
+    @Composable
+    fun textStyleFor(style: String): TextStyle = when (style) {
+        "title" -> MaterialTheme.typography.headlineMedium
+        "heading" -> MaterialTheme.typography.titleLarge
+        "quote" -> MaterialTheme.typography.bodyMedium
+        else -> MaterialTheme.typography.bodyLarge
+    }
+
+    /** 段落样式对应的设计字号（自绘 / 布局计算用；与 [textStyleFor] 的角色一一对应）。 */
     fun designSizeForStyle(style: String): Dp = when (style) {
         "title" -> TypeSize.editorTitle
         "heading" -> TypeSize.editorHeading
         "quote" -> TypeSize.editorQuote
         else -> TypeSize.editorBody
-    }
-
-    /**
-     * 段落行距比例（`RichTextEngine.swift:40-42`）：引用 0.5×，其余 0.13×。
-     * 只影响绘制、不落库 —— 读取时由块类型重新推导（与 iOS 一致）。
-     */
-    fun lineSpacingRatio(style: String): Float = if (style == "quote") 0.5f else 0.13f
-
-    /**
-     * 段后距比例（`RichTextEngine.swift:46-53`）：大标题 0.4、小标题 0.3、引用 0.4、正文 0。
-     */
-    fun paragraphSpacingRatio(style: String): Float = when (style) {
-        "title" -> 0.4f
-        "heading" -> 0.3f
-        "quote" -> 0.4f
-        else -> 0f
     }
 
     /** 编辑区最小高度（E4：默认 160dp，随正文字号缩放）。 */

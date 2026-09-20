@@ -77,13 +77,20 @@ object Spacing {
 /**
  * 命名语义字号（未缩放的**设计字号**）。
  *
- * ⚠️ **这一套是"内容层"的梯级**：编辑器段落（28/22/17/15，跨端阅读体验的契约）、
- * 日历与自绘文本。**M3 组件不用它** —— `MaterialTheme.typography` 的 15 个角色
- * 保持 Material 官方字号（见 [justDiaryTypography]），两者不要互相污染：
- * 首轮把这张表挂到 M3 角色上，结果是 `titleLarge = 18`、`bodyLarge = 17`、
- * `headlineSmall = 20`，顶栏 / 对话框 / 输入框全都不是官方尺寸。
+ * ⚠️ **这一套是"内容层"的梯级**：编辑器段落、日历与自绘文本。
+ * **M3 组件不用它** —— `MaterialTheme.typography` 的 15 个角色保持 Material
+ * 官方字号（见 [justDiaryTypography]）。首轮把这张表挂到 M3 角色上，结果是
+ * `titleLarge = 18`、`bodyLarge = 17`、`headlineSmall = 20`，顶栏 / 对话框 /
+ * 输入框全都不是官方尺寸。
  *
- * 数值与 iOS `TypeSize` 一一对应。
+ * **两个平台各按自己的规范**（已确认的产品决策）：
+ *  - iOS 版按 **Apple HIG** 的语义梯级（Title1 28 / Title2 22 / Body 17 / Subheadline 15，
+ *    见 `JustADiary/JustDiary/Views/Diary/RichTextEngine.swift:9`）；
+ *  - Android 版按 **Material 3** 的角色（headlineMedium 28 / titleLarge 22 /
+ *    bodyLarge 16 / bodyMedium 14）。
+ *  两边因此**阅读排版不完全一致**，这是有意的：`content_json` 存的是**语义样式**
+ *  （`title` / `heading` / `body` / `quote`），字号由各端在渲染时按自己的规范推导，
+ *  所以 `.jdiary` 仍然双向互通（`app/src/test/resources/golden/` 的字节级断言不变）。
  *
  * 实际绘制字号由 [DynamicTypeMetrics.effectiveSp] 结合系统字体缩放算出，
  * **绝不使用本对象里的裸值直接绘制**（否则会忽略系统文字大小设置）。
@@ -133,10 +140,17 @@ object TypeSize {
 
     // ---- 编辑器的语义段落梯级（title 28 / heading 22 / body 17 / quote 15）----
 
+    /** 大标题 → M3 `headlineMedium`（28sp / 行高 36）。 */
     val editorTitle: Dp = 28.dp
+
+    /** 小标题 → M3 `titleLarge`（22sp / 行高 28）。 */
     val editorHeading: Dp = 22.dp
-    val editorBody: Dp = 17.dp
-    val editorQuote: Dp = 15.dp
+
+    /** 正文 → M3 `bodyLarge`（16sp / 行高 24）。 */
+    val editorBody: Dp = 16.dp
+
+    /** 引用 → M3 `bodyMedium`（14sp / 行高 20）。 */
+    val editorQuote: Dp = 14.dp
 
     /** 编辑器四档梯级，从大到小（往返不变量测试用）。 */
     val editorLadder: List<Dp> = listOf(editorTitle, editorHeading, editorBody, editorQuote)

@@ -122,9 +122,14 @@ M3 的强调层级用语义色（`onSurface` / `onSurfaceVariant`）表达。实
    只把本项目的**逐档封顶动态字体**套上去。顶栏标题、对话框、`OutlinedTextField`、
    按钮、`NavigationBarItem`、芯片因此都是官方尺寸。
 2. **自绘内容用 [TypeSize] 梯级**（日历格子、柱状图、分享长图、编辑器段落）。
-   编辑器段落的 28 / 22 / 17 / 15 是**跨端阅读体验的契约**（与 iOS 的段落语义一一对应），
-   刻意保留 Apple 的梯级；它们落在 M3 角色上的**最近邻**是
-   headlineMedium / titleLarge / bodyLarge / bodyMedium。
+   编辑器段落的梯级**直接取 M3 的角色字号**：
+   `title → headlineMedium 28` / `heading → titleLarge 22` / `body → bodyLarge 16` /
+   `quote → bodyMedium 14`；**行高也用角色的官方值**（36 / 28 / 24 / 20），不再自算比例。
+   > **两个平台各按自己的规范**（已确认）：iOS 版按 Apple HIG 取 Title1 28 / Title2 22 /
+   > Body 17 / Subheadline 15（见 `JustADiary/JustDiary/Views/Diary/RichTextEngine.swift:9`），
+   > Android 版按 Material 3。两端的阅读排版因此**有意不同**；
+   > `content_json` 存的是**语义样式**、字号从不落库，所以 `.jdiary` 仍然双向互通
+   > （golden 字节级断言不变）。
 
 > **首轮的错误**：把自定梯级直接挂到 M3 的 15 个角色上，于是 `titleLarge = 18`（官方 22）、
 > `bodyLarge = 17`（官方 16）、`headlineSmall = 20`（官方 24）—— **所有 M3 组件都不是官方字号**。
@@ -208,7 +213,7 @@ Material 3 的层次靠 `surface` / `surfaceContainerLow` / 阴影与描边表�
 | 1 | 最小触控目标 | **48dp**（[Accessibility](https://m3.material.io/foundations/accessible-design/accessibility-basics)） | `Spacing.hitTarget = 48dp` | ✅ 本轮修正（原 44dp 是 iOS HIG） |
 | 2 | 形状梯级 | `extraSmall 4 / small 8 / medium 12 / large 16 / largeIncreased 20 / extraLarge 28 / extraLargeIncreased 32 / extraExtraLarge 48 / full`（[Shape](https://m3.material.io/styles/shape/shape-scale-tokens)） | `Radius`：`card 16` / `panel 28` / `field 12` / `image 12` / `badge 12` / `bar 4` | ✅ 本轮修正。**精确说明**：原来的 `card 20` 其实**是**官方令牌（`largeIncreased`，Expressive 新增）；但 `panel 26`、`field 14`、`image 14` **不在梯级上**。现在统一到 `large / extraLarge / medium`，与 M3 的卡片族取同一档 |
 | 3 | M3 组件字号 | 15 个角色的官方 type scale（[Type scale](https://m3.material.io/styles/typography/type-scale-tokens)）。**注意 M3 Expressive 修订过部分角色**，且每个角色还有 `Emphasized` 变体 | `MaterialTheme.typography` = **`Typography()` 基线**（直接取库里的官方值，因此自动跟随 Expressive 的修订）+ 本项目的逐档封顶缩放 | ✅ 本轮修正。原先把自定梯级挂到角色上，于是 `titleLarge = 18`（官方 22）、`bodyLarge = 17`（官方 16）、`headlineSmall = 20`（官方 24）—— 顶栏 / 对话框 / 输入框 / 按钮全都不是官方尺寸 |
-| 4 | 自绘内容字号 | 不受 type scale 约束，但应有据可依 | `TypeSize` 梯级；编辑器段落 28/22/17/15 是**跨端阅读契约**，最近邻为 headlineMedium / titleLarge / bodyLarge / bodyMedium | ⚠️ 有意保留（内容层，见 §3.2） |
+| 4 | 自绘内容字号 | 不受 type scale 约束，但应有据可依 | 编辑器段落**直接取 M3 角色**：headlineMedium 28 / titleLarge 22 / bodyLarge 16 / bodyMedium 14，行高用官方值 | ✅ 本轮修正（原为 Apple 的 28/22/17/15 + 自算行距；iOS 侧仍按 Apple，两端有意不同） |
 | 5 | Small top app bar | 高度 **64dp**（[Top app bar](https://m3.material.io/components/top-app-bar/specs)） | `CalendarLayout.HEADER_H = 64f` | ✅ 本轮修正（原 52dp 是自定值） |
 | 6 | 动效时长 / 缓动 | `duration.medium4 = 400ms`、`easing.emphasized = (0.2, 0, 0, 1)`（[Easing & duration](https://m3.material.io/styles/motion/easing-and-duration/tokens-specs)） | morph 400ms + emphasized；翻页 300ms(medium2) / 250ms(medium1) | ✅ 本轮修正（原 600ms + iOS 曲线） |
 | 7 | 状态层 / 涟漪 | 可交互元素必须有触摸反馈（[States](https://m3.material.io/foundations/interaction/states/state-layers)） | 日格 = 圆形涟漪；年历卡片 = 有界涟漪；遮罩层显式无反馈（正确） | ✅ 本轮修正（原日格/年历 `indication = null`，完全无反馈） |
@@ -222,15 +227,17 @@ Material 3 的层次靠 `surface` / `surfaceContainerLow` / 阴影与描边表�
 | 15 | 无障碍语义 | 交互元素有 `contentDescription`；装饰性图标为 `null`；状态可读 | 日格逐格可读、结果行带 Button 特质、装饰图标显式 null | ✅ |
 | 16 | 减弱动效 | 尊重系统"减弱动态效果" | 180ms 线性（morph）/ 不做 morph | ✅ |
 
-**判定汇总**：16 项里 **13 项 ✅**、**3 项 ⚠️ 有意偏离**（自绘内容字号、分栏阈值、以及第 4 项
-的编辑器段落梯级）。三项都写在方案里、有理由、可复核 —— 这是"按 Google 规范"与
-"与 iOS 版功能/阅读体验对齐"两条约束的**已知交点**，不是遗漏。
+**判定汇总**：16 项里 **14 项 ✅**、**2 项 ⚠️ 有意偏离**（分栏阈值 700dp、
+以及属于区域设置内容的周起始日 / 农历 / 干支生肖）。
+"编辑器段落梯级"这一项原先是偏离，**已按 M3 改掉**；iOS 侧继续按 Apple HIG，
+两端阅读排版有意不同而互通不受影响 —— 这是"各按自己的平台规范"的正常结果，不是缺陷。
 
-### 3.8 仍然偏离、需要产品决策的点
+### 3.8 仍然偏离的点
 
-1. **编辑器段落梯级 28/22/17/15** 保留 Apple 的数值（跨端阅读体验一致）。若要完全按 M3，
-   应改为 headlineMedium 28 / titleLarge 22 / bodyLarge **16** / bodyMedium **14**
-   —— 那会让 Android 与 iOS 的阅读版式出现可见差异。**默认不改**。
+1. ~~编辑器段落梯级保留 Apple 的数值~~ → **已按 M3 改**：28 / 22 / **16** / **14**
+   （headlineMedium / titleLarge / bodyLarge / bodyMedium），行高用角色官方值。
+   iOS 侧保持 Apple HIG 的 28 / 22 / 17 / 15。**两端阅读排版有意不同**，
+   互通不受影响（存语义样式，不存字号）。这条已从"偏离项"变成"平台分工"。
 2. **首页分栏阈值 700dp**（M3 建议 840dp 起分栏）：日历 7 列至少要 280dp、正文列至少 320dp，
    相加 ≈ 700dp，手机横屏的可用宽 750dp 正好落进分栏一侧。按 840dp 的话手机横屏永远不会分栏，
    与 iOS 版行为不一致。
