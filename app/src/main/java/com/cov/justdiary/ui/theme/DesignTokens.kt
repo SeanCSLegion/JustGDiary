@@ -15,22 +15,31 @@ import androidx.compose.ui.unit.sp
  */
 object Radius {
 
-    /** 内容卡片、列表行、hero 面板。 */
-    val card: Dp = 20.dp
+    /**
+     * 全部取值**对齐 Material 3 的形状梯级**（`ShapeKeyTokens` / `MaterialTheme.shapes`）：
+     * `extraSmall 4` / `small 8` / `medium 12` / `large 16` / `extraLarge 28` / `full`。
+     *
+     * 首轮这些数字是从 iOS `DesignSystem.swift` 逐字搬来的（20 / 26 / 14 / 14），
+     * 都不是 M3 梯级上的值；视觉层既然走 Material，自绘组件也要落在同一条梯级上
+     * （M3 组件本来就是 `MaterialTheme.shapes` 给的，两者混用会出现"卡片 12、日历 20"的错位）。
+     */
 
-    /** 悬浮控件面：编辑器格式栏、sheet。 */
-    val panel: Dp = 26.dp
+    /** 内容卡片、列表行、hero 面板。M3 `large`。 */
+    val card: Dp = 16.dp
 
-    /** 输入框与卡片内的次级面。 */
-    val field: Dp = 14.dp
+    /** 悬浮控件面：编辑器格式栏、sheet。M3 `extraLarge`。 */
+    val panel: Dp = 28.dp
 
-    /** 卡片内联图片。 */
-    val image: Dp = 14.dp
+    /** 输入框与卡片内的次级面。M3 `medium`。 */
+    val field: Dp = 12.dp
 
-    /** 图标徽章与小色块。 */
+    /** 卡片内联图片。M3 `medium`。 */
+    val image: Dp = 12.dp
+
+    /** 图标徽章与小色块。M3 `medium`。 */
     val badge: Dp = 12.dp
 
-    /** 图表柱、进度条。 */
+    /** 图表柱、进度条。M3 `extraSmall`。 */
     val bar: Dp = 4.dp
 
     /** 2dp 高的标记线（日历"有日记"下划线取 1dp 圆角）。 */
@@ -52,15 +61,29 @@ object Spacing {
     /** 卡片图标徽章与文字之间的距离。 */
     val rowIcon: Dp = 12.dp
 
-    /** 最小点击目标。 */
-    val hitTarget: Dp = 44.dp
+    /**
+     * 最小触控目标。
+     *
+     * **Material 的硬性要求是 48dp**（Material 3 "Accessibility" → touch target size；
+     * 也是 Android 的 `LocalMinimumInteractiveComponentSize` 默认值）。
+     * 首轮这里是 iOS HIG 的 44pt —— 那是 Apple 的数值，不是 Google 的。
+     */
+    val hitTarget: Dp = 48.dp
 
     /** 页面统一边距（iOS 侧十六处一致）。 */
     val page: Dp = 16.dp
 }
 
 /**
- * 命名语义字号（未缩放的**设计字号**）。数值与 iOS `TypeSize` 一一对应。
+ * 命名语义字号（未缩放的**设计字号**）。
+ *
+ * ⚠️ **这一套是"内容层"的梯级**：编辑器段落（28/22/17/15，跨端阅读体验的契约）、
+ * 日历与自绘文本。**M3 组件不用它** —— `MaterialTheme.typography` 的 15 个角色
+ * 保持 Material 官方字号（见 [justDiaryTypography]），两者不要互相污染：
+ * 首轮把这张表挂到 M3 角色上，结果是 `titleLarge = 18`、`bodyLarge = 17`、
+ * `headlineSmall = 20`，顶栏 / 对话框 / 输入框全都不是官方尺寸。
+ *
+ * 数值与 iOS `TypeSize` 一一对应。
  *
  * 实际绘制字号由 [DynamicTypeMetrics.effectiveSp] 结合系统字体缩放算出，
  * **绝不使用本对象里的裸值直接绘制**（否则会忽略系统文字大小设置）。
@@ -222,6 +245,22 @@ object DynamicTypeMetrics {
     fun calendarSp(designSize: Dp, fontScale: Float): TextUnit {
         val scale = if (fontScale.isFinite() && fontScale > 0f) fontScale else 1f
         return (designSize.value * calendarMultiplier(scale) / scale).sp
+    }
+
+    /**
+     * 按**官方字号**解析绘制用的 `sp`：给 M3 的排版角色用。
+     *
+     * [TypeSize] 是本项目自己的内容梯级（编辑器段落、日历、自绘文本）；
+     * 而 `MaterialTheme.typography` 的 15 个角色必须**保持 M3 官方字号**
+     * （titleLarge 22 / bodyLarge 16 / labelLarge 14 …），否则 M3 组件
+     * （顶栏标题、对话框、输入框、按钮、标签页）会渲染成非官方尺寸。
+     *
+     * 规则与 [effectiveSp] 相同：`fontScale = 1` 时返回官方值本身，
+     * 放大时按该档上限封顶（梯级永不倒挂），并先除掉 Compose 的自动缩放。
+     */
+    fun effectiveSpForSize(designSize: Float, fontScale: Float): TextUnit {
+        val scale = if (fontScale.isFinite() && fontScale > 0f) fontScale else 1f
+        return (designSize * effectiveMultiplier(designSize, scale) / scale).sp
     }
 }
 

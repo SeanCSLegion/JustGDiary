@@ -30,8 +30,14 @@ object CalendarLayout {
 
     // ------------------------------------------------------------------ 常量
 
-    /** morph 时长（毫秒）。 */
-    const val MORPH_DURATION_MS = 600
+    /**
+     * morph 时长（毫秒）＝ **M3 duration token `medium4` (400ms)**。
+     *
+     * 首轮取 600ms（= iOS 侧的 morphDuration），配合一条自定曲线把"感觉慢"压下去；
+     * 现在按 Material 的令牌来：大面积"容器变换"用 `medium4` + `emphasized` 缓动，
+     * 不需要靠拉长时长换顺滑。
+     */
+    const val MORPH_DURATION_MS = 400
 
     /** `-slow-morph` / `SLOW_MORPH=1` 下的调试慢放时长。 */
     const val SLOW_MORPH_DURATION_MS = 3000
@@ -40,19 +46,35 @@ object CalendarLayout {
     const val REDUCED_MORPH_DURATION_MS = 180
 
     /**
-     * morph 的曲线控制点 `timingCurve(0.2, 0.75, 0.3, 1.0)`。
+     * **M3 `easing.emphasized`** = `cubic-bezier(0.2, 0, 0, 1)`。
      *
-     * 为什么不是 `easeInOut`：实测同样 0.6s，`easeInOut` 在时间过 25% 时只走了 13% 进度，
-     * 而这条曲线走 65% —— 这就是当初"感觉慢"的根因（`docs/animation-and-accessibility.md:38-48`）。
+     * 数值取自 material3 1.4.0 的官方令牌实现（`MotionTokens.EasingEmphasizedCubicBezier`）；
+     * 首轮用的 `timingCurve(0.2, 0.75, 0.3, 1.0)` 是 iOS 的曲线，不属于 Material。
      */
-    val MORPH_EASING = floatArrayOf(0.2f, 0.75f, 0.3f, 1.0f)
+    val M3_EMPHASIZED = floatArrayOf(0.2f, 0f, 0f, 1f)
 
-    /** 翻月 / 今天是 `.snappy(duration: 0.3)`；横屏点日期与 toast 是 0.25。 */
+    /**
+     * **M3 `easing.emphasized.decelerate`** = `cubic-bezier(0.05, 0.7, 0.1, 1)`。
+     *
+     * 用于"进入"方向的大面积过渡（`MotionTokens.EasingEmphasizedDecelerateCubicBezier`）。
+     */
+    val M3_EMPHASIZED_DECELERATE = floatArrayOf(0.05f, 0.7f, 0.1f, 1f)
+
+    /**
+     * 翻月 / 翻周 / 回到今天的时长（毫秒）。
+     *
+     * 两者都是 **M3 duration token**：`medium1 = 250`、`medium2 = 300`。
+     */
     const val PAGE_SETTLE_DURATION_MS = 300
     const val QUICK_SETTLE_DURATION_MS = 250
 
-    /** 竖屏：首页顶栏高度（与 `HomeTopBar` 的 `heightIn(min = 52.dp)` 对应）。 */
-    const val HEADER_H = 52f
+    /**
+     * 竖屏：首页顶栏高度。
+     *
+     * **64dp 是 Material 3 `small top app bar` 的官方高度**（M3 "App bars" → small）。
+     * 首轮取的 52dp 是自定值。
+     */
+    const val HEADER_H = 64f
 
     /** 竖屏：月历的大标题槽（**只在月态存在**）。 */
     const val BIG_TITLE_H = 72f
@@ -133,11 +155,9 @@ object CalendarLayout {
      */
 
 
-    /** 未选中的相邻月日期的不透明度。 */
-    const val ADJACENT_MONTH_ALPHA = 0.35f
-
-    /** 未来日期的整体不透明度系数。 */
-    const val FUTURE_ALPHA = 0.35f
+    // 注：首轮这里有 ADJACENT_MONTH_ALPHA / FUTURE_ALPHA 两个"压透明度"的常量。
+    // 相邻月现在**不画**，未来日期改用 M3 的 `onSurfaceVariant`（语义色层级）而不是
+    // 透明度 —— 0.35 alpha 的对比度只有 2.19:1，Material / WCAG AA 都不允许。
 
     // ------------------------------------------------------------------ 基础工具
 
@@ -657,6 +677,4 @@ object CalendarLayout {
         return (lead + date.dayOfMonth - 1) / 7
     }
 
-    /** 相邻月份的日期在锚定月份网格里的额外透明度（与 iOS 的 `adjacentAlpha` 默认值一致）。 */
-    fun adjacentAlpha(showAdjacent: Boolean): Float = if (showAdjacent) 1f else ADJACENT_MONTH_ALPHA
 }

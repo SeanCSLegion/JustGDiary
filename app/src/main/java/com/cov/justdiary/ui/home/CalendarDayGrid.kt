@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ripple
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -145,8 +146,6 @@ fun CalendarDayGrid(
                     }
                     CalendarDayCell(
                         date = date,
-                        anchorMonth = anchorMonth,
-                        showAdjacent = showAdjacent,
                         showLunar = showLunar,
                         isSelected = DateUtil.dayKeyOf(date) == selectedKey,
                         isToday = DateUtil.dayKeyOf(date) == todayKey,
@@ -182,8 +181,6 @@ fun CalendarDayGrid(
 @Composable
 private fun CalendarDayCell(
     date: LocalDate,
-    anchorMonth: LocalDate,
-    showAdjacent: Boolean,
     showLunar: Boolean,
     isSelected: Boolean,
     isToday: Boolean,
@@ -200,14 +197,7 @@ private fun CalendarDayCell(
     modifier: Modifier = Modifier,
 ) {
     val key = DateUtil.dayKeyOf(date)
-    val inMonth = date.year == anchorMonth.year && date.monthValue == anchorMonth.monthValue
     val isFuture = key > todayKey
-    val contentAlpha = when {
-        !inMonth && !showAdjacent -> CalendarLayout.ADJACENT_MONTH_ALPHA
-        !inMonth -> 0.55f
-        isFuture -> CalendarLayout.FUTURE_ALPHA
-        else -> 1f
-    }
 
     val dateLabel = DateFormats.dayTitleFor(date)
     val todayLabel = stringResource(R.string.index_today)
@@ -221,9 +211,13 @@ private fun CalendarDayCell(
         add(if (hasDiary) hasDiaryLabel else noDiaryLabel)
     }.joinToString(" · ")
 
+    // 文字**不压 alpha**：M3 的强调层级用语义色表达，不用透明度。
+    // 实测 0.35 alpha 的日号在浅色下只有 2.19:1，连"大字 3:1"都不到（WCAG AA / Material 都不允许）；
+    // `onSurfaceVariant` 是 M3 的"中等强调"角色，浅色下约 8.6:1。
     val dayColor = when {
         isSelected -> MaterialTheme.colorScheme.onPrimary
         isToday -> MaterialTheme.colorScheme.primary
+        isFuture -> MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.onSurface
     }
     val markColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
@@ -235,10 +229,13 @@ private fun CalendarDayCell(
             // 不写 fillMaxHeight 时 Box 只包住内容（日号 + 农历 ≈ 70dp），
             // 于是内容贴在行顶、下面空一截，分隔线看起来离内容很远。
             .fillMaxHeight()
+            // Material 要求交互元素有**状态层/涟漪**；首轮这里是 `indication = null`
+            // （日历格子完全没有任何触摸反馈）。做成"以日号圆为直径的圆形涟漪"，
+            // 与 M3 date picker 的 40dp 圆形状态层同一种表达。
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
-                indication = null,
+                indication = ripple(bounded = false, radius = circleDiameter / 2),
                 role = Role.Button,
                 onClick = onClick,
             )
@@ -284,7 +281,7 @@ private fun CalendarDayCell(
                 Text(
                     text = date.dayOfMonth.toString(),
                     fontSize = dayFontSize,
-                    color = dayColor.copy(alpha = contentAlpha),
+                    color = dayColor,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Center,
@@ -294,15 +291,14 @@ private fun CalendarDayCell(
                 Text(
                     text = Lunar.dayLabelOf(date),
                     fontSize = lunarFontSize,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                        .copy(alpha = contentAlpha * 0.75f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Center,
                 )
             }
             if (hasDiary) {
-                DiaryMark(color = markColor.copy(alpha = contentAlpha), width = diaryMarkWidth)
+                DiaryMark(color = markColor, width = diaryMarkWidth)
             }
         }
     }
@@ -354,11 +350,10 @@ fun CalendarWeekdayHeader(
                 text = label,
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
-                color = if (isWeekend) {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                // 周末列同样不压 alpha（0.6 的 onSurfaceVariant 只有 3.16:1，
+                // 而星期栏是 11sp 小字，需要 4.5:1）。M3 的 `onSurfaceVariant` 本身
+                // 就是"列标题"这一层强调，直接用即可。
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelMedium,
                 fontSize = DynamicTypeMetrics.calendarSp(11.dp, fontScale),
                 maxLines = 1,

@@ -8,48 +8,55 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 
 /**
- * Material 3 排版：把本项目的**设计字号梯级**映射到 M3 的语义排版角色。
+ * Material 3 排版。
  *
- * 为什么不是直接用 `Typography()` 的基线值：本项目有一套既定的设计字号
- * （32 / 28 / 24 / 22 / 20 / 18 / 17 / 16 / 15 / 14 / 13 / 12 / 11，见 [TypeSize]），
- * 屏幕上每一处文字都应该取其中之一，而不是各自拍脑袋。把它们挂到 M3 的角色上之后，
- * 组件里写 `MaterialTheme.typography.titleMedium` 就等于拿到设计字号 20，
- * 同时仍然处在 M3 的排版体系内。
+ * ## 为什么是"官方基线 + 本项目缩放"而不是"把自定梯级挂上去"
  *
- * 字号通过 [DynamicTypeMetrics.effectiveSp] 解析（含逐档上限），因此**默认字号下
- * 每个角色都恰好等于设计字号**，放大字号时才按各档上限分别增长。
+ * 首轮把本项目的设计字号梯级（32/28/24/22/20/18/17/16/15/14/13/12/11）
+ * 直接挂到 M3 的 15 个角色上，结果是 `titleLarge = 18`（官方 22）、
+ * `bodyLarge = 17`（官方 16）、`headlineSmall = 20`（官方 24）……
+ * 于是**所有 M3 组件都不是官方字号**：顶栏标题、对话框、`OutlinedTextField`、
+ * 按钮、`NavigationBarItem` 全部偏离。
  *
- * `lineHeight` 一律留给平台默认：编辑器的段落行距（正文 0.13×、引用 0.5×）是**绘制规则**，
- * 在 M5 的编辑器渲染里单独处理（与 iOS 一致），不混进通用排版。
+ * 现在：15 个角色**保持 Material 官方字号**（`Typography()` 基线），只把本项目的
+ * **逐档封顶动态字体**套上去 —— `fontScale = 1` 时与 Google 的基线逐字一致，
+ * 放大时按各档上限增长、梯级不倒挂。
+ *
+ * 本项目的自定梯级 [TypeSize] 仍然服务于**内容层**：编辑器段落（28/22/17/15 是
+ * 跨端阅读体验的契约）、日历格子、自绘文本。两者职责分开，不再互相污染。
+ *
+ * `lineHeight` 保持 M3 的角色行高；编辑器的段落行距（正文 0.13×、引用 0.5×）
+ * 是**绘制规则**，在编辑器渲染里单独处理（与 iOS 一致），不混进通用排版。
  */
 fun justDiaryTypography(fontScale: Float): Typography {
-    fun style(designSize: Dp, weight: FontWeight) = TextStyle(
-        fontSize = DynamicTypeMetrics.effectiveSp(designSize, fontScale),
-        fontWeight = weight,
-        lineHeight = TextUnit.Unspecified,
+    val base = Typography()
+
+    /** 保留 M3 官方的字号与字重，只把**字号**按本项目的逐档上限重算。 */
+    fun TextStyle.scaledRole(): TextStyle = copy(
+        fontSize = DynamicTypeMetrics.effectiveSpForSize(fontSize.value, fontScale),
+        lineHeight = if (lineHeight == TextUnit.Unspecified) {
+            TextUnit.Unspecified
+        } else {
+            DynamicTypeMetrics.effectiveSpForSize(lineHeight.value, fontScale)
+        },
     )
 
     return Typography(
-        // 大字号：日历的月/年标题、编辑器大标题
-        displayLarge = style(TypeSize.display, FontWeight.Normal),
-        displayMedium = style(TypeSize.editorTitle, FontWeight.Bold),
-        displaySmall = style(TypeSize.pageTitle, FontWeight.Bold),
-        // 标题
-        headlineLarge = style(TypeSize.pageTitle, FontWeight.SemiBold),
-        headlineMedium = style(TypeSize.editorHeading, FontWeight.SemiBold),
-        headlineSmall = style(TypeSize.cardTitle, FontWeight.SemiBold),
-        // 小标题与行内主文本
-        titleLarge = style(TypeSize.headerTitle, FontWeight.SemiBold),
-        titleMedium = style(TypeSize.sheetTitle, FontWeight.Medium),
-        titleSmall = style(TypeSize.rowTitle, FontWeight.Medium),
-        // 正文
-        bodyLarge = style(TypeSize.editorBody, FontWeight.Normal),
-        bodyMedium = style(TypeSize.rowTitle, FontWeight.Normal),
-        bodySmall = style(TypeSize.rowSub, FontWeight.Normal),
-        // 标签、芯片、徽章
-        labelLarge = style(TypeSize.chip, FontWeight.Medium),
-        labelMedium = style(TypeSize.badge, FontWeight.Medium),
-        labelSmall = style(TypeSize.caption, FontWeight.Normal),
+        displayLarge = base.displayLarge.scaledRole(),
+        displayMedium = base.displayMedium.scaledRole(),
+        displaySmall = base.displaySmall.scaledRole(),
+        headlineLarge = base.headlineLarge.scaledRole(),
+        headlineMedium = base.headlineMedium.scaledRole(),
+        headlineSmall = base.headlineSmall.scaledRole(),
+        titleLarge = base.titleLarge.scaledRole(),
+        titleMedium = base.titleMedium.scaledRole(),
+        titleSmall = base.titleSmall.scaledRole(),
+        bodyLarge = base.bodyLarge.scaledRole(),
+        bodyMedium = base.bodyMedium.scaledRole(),
+        bodySmall = base.bodySmall.scaledRole(),
+        labelLarge = base.labelLarge.scaledRole(),
+        labelMedium = base.labelMedium.scaledRole(),
+        labelSmall = base.labelSmall.scaledRole(),
     )
 }
 

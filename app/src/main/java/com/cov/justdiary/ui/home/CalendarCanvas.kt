@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -112,7 +113,7 @@ fun YearCanvas(
                 if (zodiacLabel.isNotEmpty()) {
                     val zodiacStyle = TextStyle(
                         fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, density.fontScale),
-                        color = onSurfaceVariant.copy(alpha = 0.7f),
+                        color = onSurfaceVariant,
                     )
                     val zodiacText = measurer.measure(zodiacLabel, zodiacStyle)
                     drawText(
@@ -217,9 +218,11 @@ fun YearCanvas(
                         .offset(x = card.x.dp, y = card.y.dp)
                         .fillMaxWidth(card.w / canvasW)
                         .fillMaxHeight(card.h / canvasH)
+                        // Material 要求状态层；年历卡片是一个整体点击目标，
+                        // 用默认的有界涟漪（矩形内）即可。
                         .clickable(
                             interactionSource = interaction,
-                            indication = null,
+                            indication = ripple(),
                             role = Role.Button,
                             onClick = { onMonthClick(month) },
                         )

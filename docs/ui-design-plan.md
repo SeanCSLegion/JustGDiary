@@ -105,11 +105,33 @@ iOS 对照：iPhone 18 Pro（402 × 874 pt，iOS 27）
 
 **"有内容 / 无内容"不许只靠颜色承载**：一律同时有形状或文字差异（下划线、圆环、stateDescription）。
 
+**对比度（硬性）**：正文 ≥ 4.5:1、大字（≥18.66sp 粗体或 ≥24sp）≥ 3:1（WCAG AA，Material 的
+"Accessibility → color and contrast" 直接引用它）。**不用 `alpha` 压文字表达"次要"** ——
+M3 的强调层级用语义色（`onSurface` / `onSurfaceVariant`）表达。实测反例：未来日期原先
+`onSurface @35%`，浅色下只有 **2.19:1**；周末列 `onSurfaceVariant @60%` 只有 **3.16:1**
+（而星期栏是 11sp 小字，需要 4.5:1）。现已全部改为语义色。
+
 ### 3.2 字体梯级
 
-字号只允许落在梯级上（`ui/theme/TypeSize.kt`），不拍脑袋取字号。缩放走
-`DynamicTypeMetrics.effectiveSp`：`multiplier = min(ceiling(style), max(1, fontScale))`，
-**`fontScale = 1` 时全部为 1**（默认外观与设计一致），放大时按档封顶保证梯级永不倒挂。
+**两层字号，职责分开**：
+
+1. **M3 组件的 15 个排版角色 = Material 官方字号**。`MaterialTheme.typography`
+   直接取 `Typography()` 基线（displayLarge 57 / headlineLarge 32 / headlineMedium 28 /
+   headlineSmall 24 / titleLarge 22 / titleMedium 16 / titleSmall 14 / bodyLarge 16 /
+   bodyMedium 14 / bodySmall 12 / labelLarge 14 / labelMedium 12 / labelSmall 11 …），
+   只把本项目的**逐档封顶动态字体**套上去。顶栏标题、对话框、`OutlinedTextField`、
+   按钮、`NavigationBarItem`、芯片因此都是官方尺寸。
+2. **自绘内容用 [TypeSize] 梯级**（日历格子、柱状图、分享长图、编辑器段落）。
+   编辑器段落的 28 / 22 / 17 / 15 是**跨端阅读体验的契约**（与 iOS 的段落语义一一对应），
+   刻意保留 Apple 的梯级；它们落在 M3 角色上的**最近邻**是
+   headlineMedium / titleLarge / bodyLarge / bodyMedium。
+
+> **首轮的错误**：把自定梯级直接挂到 M3 的 15 个角色上，于是 `titleLarge = 18`（官方 22）、
+> `bodyLarge = 17`（官方 16）、`headlineSmall = 20`（官方 24）—— **所有 M3 组件都不是官方字号**。
+> 现已拆开。
+
+缩放走 `DynamicTypeMetrics`：`multiplier = min(ceiling(style), max(1, fontScale))`，
+**`fontScale = 1` 时全部为 1**（默认外观与官方基线逐字一致），放大时按档封顶保证梯级永不倒挂。
 
 日历内文字走**半速**（`calendarSp`）：格子尺寸由屏幕决定，全速放大必然溢出。
 
@@ -117,19 +139,46 @@ iOS 对照：iPhone 18 Pro（402 × 874 pt，iOS 27）
 
 ### 3.3 间距 / 圆角 / 触控目标
 
-- 间距只用 `Spacing`：`page = 16` / `card = 12` / `rowIcon = 12` / `hitTarget = 44`；
-- 圆角：M3 组件用 `MaterialTheme.shapes`；**自绘**组件（日历格、柱状图、分享长图）用 `Radius` 令牌，嵌套圆角走 `Radius.concentric(outer, inset)`；
-- **最小点击目标 48dp**：日格因此不小于 48dp；更小的视觉元素（选中圆、图标）靠外层 padding 或 `minimumInteractiveComponentSize` 补足。
+- 间距只用 `Spacing`：`page = 16` / `card = 12` / `rowIcon = 12`；
+- 圆角**全部落在 M3 形状梯级上**。material3 1.4.0（M3 Expressive）的完整梯级是
+  `none 0` / `extraSmall 4` / `small 8` / `medium 12` / `large 16` / `largeIncreased 20` /
+  `extraLarge 28` / `extraLargeIncreased 32` / `extraExtraLarge 48` / `full`。M3 组件本来就走 `MaterialTheme.shapes`；**自绘**组件（日历格、柱状图、
+  分享长图）用 `Radius` 令牌，取值同样对齐这条梯级 ——
+  `card = 16`(large) / `panel = 28`(extraLarge) / `field = 12`(medium) / `image = 12`(medium) /
+  `badge = 12`(medium) / `bar = 4`(extraSmall) / `hairline = 1`(自绘 2dp 标记线)；
+  嵌套圆角走 `Radius.concentric(outer, inset)`；
+- **最小触控目标 48dp —— Material 的硬性要求**：`Spacing.hitTarget = 48dp`，日格不小于它；
+  更小的视觉元素（选中圆、图标）靠外层 padding 或
+  `LocalMinimumInteractiveComponentSize` 补足。
+
+> **首轮的形状与触控目标是 iOS 的数值**：`card 20` / `panel 26` / `field 14` / `image 14` /
+> `hitTarget 44pt` —— 没有一个是 M3 梯级上的值，44dp 更是低于 Material 的下限。
+> 视觉层既然走 Material，自绘组件也必须落在同一条梯级上，否则会出现
+> "M3 卡片 12、日历 20"的错位。
+
+- **状态层（涟漪）是硬性要求**：可交互元素必须有触摸反馈。首轮日历格与年历卡片写的是
+  `indication = null`，**完全没有反馈**。现在日格给"以日号圆为直径的圆形涟漪"
+  （同 M3 date picker 的圆形状态层），年历卡片给默认有界涟漪。
+  **例外**：导出/导入的遮罩层（scrim）用 `indication = null` 是**正确**的 —— 它只负责吞掉点击。
 
 ### 3.4 动效令牌
 
-| 令牌 | 值 | 用途 |
-| --- | --- | --- |
-| `MORPH_DURATION_MS` | **600** | 月↔周、年↔月 morph |
-| `MORPH_CURVE` | `CubicBezier(0.2f, 0.75f, 0.3f, 1.0f)` | 同上（iOS 原文曲线） |
-| `REDUCED_MORPH_DURATION_MS` | **180** + `LinearEasing` | 系统"减弱动态效果"开启时 |
-| `PAGE_SETTLE_DURATION_MS` | **300** | 翻月 / 翻周 / 回到今天 |
-| `QUICK_SETTLE_DURATION_MS` | **250** | 分栏下点日期、toast |
+**全部取 Material 3 的动效令牌**（数值与 material3 1.4.0 的 `MotionTokens` 逐字一致）：
+
+| 令牌 | 值 | M3 令牌名 | 用途 |
+| --- | --- | --- | --- |
+| `MORPH_DURATION_MS` | **400** | `duration.medium4` | 月↔周、年↔月 morph（大面积容器变换） |
+| `M3_EMPHASIZED` | `(0.2, 0, 0, 1)` | `easing.emphasized` | morph |
+| `M3_EMPHASIZED_DECELERATE` | `(0.05, 0.7, 0.1, 1)` | `easing.emphasized.decelerate` | "进入"方向的大面积过渡 |
+| `PAGE_SETTLE_DURATION_MS` | **300** | `duration.medium2` | 翻月 / 翻周 / 回到今天 |
+| `QUICK_SETTLE_DURATION_MS` | **250** | `duration.medium1` | 分栏下点日期、toast |
+| `REDUCED_MORPH_DURATION_MS` | **180** + 线性 | —（Android 无障碍约定） | 系统"减弱动态效果"开启时 |
+
+> **首轮用的是 iOS 的曲线**：600ms + `timingCurve(0.2, 0.75, 0.3, 1.0)`。那是 Apple 的数值，
+> 不属于 Material；按 Google 的令牌改成 `medium4 + easing.emphasized` 之后**不需要靠拉长时长
+> 换顺滑**，所以时长从 600 降到 400。
+> （`MaterialTheme.motionScheme` 在 material3 1.4.0 里仍是 `internal`，取不到，
+> 因此按官方令牌值显式构造 `CubicBezierEasing`。）
 | 弹簧（可选） | `snappy(0.3)` 的 Compose 等价 | 优先用 `tween` 保持与纯数学层一致 |
 
 调试开关保留：`-slow-morph`（慢放，肉眼核对几何）、`-morph-log`（帧率日志）。
@@ -148,6 +197,45 @@ Material 3 的层次靠 `surface` / `surfaceContainerLow` / 阴影与描边表�
 - 页面底 = `colorScheme.surface`（`Scaffold` 默认）；
 - 内容卡片 = `surfaceContainerLow` + 0.5dp `outlineVariant@45%` 描边；
 - 日历整块**不套卡片**（与 iOS 一致：日历是版面本身，不是卡片）。
+
+### 3.7 Material 3 合规核对表
+
+规范：以 Google 官方的 Material 3 为准（[m3.material.io](https://m3.material.io) 与
+`androidx.compose.material3` 1.4.0 的令牌实现）。逐项核对结果：
+
+| # | 项目 | Google 官方要求 | 本项目现状 | 判定 |
+| --- | --- | --- | --- | --- |
+| 1 | 最小触控目标 | **48dp**（[Accessibility](https://m3.material.io/foundations/accessible-design/accessibility-basics)） | `Spacing.hitTarget = 48dp` | ✅ 本轮修正（原 44dp 是 iOS HIG） |
+| 2 | 形状梯级 | `extraSmall 4 / small 8 / medium 12 / large 16 / largeIncreased 20 / extraLarge 28 / extraLargeIncreased 32 / extraExtraLarge 48 / full`（[Shape](https://m3.material.io/styles/shape/shape-scale-tokens)） | `Radius`：`card 16` / `panel 28` / `field 12` / `image 12` / `badge 12` / `bar 4` | ✅ 本轮修正。**精确说明**：原来的 `card 20` 其实**是**官方令牌（`largeIncreased`，Expressive 新增）；但 `panel 26`、`field 14`、`image 14` **不在梯级上**。现在统一到 `large / extraLarge / medium`，与 M3 的卡片族取同一档 |
+| 3 | M3 组件字号 | 15 个角色的官方 type scale（[Type scale](https://m3.material.io/styles/typography/type-scale-tokens)）。**注意 M3 Expressive 修订过部分角色**，且每个角色还有 `Emphasized` 变体 | `MaterialTheme.typography` = **`Typography()` 基线**（直接取库里的官方值，因此自动跟随 Expressive 的修订）+ 本项目的逐档封顶缩放 | ✅ 本轮修正。原先把自定梯级挂到角色上，于是 `titleLarge = 18`（官方 22）、`bodyLarge = 17`（官方 16）、`headlineSmall = 20`（官方 24）—— 顶栏 / 对话框 / 输入框 / 按钮全都不是官方尺寸 |
+| 4 | 自绘内容字号 | 不受 type scale 约束，但应有据可依 | `TypeSize` 梯级；编辑器段落 28/22/17/15 是**跨端阅读契约**，最近邻为 headlineMedium / titleLarge / bodyLarge / bodyMedium | ⚠️ 有意保留（内容层，见 §3.2） |
+| 5 | Small top app bar | 高度 **64dp**（[Top app bar](https://m3.material.io/components/top-app-bar/specs)） | `CalendarLayout.HEADER_H = 64f` | ✅ 本轮修正（原 52dp 是自定值） |
+| 6 | 动效时长 / 缓动 | `duration.medium4 = 400ms`、`easing.emphasized = (0.2, 0, 0, 1)`（[Easing & duration](https://m3.material.io/styles/motion/easing-and-duration/tokens-specs)） | morph 400ms + emphasized；翻页 300ms(medium2) / 250ms(medium1) | ✅ 本轮修正（原 600ms + iOS 曲线） |
+| 7 | 状态层 / 涟漪 | 可交互元素必须有触摸反馈（[States](https://m3.material.io/foundations/interaction/states/state-layers)） | 日格 = 圆形涟漪；年历卡片 = 有界涟漪；遮罩层显式无反馈（正确） | ✅ 本轮修正（原日格/年历 `indication = null`，完全无反馈） |
+| 8 | 文字对比度 | 正文 ≥ 4.5:1、大字 ≥ 3:1（[Accessibility](https://m3.material.io/foundations/accessible-design/accessibility-basics)） | 全部改用语义色，不用 alpha 压文字 | ✅ 本轮修正（原未来日期 2.19:1、周末列 3.16:1） |
+| 9 | 不用颜色单独承载信息 | 必须同时有形状/文字/语义 | 有日记 = 下划线；今天 = 圆环；选中 = 实心圆；状态进 `stateDescription` | ✅ |
+| 10 | 底部导航 | 3–5 个目的地；`NavigationBar` 紧凑 / `NavigationRail` ≥ 600dp | 4 个；600dp 切 `NavigationRail` | ✅ |
+| 11 | 窗口尺寸类 | compact < 600 / medium 600–839 / expanded ≥ 840（[Window size classes](https://m3.material.io/foundations/layout/applying-layout/window-size-classes)） | 导航按 600dp 切；首页分栏按 **700dp 且宽 > 高**（比 M3 的 840dp 更早分栏，因为日历 + 正文列各需最小宽度） | ⚠️ 有意偏离，理由见 §5.8 |
+| 12 | 表面层级 | 用 `surfaceContainer*` 色调层级，而不是阴影（[Elevation](https://m3.material.io/styles/elevation/overview)） | 页面 `surface`、卡片 `surfaceContainerLow`、遮罩内 `surfaceContainerHigh` | ✅ |
+| 13 | 颜色角色 | 用语义角色、不写死十六进制 | `MaterialTheme.colorScheme` + 动态取色，零写死 | ✅ |
+| 14 | 动态取色 | Material You 默认开启（Android 12+） | `dynamicLight/DarkColorScheme`，设置里可关 | ✅ |
+| 15 | 无障碍语义 | 交互元素有 `contentDescription`；装饰性图标为 `null`；状态可读 | 日格逐格可读、结果行带 Button 特质、装饰图标显式 null | ✅ |
+| 16 | 减弱动效 | 尊重系统"减弱动态效果" | 180ms 线性（morph）/ 不做 morph | ✅ |
+
+**判定汇总**：16 项里 **13 项 ✅**、**3 项 ⚠️ 有意偏离**（自绘内容字号、分栏阈值、以及第 4 项
+的编辑器段落梯级）。三项都写在方案里、有理由、可复核 —— 这是"按 Google 规范"与
+"与 iOS 版功能/阅读体验对齐"两条约束的**已知交点**，不是遗漏。
+
+### 3.8 仍然偏离、需要产品决策的点
+
+1. **编辑器段落梯级 28/22/17/15** 保留 Apple 的数值（跨端阅读体验一致）。若要完全按 M3，
+   应改为 headlineMedium 28 / titleLarge 22 / bodyLarge **16** / bodyMedium **14**
+   —— 那会让 Android 与 iOS 的阅读版式出现可见差异。**默认不改**。
+2. **首页分栏阈值 700dp**（M3 建议 840dp 起分栏）：日历 7 列至少要 280dp、正文列至少 320dp，
+   相加 ≈ 700dp，手机横屏的可用宽 750dp 正好落进分栏一侧。按 840dp 的话手机横屏永远不会分栏，
+   与 iOS 版行为不一致。
+3. **周起始日、农历、干支生肖**：Material 没有对应规范（属于内容/区域设置），按 iOS 版与
+   应用语言处理。
 
 ---
 
@@ -173,14 +261,14 @@ Material 3 的层次靠 `surface` / `surfaceContainerLow` / 阴影与描边表�
 
 | 形态 | 版面 | 日记内容 |
 | --- | --- | --- |
-| **月态** | 顶栏 52 + 大标题槽 72 + 星期栏 30 + 固定 6 行网格 | 无 |
-| **周态** | 顶栏 52 + 星期栏 30 + 周条 68 + 日期标题行 40 + 内容区 | 有（占剩余全部高度） |
-| **年态** | 顶栏 52 + 年份标题行 62 + 3 × 4 迷你月卡片 | 无 |
+| **月态** | 顶栏 64 + 大标题槽 72 + 星期栏 30 + 固定 6 行网格 | 无 |
+| **周态** | 顶栏 64 + 星期栏 30 + 周条 68 + 日期标题行 40 + 内容区 | 有（占剩余全部高度） |
+| **年态** | 顶栏 64 + 年份标题行 62 + 3 × 4 迷你月卡片 | 无 |
 
 **几何公式**（`CalendarLayout`）：
 
 ```
-headerH      = 52                       // minHeight，大字号不裁切
+headerH      = 64                       // M3 small top app bar 的官方高度
 areaH        = 可用高 − headerH          // 可用高来自 WindowInsets + BoxWithConstraints
 bigTitleH    = 72                       // 只在月态存在
 weekdayH     = 30
@@ -194,16 +282,16 @@ yearCardW    = (内容宽 − 2×16 − 2×gutter 6) / 3
 yearCardH    = (areaH − yearTitleH − 2×8 − 3×6) / 4
 ```
 
-参考设备（426.7 × 952dp，状态栏 24dp）落值：
+参考设备（426.7 × 952dp，状态栏 24dp，顶栏 64dp）落值：
 
 | 量 | 值 |
 | --- | --- |
-| `areaH` | 876 |
-| `gridAreaH` | 774 |
-| **`cellH`** | **129** |
-| 6 行网格高 | 774（**正好铺满**，无空白带） |
-| 5 行网格高 / 留白 | 645 / 129 |
-| `yearCardW × yearCardH` | 127.6 × 195 |
+| `areaH` | 952 − 24 − 64 = 864 |
+| `gridAreaH` | 864 − 72 − 30 = 762 |
+| **`cellH`** | **127** |
+| 6 行网格高 | 762（**正好铺满**，无空白带） |
+| 5 行网格高 / 留白 | 635 / 127 |
+| `yearCardW × yearCardH` | 127.6 × 192 |
 | 内容宽（分栏时右栏） | 见 §5.8 |
 
 > **为什么 `cellH` 不封顶**：首轮封顶 96dp 的后果就是 §2 的 D5 —— 6 行只占 576dp，
@@ -217,7 +305,7 @@ yearCardH    = (areaH − yearTitleH − 2×8 − 3×6) / 4
 ```
 竖屏 · 月态（6 行月，铺满）          竖屏 · 周态（周条 + 内容）
 ┌──────────────────────────┐        ┌──────────────────────────┐
-│ ▾ 2026年          今天    │        │ ‹ 九月            今天    │  ← 52
+│ ▾ 2026年          今天    │        │ ‹ 九月            今天    │  ← 64
 ├──────────────────────────┤        ├──────────────────────────┤
 │ 九月                      │  ← 72  │  一  二  三 …  六  日     │  ← 30
 │  一  二  三  四  五  六  日│  ← 30  ├──────────────────────────┤
@@ -260,7 +348,7 @@ yearCardH    = (areaH − yearTitleH − 2×8 − 3×6) / 4
 
 自上而下：
 
-1. 顶栏 52：左 `‹ 九月`（点它 = morph 回月态）；右 `今天`；
+1. 顶栏 64：左 `‹ 九月`（点它 = morph 回月态）；右 `今天`；
 2. 星期栏 30（与月态同一个组件、同一位置，位置由 morph 插值决定）；
 3. 周条 68：7 格，选中日靠 `primary` 实心圆；**不画行分隔线**；
 4. 分隔线（1dp `outlineVariant@35%`）；
@@ -369,7 +457,7 @@ yearCardH    = (areaH − yearTitleH − 2×8 − 3×6) / 4
 | 周态 | `‹ 九月`（整块可点 → 回月态） | `今天` |
 | 年态 | `‹ 2026年`（整块可点 → 回月态） | `今天` |
 
-- 高度 `minHeight = 52dp`；
+- 高度 `minHeight = 64dp`（**M3 `small top app bar` 的官方高度**；首轮取的是自定的 52dp）；
 - **删掉日历图标按钮**（D7）。回月态的入口是"周态顶栏左侧"，不是第二个图标；
 - 分栏（横屏/宽窗口）时整块顶栏隐藏（见 §5.8）。
 
@@ -425,7 +513,7 @@ yearCardH    = (areaH − yearTitleH − 2×8 − 3×6) / 4
 
 ```
 ┌──────────────────────────────────────┐
-│ ←           🕐搜索   ✎写日记   ⤴分享   │  ← 52，图标动作 + contentDescription
+│ ←           🕐搜索   ✎写日记   ⤴分享   │  ← 64，图标动作 + contentDescription
 ├──────────────────────────────────────┤
 │ 9月20日 周日  [今天]                   │  ← hero：日期 20sp medium
 │ 🕐 08:23 开始写 · 2 个片段             │     13sp onSurfaceVariant
@@ -479,7 +567,7 @@ yearCardH    = (areaH − yearTitleH − 2×8 − 3×6) / 4
 
 ```
 ┌──────────────────────────────────────┐
-│ ←                 🖼插入图片  放弃修改  保存 │  ← 52
+│ ←                 🖼插入图片  放弃修改  保存 │  ← 64
 ├──────────────────────────────────────┤
 │ ┌──────────────────────────────────┐ │
 │ │ [08:23]                          │ │  ← 时间胶囊：13sp bold primary

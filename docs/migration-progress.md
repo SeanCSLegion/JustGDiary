@@ -981,3 +981,48 @@ Pixel 10 Pro AVD（1280 × 2856 @480dpi = 426.7 × 952dp）上逐屏实测。
 - 上机实测（截图见 `docs/ui-audit/` 与本节所列）：竖屏月 / 周 / 年、深色月 / 周 / 年、
   横屏分栏、上下滑翻月、点日期 morph、顶栏返回月态、年历 12 张卡片可聚焦。
 - 无障碍：月态 30 个日格节点（只含当月），每格 `content-description` = 完整日期 + 状态。
+
+---
+
+## R3 —— Material 3 合规复查 ✅ 已完成
+
+依据：Google 官方 Material 3（[m3.material.io](https://m3.material.io)）与
+`androidx.compose.material3:material3:1.4.0` 的**令牌实现**（形状 / 动效 / 字号 / 组件高度的
+数值直接从 AAR 字节码里取出核对，避免照抄博客里的过时数字）。
+逐项核对表见 [`docs/ui-design-plan.md`](ui-design-plan.md) §3.7。
+
+### 判定：16 项里 13 项 ✅、3 项有意偏离
+
+修掉的**硬性违规**：
+
+| 项 | Google 要求 | 本项目（改前） | 现状 |
+| --- | --- | --- | --- |
+| 触控目标 | **48dp** | `hitTarget = 44dp`（iOS HIG 的 44pt） | 48dp |
+| 状态层 | 可交互元素必须有触摸反馈 | 日历格与年历卡片 `indication = null`，**完全没有反馈** | 日格 = 圆形涟漪（同 M3 date picker 的状态层）；年历卡片 = 有界涟漪 |
+| 文字对比度 | 正文 ≥ 4.5:1、大字 ≥ 3:1 | 未来日期 `onSurface @35%` → **2.19:1**；周末列 `onSurfaceVariant @60%` → **3.16:1** | 全部改用语义色（`onSurfaceVariant`），不再用 alpha 压文字 |
+| Small top app bar | 高度 **64dp** | 自定的 52dp | `HEADER_H = 64f`（行高随之 (区高−102)/6） |
+| M3 组件字号 | 15 个角色用官方 type scale | 把自定梯级挂到角色上 → `titleLarge = 18`（官方 22）、`bodyLarge = 17`（官方 16）、`headlineSmall = 20`（官方 24）—— **顶栏 / 对话框 / 输入框 / 按钮全不是官方尺寸** | `MaterialTheme.typography` 改为 **`Typography()` 基线 + 本项目逐档封顶缩放**；自定梯级只服务内容层（编辑器段落、日历、自绘文本） |
+| 形状梯级 | Expressive 梯级 `4 / 8 / 12 / 16 / 20 / 28 / 32 / 48 / full` | `panel 26`、`field 14`、`image 14` 不在梯级上 | `card 16`(large) / `panel 28`(extraLarge) / `field 12` / `image 12`（`badge 12`、`bar 4` 原本就对） |
+| 动效 | 时长与缓动用官方令牌 | 600ms + iOS 的 `timingCurve(0.2, 0.75, 0.3, 1.0)` | **400ms（`medium4`）+ `easing.emphasized = (0.2, 0, 0, 1)`**；翻页 300ms(`medium2`) / 250ms(`medium1`) |
+
+> 一处**更正我自己的判断**：改前 `Radius.card = 20` 其实**是**官方令牌
+> （`largeIncreased`，M3 Expressive 新增），不是违规；真正不在梯级上的是 26 / 14 / 14。
+> 已在规范 §3.7 里写明。
+
+### 有意偏离（写在规范 §3.8，可复核）
+
+1. **编辑器段落梯级 28/22/17/15** 保留 Apple 的数值 —— 它是**跨端阅读体验的契约**
+   （`content_json` 存的是语义样式，字号由样式在渲染端推导）。按 M3 应改成 28/22/**16**/**14**，
+   那会让 Android 与 iOS 的阅读版式出现可见差异。
+2. **首页分栏阈值 700dp**（M3 建议 840dp 起分栏）：日历 7 列至少 280dp + 正文列至少 320dp
+   ≈ 700dp，手机横屏可用宽 750dp 正好落进分栏一侧；按 840dp 则手机横屏永不分栏，与 iOS 版不一致。
+3. 周起始日 / 农历 / 干支生肖属区域设置内容，Material 无对应规范。
+
+### 验证
+
+- `./gradlew clean assembleDebug testDebugUnitTest`：**355 条全绿**
+  （`DesignTokensTest` 改成断言 M3 梯级与 48dp；`CalendarLayoutTest` 的顶栏高度与
+  行高期望值随 64dp 更新）；
+- `tools/verify_sqlite_schema.py`、`tools/verify_backup_interop.sh` 均通过；
+- 上机复测：月 / 周 / 年三态、点日期 morph、`‹ 九月` 回月态、年历 12 张卡可点、
+  深色、设置页与其余三屏无溢出。

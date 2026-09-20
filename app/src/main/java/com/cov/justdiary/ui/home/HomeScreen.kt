@@ -174,24 +174,32 @@ fun HomeScreen(
     val animatorsEnabled = remember {
         runCatching { ValueAnimator.areAnimatorsEnabled() }.getOrDefault(true)
     }
+    // morph 的动画规格 —— **Material 3 的官方令牌**：
+    //   时长 `medium4 = 400ms`、缓动 `easing.emphasized = cubic-bezier(0.2, 0, 0, 1)`。
+    // （`MaterialTheme.motionScheme` 在 material3 1.4.0 里还是 internal，取不到，
+    //   所以按官方文档/令牌实现的数值显式构造，数值与 `MotionTokens` 一致。）
+    // 首轮用的是 iOS 的 `timingCurve(0.2, 0.75, 0.3, 1.0)` + 600ms，不属于 Material。
     val morphSpec = remember(animatorsEnabled, DebugFlags.slowMorph) {
-        if (animatorsEnabled) {
-            tween<Float>(
-                durationMillis = if (DebugFlags.slowMorph) {
-                    DebugFlags.SLOW_MORPH_DURATION_MS
-                } else {
-                    CalendarLayout.MORPH_DURATION_MS
-                },
+        when {
+            // 「减弱动态效果」优先于一切调试开关：线性、短时长（Android 无障碍要求）
+            !animatorsEnabled -> tween<Float>(
+                durationMillis = CalendarLayout.REDUCED_MORPH_DURATION_MS,
+                easing = LinearEasing,
+            )
+            // 调试慢放：同样给线性，便于逐帧核对几何
+            DebugFlags.slowMorph -> tween<Float>(
+                durationMillis = DebugFlags.SLOW_MORPH_DURATION_MS,
+                easing = LinearEasing,
+            )
+            else -> tween<Float>(
+                durationMillis = CalendarLayout.MORPH_DURATION_MS,
                 easing = CubicBezierEasing(
-                    CalendarLayout.MORPH_EASING[0],
-                    CalendarLayout.MORPH_EASING[1],
-                    CalendarLayout.MORPH_EASING[2],
-                    CalendarLayout.MORPH_EASING[3],
+                    CalendarLayout.M3_EMPHASIZED[0],
+                    CalendarLayout.M3_EMPHASIZED[1],
+                    CalendarLayout.M3_EMPHASIZED[2],
+                    CalendarLayout.M3_EMPHASIZED[3],
                 ),
             )
-        } else {
-            // 减弱动效优先于调试开关
-            tween(durationMillis = CalendarLayout.REDUCED_MORPH_DURATION_MS, easing = LinearEasing)
         }
     }
 

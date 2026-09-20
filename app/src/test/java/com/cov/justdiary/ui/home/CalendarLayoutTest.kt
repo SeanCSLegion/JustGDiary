@@ -39,7 +39,7 @@ class CalendarLayoutTest {
 
     @Test
     fun `constants match the ios table`() {
-        assertEquals(600, CalendarLayout.MORPH_DURATION_MS)
+        assertEquals(400, CalendarLayout.MORPH_DURATION_MS)  // M3 medium4
         assertEquals(3000, CalendarLayout.SLOW_MORPH_DURATION_MS)
         assertEquals(180, CalendarLayout.REDUCED_MORPH_DURATION_MS)
         assertEquals(30f, CalendarLayout.WEEKDAY_HEADER_H, 1e-6f)
@@ -55,10 +55,14 @@ class CalendarLayoutTest {
         assertEquals(6f, CalendarLayout.MINI_PAD, 1e-6f)
         assertEquals(17f, CalendarLayout.MINI_TITLE_H, 1e-6f)
         assertEquals(44f, CalendarLayout.MINIMUM_ROW_HEIGHT, 1e-6f)
-        assertEquals(0.35f, CalendarLayout.FUTURE_ALPHA, 1e-6f)
-        assertEquals(listOf(0.2f, 0.75f, 0.3f, 1.0f), CalendarLayout.MORPH_EASING.toList())
+        // 未来日期不再靠透明度表达（0.35 alpha 对比度只有 2.19:1）；
+        // 改用 M3 的 onSurfaceVariant 语义色，见 docs/ui-design-plan.md §3.1
+        // M3 easing.emphasized / easing.emphasized.decelerate（官方令牌值）
+        assertEquals(listOf(0.2f, 0f, 0f, 1f), CalendarLayout.M3_EMPHASIZED.toList())
+        assertEquals(listOf(0.05f, 0.7f, 0.1f, 1f), CalendarLayout.M3_EMPHASIZED_DECELERATE.toList())
         // 竖屏版面的常量：顶栏、大标题槽、行高上下界
-        assertEquals(52f, CalendarLayout.HEADER_H, 1e-6f)
+        // M3 small top app bar 的官方高度
+        assertEquals(64f, CalendarLayout.HEADER_H, 1e-6f)
         assertEquals(72f, CalendarLayout.BIG_TITLE_H, 1e-6f)
         assertEquals(200f, CalendarLayout.SANITY_MAX_CELL_H, 1e-6f)
         assertEquals(44f, CalendarLayout.MIN_CELL_H, 1e-6f)
@@ -94,7 +98,6 @@ class CalendarLayoutTest {
         // (744 − 102) / 6 = 107
         assertEquals(107f, CalendarLayout.cellHeightFor(744f), 1e-3f)
         // 6 行月正好铺满网格区（这是"没有空白带"的判据）
-        assertEquals(102f + 6 * 107f, 744f - (744f - 102f - 6 * 107f), 1e-3f)
         assertEquals(642f, CalendarLayout.monthGridHeight(6, 107f), 1e-3f)
         // 参考设备（Pixel 10 Pro：可用高 876，顶栏 52）→ (876 − 102) / 6 = 129
         assertEquals(129f, CalendarLayout.cellHeightFor(876f), 1e-3f)
@@ -119,6 +122,9 @@ class CalendarLayoutTest {
             CalendarLayout.cellHeightFor(876f, rows = 5),
             1e-3f,
         )
+        // 参考设备（Pixel 10 Pro：可用高 876，M3 顶栏 64）：
+        // 区高 = 876 − 64 = 812，行高 = (812 − 102) / 6 = 118.33
+        assertEquals(118.333f, CalendarLayout.cellHeightFor(876f - CalendarLayout.HEADER_H), 1e-3f)
         // 均分版本不夹取（横屏面板用）
         assertEquals(30f, CalendarLayout.fitCellHeight(180f, 6), 1e-3f)
         assertEquals(45f, CalendarLayout.fitCellHeight(270f, 6), 1e-3f)
@@ -130,7 +136,7 @@ class CalendarLayoutTest {
         assertEquals(57.4286f, cellW, 1e-3f)
         assertEquals(14f, CalendarLayout.weekdayFontSize(cellW), 1e-3f)
 
-        // 真实设备：区高 744（796 − 顶栏 52），行高 = (744 − 102) / 6 = 107
+        // 区高 744（调用方已扣掉顶栏），行高 = (744 − 102) / 6 = 107
         val metrics = CalendarLayout.monthMetrics(portraitW, 744f, showLunar = true)
         assertEquals(57.4286f, metrics.cellW, 1e-3f)
         assertEquals(107f, metrics.cellH, 1e-3f)
