@@ -48,8 +48,8 @@ class CalendarLayoutTest {
         assertEquals(26f, CalendarLayout.COMPACT_WEEKDAY_HEADER_H, 1e-6f)
         assertEquals(68f, CalendarLayout.WEEK_STRIP_H, 1e-6f)
         assertEquals(40f, CalendarLayout.DAY_TITLE_H, 1e-6f)
-        // 年历标题槽从 iOS 的 62 调小到 44（标题已移到 M3 顶栏）
-        assertEquals(44f, CalendarLayout.YEAR_TITLE_H, 1e-6f)
+        // 年历标题槽回到 iOS 的 62：页内要画 32sp 的「2026年」+ 右侧生肖
+        assertEquals(62f, CalendarLayout.YEAR_TITLE_H, 1e-6f)
         assertEquals(16f, CalendarLayout.YEAR_PAD, 1e-6f)
         assertEquals(6f, CalendarLayout.YEAR_SPACING, 1e-6f)
         assertEquals(6f, CalendarLayout.MINI_PAD, 1e-6f)
@@ -57,9 +57,10 @@ class CalendarLayoutTest {
         assertEquals(44f, CalendarLayout.MINIMUM_ROW_HEIGHT, 1e-6f)
         assertEquals(0.35f, CalendarLayout.FUTURE_ALPHA, 1e-6f)
         assertEquals(listOf(0.2f, 0.75f, 0.3f, 1.0f), CalendarLayout.MORPH_EASING.toList())
-        // 本轮新增的两个常量也必须被钉住：它们是竖屏版面的唯一真源
-        assertEquals(56f, CalendarLayout.PORTRAIT_CELL_H, 1e-6f)
-        assertEquals(96f, CalendarLayout.MAX_CELL_H, 1e-6f)
+        // 竖屏版面的常量：顶栏、大标题槽、行高上下界
+        assertEquals(52f, CalendarLayout.HEADER_H, 1e-6f)
+        assertEquals(72f, CalendarLayout.BIG_TITLE_H, 1e-6f)
+        assertEquals(200f, CalendarLayout.SANITY_MAX_CELL_H, 1e-6f)
         assertEquals(44f, CalendarLayout.MIN_CELL_H, 1e-6f)
     }
 
@@ -88,27 +89,39 @@ class CalendarLayoutTest {
     }
 
     @Test
-    fun `cell height is derived from the screen and capped`() {
-        // 952dp 屏、顶栏 52dp → 区高 744，减星期栏 30 后 6 行各 119 → 被 MAX_CELL_H 封在 96
-        assertEquals(96f, CalendarLayout.cellHeightFor(744f, rows = 6), 1e-3f)
-        // 6 行 × 96 + 星期栏 30 = 606，占可用高的 76%
-        assertTrue(
-            "月历应当基本铺满整屏",
-            (CalendarLayout.WEEKDAY_HEADER_H + 6 * CalendarLayout.cellHeightFor(744f, 6)) >= 744f * 0.75f,
-        )
-        // 矮窗口按可用高压缩：(440 − 30) / 6 = 68.33
-        assertEquals(68.333f, CalendarLayout.cellHeightFor(440f, rows = 6), 1e-3f)
-        // 再矮：(280 − 30) / 6 = 41.67 → 抬到 MIN_CELL_H
-        assertEquals(44f, CalendarLayout.cellHeightFor(280f, rows = 6), 1e-3f)
+    fun `cell height fills the screen and is never capped for the panel`() {
+        // 规范 §5.1：cellH = (区高 − 大标题槽 72 − 星期栏 30) / 6，**不封顶**。
+        // (744 − 102) / 6 = 107
+        assertEquals(107f, CalendarLayout.cellHeightFor(744f), 1e-3f)
+        // 6 行月正好铺满网格区（这是"没有空白带"的判据）
+        assertEquals(102f + 6 * 107f, 744f - (744f - 102f - 6 * 107f), 1e-3f)
+        assertEquals(642f, CalendarLayout.monthGridHeight(6, 107f), 1e-3f)
+        // 参考设备（Pixel 10 Pro：可用高 876，顶栏 52）→ (876 − 102) / 6 = 129
+        assertEquals(129f, CalendarLayout.cellHeightFor(876f), 1e-3f)
+        // 矮窗口按可用高压缩：(440 − 102) / 6 = 56.33
+        assertEquals(56.333f, CalendarLayout.cellHeightFor(440f), 1e-3f)
+        // 再矮：(280 − 102) / 6 = 29.67 → 抬到 MIN_CELL_H
+        assertEquals(44f, CalendarLayout.cellHeightFor(280f), 1e-3f)
         // 极矮窗口仍然守住 MIN_CELL_H（不会压成 0，也不会抛异常）
-        assertEquals(44f, CalendarLayout.cellHeightFor(100f, rows = 6), 1e-3f)
-        // 常规小屏：(366 − 30) / 6 = 56 = PORTRAIT_CELL_H
-        assertEquals(56f, CalendarLayout.cellHeightFor(366f, rows = 6), 1e-3f)
+        assertEquals(44f, CalendarLayout.cellHeightFor(100f), 1e-3f)
+        assertEquals(44f, CalendarLayout.cellHeightFor(0f), 1e-3f)
+        // 区间永不反转：MIN_CELL_H < SANITY_MAX_CELL_H，任何可用高都不抛异常
+        var previous = -1f
+        for (h in 0..2000 step 37) {
+            val cell = CalendarLayout.cellHeightFor(h.toFloat())
+            assertTrue("行高必须落在 [44, 200]", cell in 44f..200f)
+            assertTrue("行高必须随可用高单调不减", cell >= previous - 1e-3f)
+            previous = cell
+        }
+        // 行数与行高无关：行高只由"固定 6 行"决定，翻月时不抖
+        assertEquals(
+            CalendarLayout.cellHeightFor(876f),
+            CalendarLayout.cellHeightFor(876f, rows = 5),
+            1e-3f,
+        )
         // 均分版本不夹取（横屏面板用）
         assertEquals(30f, CalendarLayout.fitCellHeight(180f, 6), 1e-3f)
         assertEquals(45f, CalendarLayout.fitCellHeight(270f, 6), 1e-3f)
-        // 0 行不会崩（按 1 行算）
-        assertEquals(96f, CalendarLayout.cellHeightFor(744f, rows = 0), 1e-3f)
     }
 
     @Test
@@ -117,12 +130,10 @@ class CalendarLayoutTest {
         assertEquals(57.4286f, cellW, 1e-3f)
         assertEquals(14f, CalendarLayout.weekdayFontSize(cellW), 1e-3f)
 
-        // 真实设备：区高 744（796 − 顶栏 52），行高被 MAX_CELL_H 封在 96
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, 744f, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
+        // 真实设备：区高 744（796 − 顶栏 52），行高 = (744 − 102) / 6 = 107
+        val metrics = CalendarLayout.monthMetrics(portraitW, 744f, showLunar = true)
         assertEquals(57.4286f, metrics.cellW, 1e-3f)
-        assertEquals(96f, metrics.cellH, 1e-3f)
+        assertEquals(107f, metrics.cellH, 1e-3f)
         // dayFont = clamp(cellH × 0.34, 13, 20) = 20
         assertEquals(20f, metrics.dayFont, 1e-3f)
         // lunarFont = clamp(cellH × 0.18, 9, 11) = 11
@@ -206,7 +217,7 @@ class CalendarLayoutTest {
         val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)
         val (cardW, cardH) = CalendarLayout.yearCardSize(portraitW, areaH)
         assertEquals(358f / 3f, cardW, 1e-3f)
-        assertEquals((areaH - 44f - 8f - 18f) / 4f, cardH, 1e-3f)
+        assertEquals((areaH - 62f - 8f - 18f) / 4f, cardH, 1e-3f)
 
         val january = CalendarLayout.yearCardRect(1, portraitW, areaH)
         val startY = CalendarLayout.YEAR_TITLE_H + CalendarLayout.YEAR_TOP_PAD
@@ -219,10 +230,11 @@ class CalendarLayoutTest {
         // 用**年历自己的**区高算一遍：第 4 行必须落在区内（否则会被下方当日面板压住）
         val yearH = CalendarLayout.yearAreaHeight(portraitH)
         val lastCard = CalendarLayout.yearCardRect(12, portraitW, yearH)
-        assertEquals(44f + 8f + 3 * ((yearH - 44f - 8f - 18f) / 4f + 6f), lastCard.y, 1e-3f)
+        assertEquals(62f + 8f + 3 * ((yearH - 62f - 8f - 18f) / 4f + 6f), lastCard.y, 1e-3f)
         assertTrue("年历最后一行必须留在区高之内", lastCard.maxY <= yearH)
         // 卡片高度足够画清 6 行迷你网格（每行 ≥ 10dp）
-        assertTrue("年历卡片太矮就画不清迷你月", (yearH - 44f - 8f - 18f) / 4f >= 78f)
+        // 卡片里要画 6 行日号（每行至少 10dp 才读得清），这是恢复迷你月历的硬条件
+        assertTrue("年历卡片太矮就画不清迷你月", (yearH - 62f - 8f - 18f) / 4f >= 78f)
 
         val title = CalendarLayout.miniTitleRect(january)
         val grid = CalendarLayout.miniGridRect(january)
@@ -250,13 +262,11 @@ class CalendarLayoutTest {
 
     @Test
     fun `day drawing geometry matches the formulas`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, 744f, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
+        val metrics = CalendarLayout.monthMetrics(portraitW, 744f, showLunar = true)
         val rowY = 192f
         val top = CalendarLayout.contentTop(rowY, metrics)
-        // contentTop = rowY + (cellH - contentH) / 2 = 192 + (96 - 40) / 2 = 220
-        assertEquals(rowY + (96f - 40f) / 2f, top, 1e-3f)
+        // contentTop = rowY + (cellH − contentH) / 2
+        assertEquals(rowY + (metrics.cellH - metrics.contentH) / 2f, top, 1e-3f)
         assertEquals(top + metrics.dayFont / 2f, CalendarLayout.dayNumberCenterY(top, metrics), 1e-3f)
         assertEquals(
             top + metrics.dayFont + 4f + metrics.lunarLineH / 2f,
@@ -277,9 +287,7 @@ class CalendarLayoutTest {
 
     @Test
     fun `hit testing returns the day under the point and rejects out of range`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, 744f, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
+        val metrics = CalendarLayout.monthMetrics(portraitW, 744f, showLunar = true)
         val weeks = CalendarGrid.weeks(LocalDate.of(2026, 9, 1), DateUtil.WEEK_START_MONDAY)
         val anchor = LocalDate.of(2026, 9, 1)
 
@@ -301,9 +309,7 @@ class CalendarLayoutTest {
 
     @Test
     fun `hit testing rejects adjacent month days when they are not shown`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, 744f, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
+        val metrics = CalendarLayout.monthMetrics(portraitW, 744f, showLunar = true)
         val weeks = CalendarGrid.weeks(LocalDate.of(2026, 9, 1), DateUtil.WEEK_START_MONDAY)
         val anchor = LocalDate.of(2026, 10, 1)
 

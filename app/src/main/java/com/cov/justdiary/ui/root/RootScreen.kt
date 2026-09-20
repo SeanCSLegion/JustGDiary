@@ -78,6 +78,9 @@ fun RootScreen(modifier: Modifier = Modifier) {
 
     // 全屏的日记页（阅读/编辑）在标签页之上：对应 iOS 的 `.fullScreenCover`
     var openDayKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // 「写日记 / 继续写日记」直接进编辑器（对应 iOS 的 `openEditor`），
+    // 而点日期 / 点日记卡片是进阅读页（`openDiary`）。
+    var openInWrite by rememberSaveable { mutableStateOf(false) }
     // 日记数据变过之后，让各个页面自己刷一次（对应 iOS 的 `.diaryVersionChanged`）
     var dataVersion by rememberSaveable { mutableIntStateOf(0) }
 
@@ -93,8 +96,9 @@ fun RootScreen(modifier: Modifier = Modifier) {
         AdaptiveLayoutHost(modifier = modifier) {
             DiaryPageScreen(
                 dayKey = openDayKey,
-                onClose = { openDayKey = null },
+                onClose = { openDayKey = null; openInWrite = false },
                 onDataChanged = { dataVersion++ },
+                startInWrite = openInWrite,
             )
         }
         return
@@ -127,6 +131,7 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         container = container,
                         dataVersion = dataVersion,
                         onOpenDay = { openDayKey = it },
+                        onWriteDay = { openInWrite = true; openDayKey = it },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -152,6 +157,7 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         container = container,
                         dataVersion = dataVersion,
                         onOpenDay = { openDayKey = it },
+                        onWriteDay = { openInWrite = true; openDayKey = it },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding),
@@ -175,6 +181,8 @@ private fun TabContent(
     container: AppContainer,
     dataVersion: Int,
     onOpenDay: (String) -> Unit,
+    /** 直接进编辑器（首页当日面板的「写日记」）。 */
+    onWriteDay: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -187,6 +195,9 @@ private fun TabContent(
             val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(container))
             val state by viewModel.state.collectAsState()
             LaunchedEffect(dataVersion) { viewModel.refresh() }
+            // 设置变化（auto_time / 周起始…）后刷新这个**已经活着**的标签页
+            val settingsVersion by container.settings.version.collectAsState()
+            LaunchedEffect(settingsVersion) { viewModel.refreshSettings() }
             HomeScreen(
                 modifier = modifier,
                 today = state.today,
@@ -194,9 +205,11 @@ private fun TabContent(
                 weekStart = state.weekStart,
                 dateFormats = formats,
                 dayBlocks = state.dayBlocks,
+                showTime = state.autoTime,
                 onYearChange = viewModel::setVisibleYear,
                 onSelectDay = viewModel::select,
                 onOpenDay = { onOpenDay(DateUtil.dayKeyOf(it)) },
+                onWrite = { onWriteDay(DateUtil.dayKeyOf(it)) },
                 imageLoader = { src -> container.mediaStore.image(src)?.asImageBitmap() },
             )
         }

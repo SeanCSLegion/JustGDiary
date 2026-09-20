@@ -36,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import com.cov.justdiary.R
 import androidx.compose.runtime.remember
@@ -59,9 +60,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
 import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.service.SearchUtil
+import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
 import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
+import com.cov.justdiary.ui.theme.TypeSize
 
 /**
  * 日记阅读页。对应 iOS `Views/Diary/DiaryPageView.swift` + `ReadTextView.swift`。
@@ -110,20 +113,16 @@ fun DiaryReadScreen(
     val matches = remember(parts, keyword) { DiarySearch.findMatches(parts, keyword) }
 
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
-        // 页头：日期 + 分享
+        // 顶栏：只剩动作（多选计数 / 写日记 / 分享）。
+        // **日期不在这里** —— 它与元信息一起进下方的 hero 卡片（规范 §6.1/§6.2、缺陷 D8：
+        // 日期写在顶栏时，空态只剩一条搜索框，整屏像坏掉了一样）。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Spacing.page, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = dayTitle,
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.widthIn(max = ReadLayout.READING_MAX_WIDTH.dp),
-            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (selectMode) {
                     Text(
@@ -181,6 +180,71 @@ fun DiaryReadScreen(
                 IconButton(onClick = { onSearchStep(1) }, enabled = matches.isNotEmpty()) {
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = NEXT_MATCH_LABEL)
                 }
+            }
+        }
+
+        // hero 卡片：日期 + （今天才有的）胶囊 + 元信息行。**常驻**，空态也画 —— 这是缺陷 D8
+        // 的修法（规范 §6.2：不给整屏空白）。位置与 iOS 一致：`搜索栏 → hero → 片段卡片`
+        // （`DiaryPageView.swift:123-142`，间距 12）。
+        val fontScale = LocalDensity.current.fontScale
+        // 宿主只在"今天"才传 `onWrite`（`canEditToday = actualDayKey == todayKey`，
+        // 见 `DiaryPageViewModel.State.canEditToday`），所以非 null 即今天 —— 与 iOS 的
+        // `vm.canEditToday` 判断同源，不需要再引入一套日期比较。
+        val isToday = onWrite != null
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.page),
+            shape = RoundedCornerShape(Radius.card),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = dayTitle,
+                        fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.cardTitle, fontScale),
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.widthIn(max = ReadLayout.READING_MAX_WIDTH.dp),
+                    )
+                    if (isToday) {
+                        // 「今天」胶囊（iOS `index_card_today`：primary 底 + onPrimary 字、12sp medium）
+                        Text(
+                            text = stringResource(R.string.index_today),
+                            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, fontScale),
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(percent = 50))
+                                .background(MaterialTheme.colorScheme.primary)
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
+                // 元信息行：首片段的 `startLine` + 片段数。`startLine` 是宿主按 `auto_time`
+                // **预先算好的**（关闭时不显示时间），这里**不重算**；地点若存在也已经包含在
+                // `startLine` 里，所以不再单列一行地点（规范 §6.1 的 hero）。空态换成既有文案。
+                Text(
+                    text = when {
+                        blocks.isEmpty() -> stringResource(R.string.index_day_empty)
+
+                        blocks.first().startLine.isBlank() ->
+                            stringResource(R.string.read_hero_segments, blocks.size)
+
+                        else -> "${blocks.first().startLine} · " +
+                            stringResource(R.string.read_hero_segments, blocks.size)
+                    },
+                    fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 

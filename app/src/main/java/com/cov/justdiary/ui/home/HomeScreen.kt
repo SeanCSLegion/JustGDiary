@@ -19,10 +19,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -36,6 +38,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,12 +55,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -81,7 +86,9 @@ import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.Log
 import com.cov.justdiary.service.Lunar
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.Spacing
+import com.cov.justdiary.ui.theme.TypeSize
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -125,8 +132,20 @@ fun HomeScreen(
     showLunar: Boolean = true,
     dateFormats: DateFormats? = null,
     onOpenDay: (LocalDate) -> Unit = {},
+    /**
+     * 「写日记 / 继续写日记」的去向：**直接进编辑器**（对应 iOS 的 `openEditor(dayKey)`）。
+     *
+     * 不传时退回 [onOpenDay]（阅读页），保证旧调用点行为不变。
+     */
+    onWrite: (LocalDate) -> Unit = onOpenDay,
     /** 当前选中日的片段（当日面板用；`null` = 这一天还没有日记）。 */
     dayBlocks: List<EditBlock>? = null,
+    /**
+     * `auto_time` 设置：是否显示片段的开始时间。
+     *
+     * 关闭时只显示地点（与 iOS 的 `vm.showsTime` 同一语义）；数据层照旧记录。
+     */
+    showTime: Boolean = true,
     /** 年份变化 → 让上层按年份区间重新读日记标记。 */
     onYearChange: (Int) -> Unit = {},
     /** 选中日变化 → 让上层读这一天的内容。 */
@@ -139,8 +158,17 @@ fun HomeScreen(
     var selectedKey by rememberSaveable { mutableStateOf(todayKey) }
     var mode by rememberSaveable { mutableStateOf(HomeViewMode.MONTH) }
 
-    val yearProgress = remember { Animatable(0f) }
-    val weekProgress = remember { Animatable(0f) }
+    // ⚠️ 两个进度条必须**从恢复出来的 mode 初始化**，不能固定从 0 起。
+    //
+    // `mode` 是 `rememberSaveable`（配置变更 / 进程重建后会恢复），而 `Animatable`
+    // 不是 —— 于是"在年态下旋转屏幕再切深色"时会出现：mode 恢复成 YEAR，而
+    // yearProgress 回到 0 → 年层 `alpha = yearOpacity = 0`，整屏年历消失，
+    // 只剩下顶栏的「‹ 2026年」（实测缺陷，见方案 §2 D2）。
+    //
+    // 规则：图层的**可见性由状态（mode）决定**，动画只负责过渡。
+    // 从 mode 初始化等价于"恢复时直接贴到终值"，零帧闪烁，且不影响正常动画。
+    val yearProgress = remember { Animatable(if (mode == HomeViewMode.YEAR) 1f else 0f) }
+    val weekProgress = remember { Animatable(if (mode == HomeViewMode.WEEK) 1f else 0f) }
     val scope = rememberCoroutineScope()
     val morphing = yearProgress.value > 0.01f || weekProgress.value > 0.01f
     val animatorsEnabled = remember {
@@ -221,23 +249,51 @@ fun HomeScreen(
         monthKey = CalendarGrid.monthKeyOf(next)
     }
 
-    fun toggleYear() {
-        if (yearProgress.value > 0.01f) {
+    /** 月态 → 年历（缩放 morph）。 */
+    fun openYear() {
+        if (mode == HomeViewMode.YEAR) return
+        mode = HomeViewMode.YEAR
+        scope.launch { yearProgress.animateTo(1f, morphSpec) }
+    }
+
+    /** 周态 / 年态 → 月态。周态回退时把月份拉回选中日所在的月（与 iOS 的 `goBack` 一致）。 */
+    fun backToMonth() {
+        if (mode == HomeViewMode.WEEK) {
+            monthKey = CalendarGrid.monthKeyOf(selectedDate)
+            setWeekMode(false)
+            return
+        }
+        if (mode == HomeViewMode.YEAR) {
             mode = HomeViewMode.MONTH
             scope.launch { yearProgress.animateTo(0f, morphSpec) }
-        } else {
-            mode = HomeViewMode.YEAR
-            scope.launch { yearProgress.animateTo(1f, morphSpec) }
         }
     }
 
+    /** 年历里点某个月 → 缩放 morph 回月态。 */
+    fun openMonthFromYear(month: Int) {
+        monthKey = CalendarGrid.monthKey(year, month)
+        selectedKey = DateUtil.dayKeyOf(LocalDate.of(year, month, 1))
+        mode = HomeViewMode.MONTH
+        scope.launch { yearProgress.animateTo(0f, morphSpec) }
+    }
+
+    /**
+     * 回到今天（规范 §5.6）。
+     *
+     * **周态与月态都保持当前形态**，只有年态要退回月态 —— 与 iOS 一致
+     * （`todayTapped`：year → 当月；month → `resetToToday`；week → `select(now)`）。
+     * 首轮一律 `mode = MONTH`，于是在周态点"今天"会被踢回月态。
+     */
     fun goToday() {
         monthKey = CalendarGrid.monthKeyOf(today)
         selectedKey = todayKey
-        mode = HomeViewMode.MONTH
-        scope.launch {
-            yearProgress.snapTo(0f)
-            weekProgress.snapTo(0f)
+        when (mode) {
+            HomeViewMode.YEAR -> {
+                mode = HomeViewMode.MONTH
+                scope.launch { yearProgress.snapTo(0f) }
+            }
+            HomeViewMode.WEEK -> Unit
+            HomeViewMode.MONTH -> scope.launch { yearProgress.snapTo(0f) }
         }
     }
 
@@ -253,57 +309,68 @@ fun HomeScreen(
         val adaptive = LocalAdaptiveLayout.current
         val split = adaptive.splitsMasterDetail
         val calendarW = if (split) adaptive.masterWidth else availableW
+        val densityScale = LocalDensity.current.density
 
-        // **固定 6 行**（`CalendarGrid.weeks`，与 iOS 一致）：月历是整屏视图，
-        // 行数随月份在 5/6 之间跳会让整块版面在翻月时上下抖，而且 5 行时屏幕下方留一大块空白。
-        // 固定 6 行 = 行高稳定、版面稳定，末行不属于当月的日期按"相邻月"淡显。
+        // 当月**实际**行数（4…6）：`displayedWeeks` 从尾部删掉"整行都不属于本月"的行。
+        // 与 `weeks()` 的固定 6 行不同 —— 只画真正含当月日期的行（规范 §5.1 / §5.2），
+        // 于是 5 行月的最后一行是留白，而不是一排相邻月的日期。
         val displayed = remember(monthFirst, weekStart) {
-            CalendarGrid.weeks(monthFirst, weekStart)
+            CalendarGrid.displayedWeeks(monthFirst, weekStart)
         }
         val rows = displayed.size
-        // 月态是**整屏视图**（规范 §5.1）：日历带 = 顶栏之外的全部可用高，
-        // 行高由它反算并封顶在 MAX_CELL_H（避免首轮"126dp 行高把日历拉散"）。
-        // 周态的日历带只有「星期栏 + 周条」，下方才是日记预览；
-        // 横屏分栏时左栏撑满可用高。
-        val topBarH = if (split) 0f else CALENDAR_BAND_TOP
-        val monthAreaH = if (split) {
-            maxOf(CalendarLayout.PORTRAIT_MIN_AREA_H, availableH - CalendarLayout.WEEKDAY_HEADER_H)
-        } else {
-            CalendarLayout.monthAreaHeight(availableH - topBarH, rows)
+
+        // 月态日历带 = 顶栏之外的全部可用高；行高按**固定 6 行**等分、不封顶
+        // （规范 §5.1：行高跨月恒定 ⇒ 翻月不抖；6 行月铺满、5 行月留一行白）。
+        val topBarH = if (split) 0f else CalendarLayout.HEADER_H
+        val monthAreaH = maxOf(0f, availableH - topBarH)
+        // 分栏（横屏）的密度降级（规范 §5.8）：左栏高度稀缺，按每行可用高决定农历显隐 ——
+        // `perRow ≥ 60` 显示农历、`≥ 44` 隐藏、否则退成周条。竖屏不走这条（农历只由语言决定）。
+        val splitHeaderH = CalendarLayout.COMPACT_MONTH_TITLE_H + CalendarLayout.COMPACT_WEEKDAY_HEADER_H
+        val density = remember(monthAreaH, rows, showLunar, split) {
+            if (split) {
+                CalendarLayout.resolveDensity(monthAreaH - splitHeaderH, rows, showLunar)
+            } else {
+                CalendarLayout.Density(CalendarLayout.DensityKind.Month, showLunar)
+            }
         }
-        val cellH = CalendarLayout.cellHeightFor(monthAreaH, rows)
-        // 月层**实际**占的网格高：行高被 MAX_CELL_H 封顶后，网格比"可用高"矮。
-        // 年↔月 morph 的月端点必须用这个值，否则收尾会跳（年层的格子尺寸对不上）。
-        val gridH = rows * cellH
-        val areaH = CalendarLayout.WEEKDAY_HEADER_H + gridH
-        val metrics = remember(calendarW, areaH, rows, cellH, showLunar) {
+        val showLunarHere = density.showLunar
+        val cellH = if (split) {
+            // 分栏要**铺满**（不封顶也不留白）：均分是唯一不出错的做法
+            CalendarLayout.fitCellHeight(monthAreaH - splitHeaderH, rows)
+        } else {
+            CalendarLayout.cellHeightFor(monthAreaH)
+        }
+        val gridH = CalendarLayout.monthGridHeight(rows, cellH)
+        val metrics = remember(calendarW, cellH, showLunarHere) {
             CalendarLayout.monthPaneMetrics(
                 cellW = CalendarLayout.monthCellW(calendarW),
                 cellH = cellH,
-                showLunar = showLunar,
+                showLunar = showLunarHere,
             )
         }
 
-        // ---- 月 ↔ 周 morph（几何与 iOS 同一套数学，只是 cellH 换成本轮的 56dp）----
-        val weekMetrics = remember(calendarW, showLunar) {
-            CalendarLayout.weekMetrics(calendarW, showLunar)
+        // ---- 月 ↔ 周 morph（规范 §5.5.1）----
+        val weekMetrics = remember(calendarW, showLunarHere) {
+            CalendarLayout.weekMetrics(calendarW, showLunarHere)
         }
         val selectedWeekIndex = remember(displayed, selectedKey) {
             displayed.indexOfFirst { row -> row.any { DateUtil.dayKeyOf(it) == selectedKey } }
                 .coerceAtLeast(0)
         }
-        val morphed = remember(weekProgress.value, weekMetrics, metrics, rows, selectedWeekIndex) {
+        val p = weekProgress.value
+        val morphed = remember(p, weekMetrics, metrics, rows, selectedWeekIndex) {
             CalendarLayout.monthWeekMorph(
-                progress = weekProgress.value,
+                progress = p,
                 baseRowY = cellH * selectedWeekIndex,
                 monthHeight = cellH * rows,
                 monthMetrics = metrics,
                 weekMetrics = weekMetrics,
-                // 落点 = 星期栏底部：星期栏在三态里都保留，选中行落在它下面
-                stripTopY = CalendarLayout.WEEKDAY_HEADER_H,
+                // 落点 = 网格容器的局部 y=0：容器自己会被上移 BIG_TITLE_H·p，
+                // 于是选中行落在**绝对** y = 星期栏底部，正是真实周条的位置。
+                stripTopY = 0f,
             )
         }
-        // 月↔周 morph 期间：选中行不动，其余行向外移出并淡出（与 iOS 的 rowOffsets 一致）
+        // 每一行的**绝对**网格局部 y（rowOffsets 用的就是它）。
         val rowOffsets = FloatArray(rows) { row ->
             when {
                 row == selectedWeekIndex -> morphed.selectedRowY
@@ -314,25 +381,81 @@ fun HomeScreen(
         val rowAlphas = FloatArray(rows) { row ->
             if (row == selectedWeekIndex) 1f else morphed.rowAboveAlpha
         }
-        val weekMode = weekProgress.value > 0.01f
-        // 三态的日历带高（`docs/design-spec.md` §5.1）：
-        //  - 月 / 年：**整屏**（顶栏之外的全部高度）
-        //  - 周：星期栏 + 周条 68，下方是日记预览（预览**只在周态**出现）
-        // 分栏模式下由 Row 决定（左栏撑满），带高不参与。
+        // 选中行在 morph 中**缩小**到周条尺寸（其余行保持月格尺寸后移出）。
+        // 只改度量不改行高会让"选中行上移"看起来像整行平移，收尾时和周条对不上。
+        val rowMetrics = remember(p, metrics, weekMetrics, rows, selectedWeekIndex) {
+            if (p <= 0.01f) {
+                null
+            } else {
+                Array(rows) { row ->
+                    if (row == selectedWeekIndex) metrics.lerp(weekMetrics, p) else metrics
+                }
+            }
+        }
+        val weekMode = p > 0.01f
         val fullBandH = maxOf(0f, availableH - topBarH)
+        // 周态的日历带 = 星期栏 30 + 周条 68（大标题槽已经移出屏幕）
         val weekBandH = CalendarLayout.WEEKDAY_HEADER_H + CalendarLayout.WEEK_STRIP_H
-        // 年历的真实高度 = 整屏（年历与月历都是整屏视图）
+        val bandH = CalendarLayout.lerp(fullBandH, weekBandH, p)
         val yearHeight = if (split) availableH else fullBandH
+        val monthTitle = monthTitleText(monthFirst, dateFormats, context)
+
+        // 进入分栏（横屏 / 宽窗口）时归位到月态：横屏不提供年历入口，也没有周态
+        // （规范 §5.8，与 iOS 的 `settleToMonth()` 等价）。
+        LaunchedEffect(split) {
+            if (split) {
+                mode = HomeViewMode.MONTH
+                yearProgress.snapTo(0f)
+                weekProgress.snapTo(0f)
+            }
+        }
+
+        // 上下滑翻月 / 翻年（规范 §5.6）：阈值与橡皮筋复用 `DragPagerMath`。
+        val pagerModifier = Modifier
+            .fillMaxWidth()
+            .height(bandH.dp)
+            .clipToBounds()
+            .pointerInput(mode, rows, cellH) {
+                var accumulated = 0f
+                val tracker = VelocityTracker()
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        accumulated = 0f
+                        tracker.resetTracking()
+                    },
+                    onDragCancel = { accumulated = 0f },
+                    onDragEnd = {
+                        val velocity = tracker.calculateVelocity().y
+                        val predictedEnd =
+                            accumulated + velocity * CalendarLayout.DragPagerMath.PROJECTION_SECONDS
+                        when (CalendarLayout.DragPagerMath.decide(accumulated, predictedEnd, true, true)) {
+                            CalendarLayout.PageTarget.Next -> if (mode == HomeViewMode.YEAR) jumpYear(1) else pageMonth(1)
+                            CalendarLayout.PageTarget.Previous -> if (mode == HomeViewMode.YEAR) jumpYear(-1) else pageMonth(-1)
+                            CalendarLayout.PageTarget.Stay -> Unit
+                        }
+                        accumulated = 0f
+                    },
+                    onVerticalDrag = { change, delta ->
+                        change.consume()
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        accumulated = CalendarLayout.DragPagerMath.clampOffset(
+                            accumulated + delta / densityScale,
+                            cellH,
+                        )
+                    },
+                )
+            }
 
         Column(modifier = Modifier.fillMaxSize()) {
-            // 分栏（横屏/宽窗口）时头部隐藏：只有 402dp 高，头部会吃掉日历（与 iOS 一致）
+            // 分栏（横屏/宽窗口）时头部隐藏：可用高只有 ~400dp，头部会吃掉日历（与 iOS 一致）
             if (!split) {
                 HomeTopBar(
                     title = homeTitle(mode, year, monthFirst, dateFormats, context),
-                    isYearMode = mode == HomeViewMode.YEAR,
-                    expandedWeek = mode == HomeViewMode.WEEK,
-                    onTitleClick = ::toggleYear,
-                    onToggleWeek = { setWeekMode(!weekMode) },
+                    mode = mode,
+                    onTitleClick = {
+                        // 月态 → 年历；周态 / 年态 → 回月态（规范 §5.7）
+                        if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
+                    },
                     onToday = ::goToday,
                 )
             }
@@ -340,7 +463,8 @@ fun HomeScreen(
             val onDayClick: (LocalDate) -> Unit = { date ->
                 val key = DateUtil.dayKeyOf(date)
                 when {
-                    // 月态：点日期 = 进周态并选中（与 iOS `openDay` 一致）
+                    // 月态：点日期 = **整屏 morph 进周态**并选中（与 iOS `openDay` 一致）。
+                    // 首轮这里是"只换下方面板、不换屏"，morph 只能靠顶栏那个图标触发（缺陷 D6/D7）。
                     !weekMode -> {
                         selectedKey = key
                         setWeekMode(true)
@@ -361,11 +485,12 @@ fun HomeScreen(
                 selectedKey = selectedKey,
                 todayKey = todayKey,
                 flags = flags,
-                showLunar = showLunar,
+                showLunar = showLunarHere,
                 weekMetrics = weekMetrics,
-                weekProgress = weekProgress.value,
+                weekProgress = p,
                 rowOffsets = rowOffsets,
                 rowAlphas = rowAlphas,
+                rowMetrics = rowMetrics,
                 selectedWeekIndex = selectedWeekIndex,
                 fadeForYear = yearProgress.value,
                 onDayClick = onDayClick,
@@ -377,83 +502,81 @@ fun HomeScreen(
                 a11yNextYear = a11yNextYear,
                 pageMonth = ::pageMonth,
                 jumpYear = ::jumpYear,
+                // 大标题槽只在竖屏存在；分栏时高度太紧（规范 §5.8）
+                showBigTitle = !split,
+                monthTitleLabel = monthTitle,
             )
             if (split) {
-                // 横屏 / 宽窗口：左右双栏，左边日历（月 / 周 / 年三态都在左栏），右边日记预览
-                Row(modifier = Modifier.fillMaxSize()) {
+                // 横屏 / 宽窗口：左右双栏。左栏只有月态（横屏不提供年历入口，也没有周态）。
+                // ⚠️ 三块必须在 **Row** 里（规范 §5.8）：放进 Column 会被按高度分配，
+                // 表现为"日历占满左半边、右栏整块消失"。
+                Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                     CalendarSection(args = calendarArgs)
-                    DayPanel(
-                        blocks = dayBlocks,
-                        selectedDate = selectedDate,
-                        todayKey = todayKey,
-                        dateFormats = dateFormats,
-                        imageLoader = imageLoader,
-                        onOpenDay = { onOpenDay(selectedDate) },
-                        onToday = ::goToday,
-                        showHeader = true,
-                        showLunar = showLunar,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                    )
+                }
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight(),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                )
+                DayPanel(
+                    blocks = dayBlocks,
+                    selectedDate = selectedDate,
+                    todayKey = todayKey,
+                    dateFormats = dateFormats,
+                    showTime = showTime,
+                    imageLoader = imageLoader,
+                    onOpenDay = { onOpenDay(selectedDate) },
+                    onWrite = { onWrite(selectedDate) },
+                    onToday = ::goToday,
+                    showHeader = true,
+                    showLunar = showLunarHere,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
                 }
             } else {
-                // 竖屏：月 / 年是**整屏**日历；周态是「周条 + 下方日记预览」。
-                // 日记预览**只在周态**出现（iOS `calendarArea`：月/年层里没有 DayContentView）。
                 when (mode) {
-                    HomeViewMode.WEEK -> Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    ) {
-                        Box(modifier = Modifier.height(weekBandH.dp)) {
-                            CalendarSection(args = calendarArgs)
-                        }
+                    // 周态：周条 + 下方日记内容（内容只在周态出现）
+                    HomeViewMode.WEEK -> Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        Box(modifier = pagerModifier) { CalendarSection(args = calendarArgs) }
                         DayPanel(
                             blocks = dayBlocks,
                             selectedDate = selectedDate,
                             todayKey = todayKey,
                             dateFormats = dateFormats,
+                            showTime = showTime,
                             imageLoader = imageLoader,
                             onOpenDay = { onOpenDay(selectedDate) },
+                            onWrite = { onWrite(selectedDate) },
                             onToday = null,
                             showHeader = true,
-                            showLunar = showLunar,
+                            showLunar = showLunarHere,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth(),
                         )
                     }
 
-                    // 月态：整屏。日历带高 = 全部可用高，行高由它反算并封顶。
-                    HomeViewMode.MONTH -> Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    ) {
+                    // 月态：整屏
+                    HomeViewMode.MONTH -> Box(modifier = pagerModifier) {
                         CalendarSection(args = calendarArgs)
                     }
 
-                    // 年态：同样整屏（覆盖整个可用高，12 张卡片均匀铺开）。
-                    HomeViewMode.YEAR -> Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    ) {
+                    // 年态：整屏（12 张迷你月 + 页内大标题）
+                    HomeViewMode.YEAR -> Box(modifier = pagerModifier) {
                         YearLayer(
                             args = calendarArgs,
                             year = year,
                             monthFirst = monthFirst,
+                            monthTitleLabel = monthTitle,
                             yearHeight = yearHeight,
+                            yearWidth = calendarW,
                             monthGridH = gridH,
                             yearProgress = yearProgress.value,
                             dateFormats = dateFormats,
-                            onMonthClick = { month ->
-                                monthKey = CalendarGrid.monthKey(year, month)
-                                selectedKey = DateUtil.dayKeyOf(LocalDate.of(year, month, 1))
-                                mode = HomeViewMode.MONTH
-                                scope.launch { yearProgress.animateTo(0f, morphSpec) }
-                            },
+                            onMonthClick = { month -> openMonthFromYear(month) },
                         )
                     }
                 }
@@ -473,25 +596,30 @@ private fun YearLayer(
     args: CalendarSectionArgs,
     year: Int,
     monthFirst: LocalDate,
+    monthTitleLabel: String,
     yearHeight: Float,
-    /** 月层网格的**实际**高度（行高封顶后），morph 的月端点。 */
+    yearWidth: Float,
+    /** 月层网格的**实际**高度（行数 × 行高），morph 的月端点。 */
     monthGridH: Float,
     yearProgress: Float,
     dateFormats: DateFormats?,
     onMonthClick: (Int) -> Unit,
 ) {
     val context = LocalContext.current
-    val morph = remember(yearProgress, yearHeight, monthGridH, args.calendarW, args.showLunar) {
+    val morph = remember(yearProgress, yearHeight, monthGridH, yearWidth, args.showLunar, args.selectedWeekIndex, args.cellHeight) {
         CalendarLayout.yearMonthMorph(
             progress = yearProgress,
+            // **源卡片 = 当前选中月的那一张**：年↔月 morph 从它自己的迷你网格长出来。
+            // 首轮固定用 1 月那张卡，于是 9 月放大时动画从左上角飞过来（观感"动画不对"）。
             miniGrid = CalendarLayout.miniGridRect(
-                CalendarLayout.yearCardRect(1, args.calendarW, yearHeight),
+                CalendarLayout.yearCardRect(monthFirst.monthValue, yearWidth, yearHeight),
             ),
-            // 网格区从星期栏底部开始，高 = 行数 × 行高
+            // 网格区从「大标题槽 + 星期栏」之下开始，高 = 行数 × 行高。
+            // 这里必须用**封顶/派生之后**的真实网格高，否则收尾时格子尺寸对不上（会跳）。
             fullGrid = CalendarLayout.fullMonthGridRect(
-                args.calendarW,
-                CalendarLayout.WEEKDAY_HEADER_H + monthGridH,
-                CalendarLayout.WEEKDAY_HEADER_H,
+                yearWidth,
+                CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H + monthGridH,
+                CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H,
             ),
             showLunar = args.showLunar,
         )
@@ -502,6 +630,8 @@ private fun YearLayer(
         todayKey = args.todayKey,
         flags = args.flags,
         weekStart = args.weekStart,
+        yearTitle = dateFormats?.year(year) ?: context.getString(R.string.date_year, year),
+        zodiacLabel = dateFormats?.yearZodiac(year).orEmpty(),
         modifier = Modifier
             .fillMaxWidth()
             .height(yearHeight.dp)
@@ -540,6 +670,8 @@ private data class CalendarSectionArgs(
     val weekProgress: Float,
     val rowOffsets: FloatArray,
     val rowAlphas: FloatArray,
+    /** 月↔周 morph：每一行的度量（选中行在 morph 中缩到周条尺寸）。 */
+    val rowMetrics: Array<CalendarLayout.DayMetrics>?,
     val selectedWeekIndex: Int,
     val fadeForYear: Float,
     val onDayClick: (LocalDate) -> Unit,
@@ -551,6 +683,10 @@ private data class CalendarSectionArgs(
     val a11yNextYear: String,
     val pageMonth: (Int) -> Unit,
     val jumpYear: (Int) -> Unit,
+    /** 是否画 72dp 的大标题槽（竖屏 true；分栏时为省高度画 false）。 */
+    val showBigTitle: Boolean,
+    /** 大标题文案（`九月`）。 */
+    val monthTitleLabel: String,
 )
 
 /**
@@ -565,9 +701,30 @@ private data class CalendarSectionArgs(
  */
 @Composable
 private fun CalendarSection(args: CalendarSectionArgs) {
+    val density = LocalDensity.current.density
+    val fontScale = LocalDensity.current.fontScale
+    val p = args.weekProgress
+    // 月↔周 morph（规范 §5.5.1）：大标题槽上移淡出、星期栏上移、网格上移。
+    // 三者的位移量都是 -BIG_TITLE_H·p，于是 p=1 时星期栏落在 y=0、网格容器落在 y=30，
+    // 正好是周条的真实位置 —— 这就是"动画终点即真实图层"。
+    // 竖屏：72dp 的 32sp 大标题；分栏：34dp 的 24sp 紧凑标题（规范 §5.8，与 iOS 的
+    // `compactMonthTitleH` 一致 —— 横屏高度稀缺，但完全不画标题会让左栏失去锚点）。
+    val bigTitleH = if (args.showBigTitle) {
+        CalendarLayout.BIG_TITLE_H
+    } else {
+        CalendarLayout.COMPACT_MONTH_TITLE_H
+    }
+    val shiftY = bigTitleH * p
+    val titleOpacity = 1f - CalendarLayout.clamp01(p * 2f)
+
     Column(
         modifier = Modifier
             .width(args.calendarW.dp)
+            // ⚠️ 必须 `unbounded`：周态的色带只有 98dp（星期栏 30 + 周条 68），
+            // 而月层天然要 72 + 30 + 网格 ≈ 640dp。不加这一条时 Column 会被父约束压缩，
+            // 最后一个子项（网格容器）分到 0 高度 —— 周条**完全不渲染**，实测就是这个现象。
+            // 正确做法是让月层保持自然高度、由外层 band 负责裁剪。
+            .wrapContentHeight(unbounded = true, align = Alignment.Top)
             // 年月切换的无障碍入口（iOS 侧没有标签，Android 一并补上）
             .semantics {
                 customActions = listOf(
@@ -578,33 +735,56 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                 )
             },
     ) {
-        if (args.showWeekdayHeader) {
-            // 星期栏在三态里都保留：周条显示的是"周一到周日"这一行的日期，
-            // 与它上面的列标题天然对齐。月态下它就是同一份列标题。
-            CalendarWeekdayHeader(weekStart = args.weekStart)
-        }
+        // 大标题槽（月态与分栏都有，只是高度不同）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // 高度在「月态（行数 × 行高）」与「周态（周条 68）」之间等值插值：
-                // 用 `if` 二选一会让容器瞬间跳掉一整块，插值则是跟着 morph 一起收，
-                // 下方面板平滑地长上来。行落点恰好等于收完后的容器顶部（星期栏底），
-                // 所以收尾时选中行正好落在容器里、不会跳。
+                .height(bigTitleH.dp)
+                .graphicsLayer {
+                    translationY = -bigTitleH * p * density
+                    alpha = titleOpacity
+                },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                // 32sp 大标题（规范 §5.2）：iOS 的视觉重心就在这一行，
+                // 首轮把它并进顶栏，于是整块版面又扁又空（实测缺陷 D5）。
+                Text(
+                    text = args.monthTitleLabel,
+                    fontSize = if (args.showBigTitle) {
+                        DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale)
+                    } else {
+                        DynamicTypeMetrics.effectiveSp(TypeSize.pageTitle, fontScale)
+                    },
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = if (args.showBigTitle) 20.dp else 16.dp),
+                )
+        }
+        Box(modifier = Modifier.graphicsLayer { translationY = -shiftY * density }) {
+            CalendarWeekdayHeader(weekStart = args.weekStart, compact = !args.showBigTitle)
+        }
+        // 高度在「月态网格」与「周条」之间插值：用 `if` 二选一会让容器瞬间跳掉一整块。
+        // 不加 clipToBounds —— 周条在 morph 前段位于容器上边界之外，裁掉会露出空白；
+        // 真正的裁剪交给外面那一层 band（让行的移出被裁掉，而周条仍在屏幕内）。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
                 .height(
                     CalendarLayout.lerp(
                         calendarGridHeight(args.displayed.size, args.cellHeight).value,
-                        CalendarLayout.WEEK_STRIP_H,
-                        args.weekProgress,
+                        CalendarLayout.WEEK_STRIP_H + bigTitleH,
+                        p,
                     ).dp,
                 )
-                // 行会被平移到容器之外，必须裁掉
-                .clipToBounds(),
+                .graphicsLayer { translationY = -shiftY * density },
         ) {
-            if (args.weekProgress > 0.01f) {
+            if (p > 0.01f) {
                 WeekStrip(
                     week = weekOf(args.displayed, args.selectedKey),
                     weekIndex = args.selectedWeekIndex,
-                    progress = args.weekProgress,
+                    progress = p,
                     stripWidth = minOf(args.calendarW, WEEK_STRIP_MAX_WIDTH_DP),
                     metrics = args.weekMetrics,
                     showLunar = args.showLunar,
@@ -613,10 +793,11 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     flags = args.flags,
                     onDayClick = args.onDayClick,
                     onPageWeek = args.onPageWeek,
-                    modifier = Modifier.graphicsLayer { translationY = 0f },
+                    // 周条在**绝对** y=30 处（星期栏之下）；换算到本容器的局部坐标
+                    modifier = Modifier.offset(y = (CalendarLayout.WEEKDAY_HEADER_H * (p - 1f)).dp),
                 )
             }
-            if (args.weekProgress < 0.99f) {
+            if (p < 0.99f) {
                 CalendarDayGrid(
                     rows = args.displayed,
                     anchorMonth = args.monthFirst,
@@ -626,21 +807,20 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     flags = args.flags,
                     onDayClick = args.onDayClick,
                     modifier = Modifier.graphicsLayer {
-                        // 年历 morph 期间月层淡出；月↔周期间由行级 alpha 负责，这里不变
+                        // 年历 morph 期间月层淡出；月↔周期间由行级 alpha 负责
                         alpha = 1f - fadeProgress(args.fadeForYear)
                     },
-                    // 固定 6 行时末行常常整行都属于下个月：那些日期仍然画出来（淡显）
-                    showAdjacent = true,
+                    // 规范 §5.2：**只画当月日期**，相邻月留空
+                    showAdjacent = false,
                     showLunar = args.showLunar,
                     showDividers = true,
-                    rowOffsets = args.rowOffsets.takeIf { args.weekProgress > 0.01f },
-                    rowAlphas = if (args.weekProgress > 0.01f) {
-                        // 与周条交叉：月层行再乘一个整体淡出系数
-                        FloatArray(args.rowAlphas.size) { args.rowAlphas[it] * (1f - args.weekProgress) }
+                    rowOffsets = args.rowOffsets.takeIf { p > 0.01f },
+                    rowAlphas = if (p > 0.01f) {
+                        FloatArray(args.rowAlphas.size) { args.rowAlphas[it] * (1f - p) }
                     } else {
                         null
                     },
-                    cellHeight = args.cellHeight.dp,
+                    rowMetrics = args.rowMetrics,
                 )
             }
         }
@@ -736,7 +916,6 @@ private fun WeekStrip(
                 showAdjacent = true,
                 showLunar = showLunar,
                 showDividers = false,
-                cellHeight = CalendarLayout.WEEK_STRIP_H.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = gridLabel },
@@ -768,24 +947,30 @@ private fun weekDescription(week: List<LocalDate>): String {
 // ---------------------------------------------------------------------- 顶栏
 
 /**
- * 首页顶栏。M3 规格（规范 §5.4）：`titleLarge` + 尾部 `TextButton`，高度 `minHeight`。
+ * 首页顶栏。M3 规格（规范 §5.7）：`titleLarge` + 尾部 `TextButton`，高度 `minHeight`。
  *
- * 整块标题可点 → 年历（与 iOS 的"年月胶囊"同一个入口，只是不再画成玻璃胶囊）。
+ * | 形态 | 左 | 右 |
+ * | --- | --- | --- |
+ * | 月态 | `▾ 2026年`（整块可点 → 年历） | `今天` |
+ * | 周态 | `‹ 九月`（整块可点 → **回月态**） | `今天` |
+ * | 年态 | `‹ 2026年`（整块可点 → 回月态） | `今天` |
+ *
+ * **这里没有"月↔周"按钮**：iOS 没有那个入口，而且它的图标在月/周两态下完全一样，
+ * 摆在「今天」旁边只会被读成第二个日历入口（实测缺陷 D7）。回月态的入口就是周态
+ * 顶栏左侧的 `‹ 九月`，与 iOS 一致。
  */
 @Composable
 private fun HomeTopBar(
     title: String,
-    isYearMode: Boolean,
-    expandedWeek: Boolean,
+    mode: HomeViewMode,
     onTitleClick: () -> Unit,
-    onToggleWeek: () -> Unit,
     onToday: () -> Unit,
 ) {
     val backLabel = stringResource(R.string.a11y_back_to_month)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = CalendarLayout.HEADER_H.dp)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -795,13 +980,17 @@ private fun HomeTopBar(
                 .clickable(onClick = onTitleClick)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
                 .semantics {
-                    if (isYearMode) contentDescription = backLabel
+                    if (mode != HomeViewMode.MONTH) contentDescription = backLabel
                 },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Icon(
-                imageVector = if (isYearMode) Icons.AutoMirrored.Filled.KeyboardArrowLeft else Icons.Filled.ArrowDropDown,
+                imageVector = if (mode == HomeViewMode.MONTH) {
+                    Icons.Filled.ArrowDropDown
+                } else {
+                    Icons.AutoMirrored.Filled.KeyboardArrowLeft
+                },
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -813,28 +1002,18 @@ private fun HomeTopBar(
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        // 月 ↔ 周：iOS 上这个入口是"点日期进周条"，Android 另外给一个显式按钮，
-        // 否则用户没有办法在周态与月态之间来回（点日期只会一直进周）。
-        IconButton(onClick = onToggleWeek) {
-            Icon(
-                imageVector = Icons.Filled.DateRange,
-                contentDescription = stringResource(
-                    if (expandedWeek) R.string.index_toggle_month else R.string.index_toggle_week,
-                ),
-                tint = if (expandedWeek) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
         TextButton(onClick = onToday) {
             Text(stringResource(R.string.index_today))
         }
     }
 }
 
-/** 顶栏标题：月态 `2026年 九月` / 年态 `2026年`。 */
+/**
+ * 顶栏标题。
+ *
+ * 月态只放**年份**（规范 §5.7）：月份由下面 72dp 的 32sp 大标题承担 —— 首轮把
+ * "2026年 九月"整串塞进顶栏，结果既没有大标题、顶栏又比 iOS 重（实测缺陷 D5 的一部分）。
+ */
 private fun homeTitle(
     mode: HomeViewMode,
     year: Int,
@@ -842,101 +1021,22 @@ private fun homeTitle(
     formats: DateFormats?,
     context: android.content.Context,
 ): String = when (mode) {
-    HomeViewMode.YEAR -> formats?.year(year) ?: context.getString(R.string.date_year, year)
-    // 月态与周态都显示"年月"：周态的大标题由周条本身表达（与 iOS 的 `titleText` 略有不同，
-    // iOS 在周态显示 `MonthFull`；这里统一成年月，避免顶栏与当日标题行重复同一条日期）
-    HomeViewMode.MONTH, HomeViewMode.WEEK -> formats?.monthTitle(year, monthFirst)
+    HomeViewMode.YEAR, HomeViewMode.MONTH ->
+        formats?.year(year) ?: context.getString(R.string.date_year, year)
+    // 周态左侧是"返回月历"，文案用月份名（与 iOS 的 `titleText` 一致）
+    HomeViewMode.WEEK -> formats?.monthFull(monthFirst)
         ?: context.getString(R.string.date_month_short, monthFirst.monthValue)
 }
 
-// ---------------------------------------------------------------------- 日历
-
-/**
- * 月历 + 上下滑翻月。
- *
- * 手势阈值、橡皮筋、预测终点全部复用 [CalendarLayout.DragPagerMath]（与 iOS 同一套数字）。
- * 拖动期间用 `translationY` 跟随，松手后翻页并把偏移清零 —— 与 iOS 的"同一事务提交"等价。
- */
-@Composable
-private fun MonthPager(
-    weeks: List<List<LocalDate>>,
+/** 月历大标题的文案（`九月` / `September`）。 */
+private fun monthTitleText(
     monthFirst: LocalDate,
-    metrics: CalendarLayout.DayMetrics,
-    cellHeight: Float,
-    selectedKey: String,
-    todayKey: String,
-    flags: Set<String>,
-    showLunar: Boolean,
-    showAdjacent: Boolean,
-    showDividers: Boolean,
-    onDayClick: (LocalDate) -> Unit,
-    onPageMonth: (Int) -> Unit,
-    /** 年历 morph 进度：月层按它淡出（与 iOS 的 `1 - clamp((p - 0.45)/0.55)` 同一曲线）。 */
-    fadeForYear: Float,
-) {
-    val density = LocalDensity.current
-    val densityScale = density.density
-    var drag by remember { mutableStateOf(0f) }
-    val gridHeightDp = calendarGridHeight(weeks.size, cellHeight)
-    val monthAlpha = 1f - fadeProgress(fadeForYear)
+    formats: DateFormats?,
+    context: android.content.Context,
+): String = formats?.monthFull(monthFirst)
+    ?: context.getString(R.string.date_month_short, monthFirst.monthValue)
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(gridHeightDp)
-            .pointerInput(weeks, cellHeight) {
-                var accumulated = 0f
-                val tracker = VelocityTracker()
-                detectVerticalDragGestures(
-                    onDragStart = {
-                        accumulated = 0f
-                        tracker.resetTracking()
-                    },
-                    onDragCancel = { drag = 0f },
-                    onDragEnd = {
-                        val velocity = tracker.calculateVelocity().y
-                        val predictedEnd =
-                            accumulated + velocity * CalendarLayout.DragPagerMath.PROJECTION_SECONDS
-                        when (CalendarLayout.DragPagerMath.decide(accumulated, predictedEnd, true, true)) {
-                            CalendarLayout.PageTarget.Next -> onPageMonth(1)
-                            CalendarLayout.PageTarget.Previous -> onPageMonth(-1)
-                            CalendarLayout.PageTarget.Stay -> Unit
-                        }
-                        // 偏移清零与翻页在同一帧提交，避免用旧偏移渲染一帧新页
-                        drag = 0f
-                    },
-                    onVerticalDrag = { change, delta ->
-                        change.consume()
-                        tracker.addPosition(change.uptimeMillis, change.position)
-                        accumulated = CalendarLayout.DragPagerMath.clampOffset(
-                            accumulated + delta / densityScale,
-                            cellHeight,
-                        )
-                        drag = accumulated
-                    },
-                )
-            },
-    ) {
-        // 年历 morph 期间月层淡出（行的 morph 已按 §5.3 移除，这里只有年↔月一条曲线）
-        CalendarDayGrid(
-            rows = weeks,
-            anchorMonth = monthFirst,
-            metrics = metrics,
-            selectedKey = selectedKey,
-            todayKey = todayKey,
-            flags = flags,
-            onDayClick = onDayClick,
-            modifier = Modifier.graphicsLayer {
-                translationY = drag * densityScale
-                alpha = monthAlpha
-            },
-            showAdjacent = showAdjacent,
-            showLunar = showLunar,
-            showDividers = showDividers,
-            cellHeight = cellHeight.dp,
-        )
-    }
-}
+// ---------------------------------------------------------------------- 日历
 
 /** 年历 morph 期间月层的不透明度曲线（对应 iOS `1 - clamp01((p - 0.45) / 0.55)`）。 */
 private fun fadeProgress(progress: Float): Float =
@@ -959,8 +1059,12 @@ private fun DayPanel(
     selectedDate: LocalDate,
     todayKey: String,
     dateFormats: DateFormats?,
+    showTime: Boolean,
     imageLoader: (String) -> ImageBitmap?,
+    /** 点日记卡片 → 进编辑器（iOS 的 `openEditor`）。 */
     onOpenDay: () -> Unit,
+    /** 「写日记 / 继续写日记」按钮 → 进编辑器。 */
+    onWrite: () -> Unit,
     onToday: (() -> Unit)?,
     showHeader: Boolean,
     showLunar: Boolean = true,
@@ -996,13 +1100,9 @@ private fun DayPanel(
                         maxLines = 1,
                     )
                 }
-                if (isToday) {
-                    Text(
-                        text = stringResource(R.string.index_today),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
+                // 这里**不画**相对日文案（今天 / 昨天 / 明天）：
+                // iOS 的当日标题行只有「日期 + 农历」，"今天"是横屏右栏标题行里那枚**按钮**。
+                // 首轮两处都画，于是横屏标题行出现两个"今天"（实测缺陷 D9）。
                 Spacer(modifier = Modifier.weight(1f))
                 if (onToday != null) {
                     TextButton(onClick = onToday) {
@@ -1032,17 +1132,18 @@ private fun DayPanel(
                         DayBlockCard(
                             block = block,
                             dateFormats = dateFormats,
+                            showTime = showTime,
                             imageLoader = imageLoader,
                             onOpenDay = onOpenDay,
                         )
                     }
                     if (isToday) {
-                        Button(onClick = onOpenDay, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = onWrite, modifier = Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.index_continue_write))
                         }
                     }
                 } else {
-                    DayEmptyState(isFuture = isFuture, isToday = isToday, onOpenDay = onOpenDay)
+                    DayEmptyState(isFuture = isFuture, isToday = isToday, onWrite = onWrite)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -1052,7 +1153,7 @@ private fun DayPanel(
 
 /** 空态：图标 + 一行说明 +（仅今天）写入口。垂直居中，不靠"顶到 56dp"的硬编码。 */
 @Composable
-private fun DayEmptyState(isFuture: Boolean, isToday: Boolean, onOpenDay: () -> Unit) {
+private fun DayEmptyState(isFuture: Boolean, isToday: Boolean, onWrite: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1080,7 +1181,7 @@ private fun DayEmptyState(isFuture: Boolean, isToday: Boolean, onOpenDay: () -> 
             textAlign = TextAlign.Center,
         )
         if (isToday) {
-            Button(onClick = onOpenDay) { Text(stringResource(R.string.index_write)) }
+            Button(onClick = onWrite) { Text(stringResource(R.string.index_write)) }
         }
     }
 }
@@ -1090,11 +1191,13 @@ private fun DayEmptyState(isFuture: Boolean, isToday: Boolean, onOpenDay: () -> 
 private fun DayBlockCard(
     block: EditBlock,
     dateFormats: DateFormats?,
+    showTime: Boolean,
     imageLoader: (String) -> ImageBitmap?,
     onOpenDay: () -> Unit,
 ) {
+    // `auto_time` 关闭时不显示开始时间，只保留地点（与 iOS 的 `showsTime` 一致）
     val startLine = buildString {
-        if (block.startTimeUtc > 0) {
+        if (showTime && block.startTimeUtc > 0) {
             append(dateFormats?.timeOf(Instant.ofEpochMilli(block.startTimeUtc)).orEmpty())
         }
         if (block.locText.isNotEmpty()) {

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -76,15 +77,26 @@ fun CalendarDayGrid(
     flags: Set<String>,
     onDayClick: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
-    showAdjacent: Boolean = true,
+    /**
+     * 是否画出相邻月的日期。
+     *
+     * **默认 false**（规范 §5.2）：iOS 的月历只画当月日期，相邻月的位置留空。
+     * 首轮默认 true，于是 8 月 31 日、10 月 1 日… 全都画了出来（实测缺陷 D4）。
+     */
+    showAdjacent: Boolean = false,
     showLunar: Boolean = true,
-    /** 月 ↔ 周 morph：每一行的 y 偏移（dp，绝对行 y）与透明度；null 表示等距排布。 */
+    /**
+     * 月 ↔ 周 morph：每一行的 y 偏移（dp，**绝对**网格局部 y）与透明度；null 表示等距排布。
+     *
+     * 注意是"绝对 y"而不是"位移量"：行高在 morph 中会变（选中行缩到周条尺寸），
+     * 流动排布的 y 于是不再是 `row × cellH`，位移必须由"目标 y − 该行的流动 y"算出来。
+     */
     rowOffsets: FloatArray? = null,
     rowAlphas: FloatArray? = null,
+    /** 月 ↔ 周 morph：每一行的度量（不传则全部用 [metrics]）。 */
+    rowMetrics: Array<CalendarLayout.DayMetrics>? = null,
     /** 行之间是否画分隔线（周条不画）。 */
     showDividers: Boolean = true,
-    /** 每格的高度（dp）。由调用方从 [CalendarLayout] 算出。 */
-    cellHeight: Dp = CalendarLayout.PORTRAIT_CELL_H.dp,
 ) {
     val fontScale = LocalDensity.current.fontScale
     val dayFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
@@ -92,31 +104,45 @@ fun CalendarDayGrid(
     val outlineVariant = MaterialTheme.colorScheme.outlineVariant
 
     Column(modifier = modifier.fillMaxWidth()) {
+        // 该行在**流动排布**下的顶部 y（含前面各行的高度与分隔线厚度）。
+        var flowY = 0f
         rows.forEachIndexed { row, week ->
-            if (row > 0 && showDividers && metrics.dividerAlpha > 0.01f) {
-                val rowHasMonthDay = !showAdjacent || week.any {
-                    it.year == anchorMonth.year && it.monthValue == anchorMonth.monthValue
-                }
-                if (rowHasMonthDay) {
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = outlineVariant.copy(alpha = 0.35f * metrics.dividerAlpha),
-                    )
-                }
+            val m = rowMetrics?.getOrNull(row) ?: metrics
+            // 分隔线：只画在"这一行至少有一个当月日期"的位置。
+            // 不能用 `!showAdjacent || ...` 短路 —— showAdjacent=false 时那会变成恒真，
+            // 于是整行都是相邻月的空行也会画一条线（实测缺陷 D12）。
+            val rowHasMonthDay = week.any {
+                it.year == anchorMonth.year && it.monthValue == anchorMonth.monthValue
             }
-            val offsetY = rowOffsets?.getOrNull(row)?.let { absY -> absY - metrics.cellH * row } ?: 0f
+            if (row > 0 && showDividers && m.dividerAlpha > 0.01f && rowHasMonthDay) {
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = outlineVariant.copy(alpha = 0.35f * m.dividerAlpha),
+                )
+                flowY += 1f
+            }
+            // 目标 y（绝对）− 流动 y = 需要施加的位移
+            val offsetY = rowOffsets?.getOrNull(row)?.let { absY -> absY - flowY } ?: 0f
             val rowAlpha = rowAlphas?.getOrNull(row) ?: 1f
+            val rowH = m.cellH.dp
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(cellHeight)
+                    .height(rowH)
                     .graphicsLayer {
                         translationY = offsetY * density
                         alpha = rowAlpha
                     },
             ) {
                 week.forEach { date ->
+                    val inMonth =
+                        date.year == anchorMonth.year && date.monthValue == anchorMonth.monthValue
+                    if (!inMonth && !showAdjacent) {
+                        // 相邻月：留空 —— 不绘制、不可点、**不进无障碍树**（规范 §5.10）
+                        Box(modifier = Modifier.weight(1f).height(rowH))
+                        return@forEach
+                    }
                     CalendarDayCell(
                         date = date,
                         anchorMonth = anchorMonth,
@@ -128,13 +154,15 @@ fun CalendarDayGrid(
                         todayKey = todayKey,
                         dayFontSize = dayFontSize,
                         lunarFontSize = lunarFontSize,
-                        cellHeight = cellHeight,
+                        circleDiameter = m.circleDiameter.dp,
+                        diaryMarkWidth = minOf(20f, m.cellW * 0.5f).dp,
                         enabled = rowAlpha > 0.01f,
                         onClick = { onDayClick(date) },
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
+            flowY += m.cellH
         }
     }
 }
@@ -148,8 +176,8 @@ fun CalendarDayGrid(
  *  - 有日记 → 日号下方 2dp 圆角短横线；
  *  - 相邻月 / 未来 → 降透明度（**仍可点**）。
  *
- * 圆的直径由 [cellHeight] 派生（`cellHeight - 16dp`，夹在 28…48dp）：
- * 原来写死 40dp，一旦行高被压到 40dp 以下，圆就会和相邻格相碰。
+ * 圆的直径由 `metrics.circleDiameter` 派生（`min(cellW−3, 内容高+14, cellH−3)`），
+ * 与纯数学层同源；原来写死 40dp，行高一变就会和相邻格相碰。
  */
 @Composable
 private fun CalendarDayCell(
@@ -163,7 +191,10 @@ private fun CalendarDayCell(
     todayKey: String,
     dayFontSize: TextUnit,
     lunarFontSize: TextUnit,
-    cellHeight: Dp,
+    /** 选中/今天的圆底直径（dp）。由 `metrics.circleDiameter` 派生，与纯数学层同源。 */
+    circleDiameter: Dp,
+    /** "有日记"下划线的宽度（dp）：`min(20, cellW × 0.5)`（与 iOS 一致）。 */
+    diaryMarkWidth: Dp,
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -197,11 +228,13 @@ private fun CalendarDayCell(
     }
     val markColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
     val interaction = remember { MutableInteractionSource() }
-    val circleDiameter = (cellHeight - 16.dp).coerceIn(28.dp, 48.dp)
 
     Box(
         modifier = modifier
-            .height(cellHeight)
+            // 撑满整行：格子高度 = 行高，内容在里面垂直居中。
+            // 不写 fillMaxHeight 时 Box 只包住内容（日号 + 农历 ≈ 70dp），
+            // 于是内容贴在行顶、下面空一截，分隔线看起来离内容很远。
+            .fillMaxHeight()
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
@@ -269,7 +302,7 @@ private fun CalendarDayCell(
                 )
             }
             if (hasDiary) {
-                DiaryMark(color = markColor.copy(alpha = contentAlpha))
+                DiaryMark(color = markColor.copy(alpha = contentAlpha), width = diaryMarkWidth)
             }
         }
     }
@@ -277,11 +310,11 @@ private fun CalendarDayCell(
 
 /** "有日记"标记：2dp 高、1dp 圆角的短横线（对应 iOS 的 `Radius.hairline`）。 */
 @Composable
-private fun DiaryMark(color: Color) {
+private fun DiaryMark(color: Color, width: Dp) {
     Box(
         modifier = Modifier
             .padding(top = 1.dp)
-            .size(width = 14.dp, height = 2.dp)
+            .size(width = width, height = 2.dp)
             .background(color, RoundedCornerShape(Radius.hairline)),
     )
 }
@@ -310,12 +343,22 @@ fun CalendarWeekdayHeader(
             .height(height.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        labels.forEach { label ->
+        labels.forEachIndexed { index, label ->
+            // 周末列降一档（规范 §5.2）：一周从周一起算时是第 6、7 列，从周日起算时是第 1、7 列。
+            val isWeekend = if (weekStart == DateUtil.WEEK_START_SUNDAY) {
+                index == 0 || index == 6
+            } else {
+                index >= 5
+            }
             Text(
                 text = label,
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isWeekend) {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
                 style = MaterialTheme.typography.labelMedium,
                 fontSize = DynamicTypeMetrics.calendarSp(11.dp, fontScale),
                 maxLines = 1,

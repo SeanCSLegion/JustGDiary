@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -165,13 +166,22 @@ fun IconBadge(
     }
 }
 
-/** 空状态：图标 + 文案（对应 iOS `GlassEmptyState`，Android 侧按 M3 重做）。 */
+/**
+ * 空状态：图标 + 文案（+ 可选副文案与行动按钮）。
+ *
+ * 对应 iOS `GlassEmptyState`（图标 26pt + 文案 15pt + 可选 compact 按钮）。
+ * 行动按钮是规范 §9.5 要求的：**有条件但无结果**时必须给一个「清除全部条件」的出口，
+ * 否则用户只能一个个点掉胶囊才能回到空态。
+ */
 @Composable
 fun EmptyState(
     icon: ImageVector,
     text: String,
     modifier: Modifier = Modifier,
     contentDescription: String? = null,
+    hint: String? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -193,6 +203,18 @@ fun EmptyState(
             textAlign = TextAlign.Center,
             modifier = Modifier.widthIn(max = 320.dp),
         )
+        if (hint != null) {
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 320.dp),
+            )
+        }
+        if (actionLabel != null && onAction != null) {
+            Button(onClick = onAction) { Text(actionLabel) }
+        }
     }
 }
 

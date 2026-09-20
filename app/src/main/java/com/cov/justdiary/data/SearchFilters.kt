@@ -33,9 +33,17 @@ data class SearchUiState(
     val hasMore: Boolean = false,
     val total: Int = -1,
     val loading: Boolean = false,
+    /**
+     * 搜索索引**真的**正在重建（还没查过 ≠ 索引没好）。
+     *
+     * 这一条是实测缺陷的修复：首轮用 `total < 0` 推导"索引未就绪"，而"无条件时不查库"
+     * 这条分支会把 `total` 留成 `-1`，于是搜索页永远停在"正在准备搜索索引…"，
+     * 三档空态一次都看不到。
+     */
+    val indexing: Boolean = false,
 ) {
-    /** 库还没准备好时 `total == -1`（与 iOS 一致）。 */
-    val indexNotReady: Boolean get() = total < 0
+    /** 索引重建中 —— 只由 [indexing] 决定，与 `total` 无关。 */
+    val indexNotReady: Boolean get() = indexing
     val isEmpty: Boolean get() = items.isEmpty()
 
     /**

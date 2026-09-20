@@ -47,6 +47,13 @@ fun DiaryPageScreen(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     onDataChanged: () -> Unit = {},
+    /**
+     * 进入时直接开写（首页当日面板的「写日记 / 继续写日记」走这条）。
+     *
+     * iOS 的 `openEditor(dayKey)` 就是这样：面板按钮直接进编辑器，不是先进阅读页再点一次。
+     * 只有当天可写时才生效（[DiaryPageViewModel.enterWrite] 自己会再判一次）。
+     */
+    startInWrite: Boolean = false,
 ) {
     val context = LocalContext.current
     val container = remember(context) {
@@ -61,7 +68,7 @@ fun DiaryPageScreen(
     // 编辑器有没有未保存内容 —— 由编辑器上报，返回键据此决定是否二次确认
     var editorDirty by remember { mutableStateOf(false) }
 
-    LaunchedEffect(dayKey) { viewModel.open(dayKey) }
+    LaunchedEffect(dayKey) { viewModel.open(dayKey, startInWrite) }
     LaunchedEffect(state.requestDismiss) {
         if (state.requestDismiss) {
             viewModel.consumeDismiss()
@@ -103,9 +110,12 @@ fun DiaryPageScreen(
                     blocks = state.blocks.map { block ->
                         ReadBlock(
                             startTimeUtc = block.startTimeUtc,
-                            startLine = formats.startLine(
-                                formats.timeOf(java.time.Instant.ofEpochMilli(block.startTimeUtc)),
-                                block.locText,
+                            // `auto_time` 关闭时不显示开始时间（只显示地点），与 iOS 的
+                            // `vm.showsTime` 同一语义。数据层照旧记录 start_time_utc。
+                            startLine = formats.blockStartLine(
+                                showTime = state.settings.autoTime,
+                                time = formats.timeOf(java.time.Instant.ofEpochMilli(block.startTimeUtc)),
+                                locText = block.locText,
                             ),
                             parts = ContentFlatten.parseContent(block.contentJson),
                         )
@@ -126,9 +136,10 @@ fun DiaryPageScreen(
                             dateText = formats.dayTitle(
                                 com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
                             ),
-                            startLine = formats.startLine(
-                                formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
-                                state.locationText,
+                            startLine = formats.blockStartLine(
+                                showTime = state.settings.autoTime,
+                                time = formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
+                                locText = state.locationText,
                             ),
                         )
                     },
@@ -153,6 +164,7 @@ fun DiaryPageScreen(
                     locationState = editorLocationState(state),
                     autoTime = state.settings.autoTime,
                     startTimeUtc = state.startTimeUtc,
+                    startTimeLabel = formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
                     onRequestLocation = viewModel::beginLocate,
                     onPrecisionChange = viewModel::applyPrecision,
                     onSave = viewModel::save,

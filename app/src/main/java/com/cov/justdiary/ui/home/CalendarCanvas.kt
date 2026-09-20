@@ -62,6 +62,10 @@ fun YearCanvas(
      * 原先这里写死 `monthValue + "月"`，切到英文后年历仍显示中文 —— 现在没有默认值，
      * 调用方必须给出跟随语言的文案（见 `HomeScreen` 的 `DateFormats.monthName`）。
      */
+    /** 页内大标题（`2026年`，32sp bold primary）。 */
+    yearTitle: String = "",
+    /** 大标题右侧的干支生肖（`丙午马年`；非中文时为空字符串）。 */
+    zodiacLabel: String = "",
     monthLabel: (LocalDate) -> String,
 ) {
     val density = LocalDensity.current
@@ -69,6 +73,7 @@ fun YearCanvas(
 
     // Canvas 的绘制 lambda 不是 @Composable 上下文，主题色必须在这里先取出
     val primary = MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     val hasDiaryLabel = stringResource(R.string.index_has_diary)
     val noDiaryLabel = stringResource(R.string.index_no_diary)
@@ -88,12 +93,41 @@ fun YearCanvas(
             val widthDp = size.width / density.density
             val heightDp = size.height / density.density
 
-            val titleStyle = TextStyle(
+            // ---- 页内大标题（规范 §5.4）：32sp bold primary + 右侧干支生肖 ----
+            // 只在中文下画生肖；英文用户看干支没有意义（与 iOS 一致）。
+            if (yearTitle.isNotEmpty()) {
+                val titleStyle = TextStyle(
+                    fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.display, density.fontScale),
+                    fontWeight = FontWeight.Bold,
+                    color = primary,
+                )
+                val titleText = measurer.measure(yearTitle, titleStyle)
+                drawText(
+                    textLayoutResult = titleText,
+                    topLeft = Offset(
+                        CalendarLayout.YEAR_PAD.dp.toPx(),
+                        (CalendarLayout.YEAR_TITLE_H.dp.toPx() - titleText.size.height) / 2f,
+                    ),
+                )
+                if (zodiacLabel.isNotEmpty()) {
+                    val zodiacStyle = TextStyle(
+                        fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, density.fontScale),
+                        color = onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                    val zodiacText = measurer.measure(zodiacLabel, zodiacStyle)
+                    drawText(
+                        textLayoutResult = zodiacText,
+                        topLeft = Offset(
+                            size.width - CalendarLayout.YEAR_PAD.dp.toPx() - zodiacText.size.width,
+                            (CalendarLayout.YEAR_TITLE_H.dp.toPx() - zodiacText.size.height) / 2f,
+                        ),
+                    )
+                }
+            }
+
+            val monthTitleStyle = TextStyle(
                 fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.rowTitle, density.fontScale),
                 fontWeight = FontWeight.SemiBold,
-            )
-            val dayStyle = TextStyle(
-                fontSize = DynamicTypeMetrics.calendarSp(TypeSize.caption, density.fontScale),
             )
 
             for (month in 1..12) {
@@ -107,7 +141,7 @@ fun YearCanvas(
 
                 val titleText = measurer.measure(
                     monthLabel(monthFirst),
-                    titleStyle.copy(color = titleColor),
+                    monthTitleStyle.copy(color = titleColor),
                 )
                 drawText(
                     textLayoutResult = titleText,
@@ -117,37 +151,55 @@ fun YearCanvas(
                     ),
                 )
 
-                // 迷你月用「圆点」而不是日号：年历卡片只有 ~50dp 高，6 行日号在这个尺寸下
-                // 必然互相叠住（首轮上机实测）。圆点在同尺寸下清晰可读，而且年历真正要回答的
-                // 问题只有两个 —— 「这个月有记录吗」「今天是哪一格」。
+                // ---- 迷你月：6 行 × 7 列的**日号**（规范 §5.4）----
+                //
+                // 首轮这里画的是"有记录的日期一个圆点"，理由是"卡片只有 ~50dp 高"。
+                // 实测卡片是 128 × 168dp（383 × 503px），这个前提早就不成立 ——
+                // 没有日号，迷你月读不出"这个月是几号星期几"，而且年↔月 morph
+                // 也就没有落点（只能退化成空白缩放，这正是"年历动画不对"的根因）。
                 val cellW = grid.w.dp.toPx() / 7f
                 val cellH = grid.h.dp.toPx() / CalendarLayout.MONTH_ROWS
-                val radius = (minOf(cellW, cellH) * 0.26f).coerceAtLeast(1.2f)
-                val weeks = CalendarGrid.weeks(monthFirst, weekStart)
+                val dayFont = CalendarLayout.miniDayFont(grid.w / 7f, grid.h / CalendarLayout.MONTH_ROWS)
+                val dayStyle = TextStyle(
+                    fontSize = DynamicTypeMetrics.calendarSp(dayFont.dp, density.fontScale),
+                )
+                val rows = CalendarGrid.displayedWeeks(monthFirst, weekStart)
 
-                weeks.forEachIndexed { row, week ->
+                rows.forEachIndexed { row, week ->
                     week.forEachIndexed { col, date ->
-                        val inMonth = date.year == year && date.monthValue == month
-                        if (!inMonth) return@forEachIndexed
+                        if (date.year != year || date.monthValue != month) return@forEachIndexed
                         val key = DateUtil.dayKeyOf(date)
                         val isToday = key == todayKey
                         val hasDiary = flags.contains(key)
-                        if (!isToday && !hasDiary) return@forEachIndexed
 
+                        val style = dayStyle.copy(
+                            color = if (isToday) primary else onSurface,
+                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                        )
+                        val layout = measurer.measure(date.dayOfMonth.toString(), style)
                         val cx = grid.x.dp.toPx() + (col + 0.5f) * cellW
                         val cy = grid.y.dp.toPx() + (row + 0.5f) * cellH
-                        if (isToday) {
-                            // 今天：实心圆 + 一圈留白，保证在任何底色上都看得见
-                            drawCircle(
+                        drawText(
+                            textLayoutResult = layout,
+                            topLeft = Offset(
+                                cx - layout.size.width / 2f,
+                                cy - layout.size.height / 2f,
+                            ),
+                        )
+                        // 有日记：日号下方 2dp 短横线；今天：同位置的实心小圆点
+                        val markW = minOf(9f, cellW * 0.5f).dp.toPx()
+                        val markY = cy + layout.size.height / 2f + 1.dp.toPx()
+                        when {
+                            hasDiary -> drawRoundRect(
                                 color = primary,
-                                radius = radius * 1.7f,
-                                center = Offset(cx, cy),
+                                topLeft = Offset(cx - markW / 2f, markY),
+                                size = androidx.compose.ui.geometry.Size(markW, 1.4f.dp.toPx()),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.7f.dp.toPx()),
                             )
-                        } else {
-                            drawCircle(
-                                color = primary.copy(alpha = 0.55f),
-                                radius = radius,
-                                center = Offset(cx, cy),
+                            isToday -> drawCircle(
+                                color = primary,
+                                radius = 1.6f.dp.toPx(),
+                                center = Offset(cx, markY + 0.7f.dp.toPx()),
                             )
                         }
                     }

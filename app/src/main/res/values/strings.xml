@@ -51,8 +51,8 @@
     <string name="settings_week_start_sub">Choose whether calendars begin on Monday or Sunday</string>
     <string name="settings_week_monday">Monday</string>
     <string name="settings_week_sunday">Sunday</string>
-    <string name="settings_auto_time">Auto-insert time</string>
-    <string name="settings_auto_time_sub">Record start time when the editor opens</string>
+    <string name="settings_auto_time">Auto-record time</string>
+    <string name="settings_auto_time_sub">Record and show the start time; hide it when off</string>
     <string name="settings_auto_loc">Auto-insert location</string>
     <string name="settings_auto_loc_sub">Requires location permission</string>
     <string name="settings_loc_permission">Location permission</string>
@@ -138,6 +138,7 @@
     <string name="search_loc_no_loc">No place recorded</string>
     <string name="search_preparing">Preparing search index…</string>
     <string name="search_start_title">Search your diary</string>
+    <string name="search_start_hint">Type a keyword, or filter by time and place</string>
     <string name="search_load_more">Load more</string>
     <string name="search_all_time">All time</string>
     <string name="search_time_week">This week</string>
@@ -164,6 +165,7 @@
     <string name="editor_tool_style">Paragraph Style</string>
     <string name="editor_tool_list">List</string>
     <string name="editor_tool_todo">To-do</string>
+    <string name="editor_align_center">Centre align</string>
     <string name="editor_history_no_add_title">Cannot add blocks</string>
     <string name="editor_history_no_add_msg">Past entries can only be edited in place. Adding new blocks is disabled to keep timestamps consistent.</string>
     <string name="editor_readonly_title">Read-only content</string>
@@ -200,6 +202,7 @@
     <string name="footprint_trend_empty">No entries this year.</string>
     <string name="search_no_result">No matching entries.</string>
     <string name="read_search_no_match">No match</string>
+    <string name="read_hero_segments">%1$d moments</string>
     <string name="editor_location_precision">Precision</string>
     <string name="editor_discard_revert_msg">Your edits revert to how the block was when you opened it.</string>
     <string name="loc_precision_none">Not set</string>

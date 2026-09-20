@@ -10,10 +10,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,8 +45,11 @@ import com.cov.justdiary.ui.theme.Spacing
  *  - 段落样式是**语义样式**（大标题 / 小标题 / 正文），没有任意磅值；
  *  - 引用单独一个按钮，且同时是"引用底色"的状态指示；
  *  - 列表与待办各自一个按钮，**只作用于当前行**；
- *  - 行内样式四个按钮显示当前生效状态（混合选区显示为未开启）。
+ *  - 行内样式四个按钮显示当前生效状态（混合选区显示为未开启）；
+ *  - 顺序固定为 段落样式 → 居中 → 列表 → 引用 → 待办 → B/I/S/U（方案 §7.4 / 缺陷 D11）。
  *
+ * @param isCentered 当前段落是否居中（`content_json` 的 `align == "center"`）。
+ *   居中与列表 / 引用 / 待办**互斥**：那三种块下本按钮置灰（见 [FontToolbar] 内注释）。
  * @param enabled 为 false 时整栏禁用 —— 由调用方在 **IME 组合期间**传 false
  *   （[FormatGate] 的规则：组合区里改 span 会被输入法覆盖）。
  */
@@ -54,12 +60,14 @@ fun FontToolbar(
     isQuote: Boolean,
     isList: Boolean,
     isTodo: Boolean,
+    isCentered: Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onBlockStyle: (EditorBlockStyle) -> Unit = {},
     onToggleQuote: () -> Unit = {},
     onToggleList: () -> Unit = {},
     onToggleTodo: () -> Unit = {},
+    onToggleAlign: () -> Unit = {},
     onToggleInline: (InlineFlag) -> Unit = {},
     onInsertImage: () -> Unit = {},
 ) {
@@ -68,7 +76,7 @@ fun FontToolbar(
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(Radius.panel),
-        color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 3.dp,
         shadowElevation = 3.dp,
     ) {
@@ -86,6 +94,7 @@ fun FontToolbar(
                     enabled = enabled,
                     label = { Text(blockStyleLabel(activeBlock)) },
                     trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = STYLE_LABEL) },
+                    colors = toolbarChipColors(),
                 )
                 DropdownMenu(expanded = styleMenuOpen, onDismissRequest = { styleMenuOpen = false }) {
                     EditorBlockStyle.entries.forEach { style ->
@@ -103,11 +112,20 @@ fun FontToolbar(
                 }
             }
 
+            // 居中对齐（方案 §7.4 / 缺陷 D11）：落库为 `content_json` 的 `align` 字段
+            // （iOS 能写、Android 从前不能写，等于跨端能力缺一块）。
+            // 与列表 / 引用 / 待办**互斥**，那些块下用 `enabled = false` 置灰而不是隐藏 ——
+            // 隐藏会让右侧按钮左右位移，置灰能保持工具栏几何稳定。
             FilterChip(
-                selected = isQuote,
-                onClick = { if (enabled) onToggleQuote() },
-                enabled = enabled,
-                label = { Text(QUOTE_LABEL) },
+                selected = isCentered,
+                onClick = { if (enabled) onToggleAlign() },
+                enabled = enabled && !isQuote && !isList && !isTodo,
+                label = { Text(ALIGN_CENTER_LABEL) },
+                // 不带图标：`material-icons-core` 里没有对齐类图标（`FormatAlignCenter`
+                // 属于 extended，本工程刻意不引入）。工具栏的其它芯片都是"文字 + 可选图标"，
+                // 这里只用文字，既不会误用"汉堡菜单"那类语义不符的图标，也和 引用 / 列表 / 待办
+                // 的视觉重量一致（文字本身就是 contentDescription）。
+                colors = toolbarChipColors(),
             )
             FilterChip(
                 selected = isList,
@@ -115,6 +133,14 @@ fun FontToolbar(
                 enabled = enabled,
                 label = { Text(LIST_LABEL) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                colors = toolbarChipColors(),
+            )
+            FilterChip(
+                selected = isQuote,
+                onClick = { if (enabled) onToggleQuote() },
+                enabled = enabled,
+                label = { Text(QUOTE_LABEL) },
+                colors = toolbarChipColors(),
             )
             FilterChip(
                 selected = isTodo,
@@ -122,6 +148,7 @@ fun FontToolbar(
                 enabled = enabled,
                 label = { Text(TODO_LABEL) },
                 leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
+                colors = toolbarChipColors(),
             )
 
             FilterChip(
@@ -129,24 +156,28 @@ fun FontToolbar(
                 onClick = { if (enabled) onToggleInline(InlineFlag.Bold) },
                 enabled = enabled,
                 label = { Text("B", fontWeight = FontWeight.Bold) },
+                colors = toolbarChipColors(),
             )
             FilterChip(
                 selected = flags.italic,
                 onClick = { if (enabled) onToggleInline(InlineFlag.Italic) },
                 enabled = enabled,
                 label = { Text("I", fontStyle = FontStyle.Italic) },
+                colors = toolbarChipColors(),
             )
             FilterChip(
                 selected = flags.strike,
                 onClick = { if (enabled) onToggleInline(InlineFlag.Strike) },
                 enabled = enabled,
                 label = { Text("S", textDecoration = TextDecoration.LineThrough) },
+                colors = toolbarChipColors(),
             )
             FilterChip(
                 selected = flags.underline,
                 onClick = { if (enabled) onToggleInline(InlineFlag.Underline) },
                 enabled = enabled,
                 label = { Text("U", textDecoration = TextDecoration.Underline) },
+                colors = toolbarChipColors(),
             )
 
             FilterChip(
@@ -154,10 +185,24 @@ fun FontToolbar(
                 onClick = { if (enabled) onInsertImage() },
                 enabled = enabled,
                 label = { Text(IMAGE_LABEL) },
+                colors = toolbarChipColors(),
             )
         }
     }
 }
+
+/**
+ * 格式栏统一的选中色：**`primary` 填充 + `onPrimary` 前景**（方案 §7.4「激活态用
+ * `primary` 填充」）。抽成一个函数是为了让居中与既有按钮真正"长得一样"——
+ * M3 `FilterChip` 默认选中色是 `secondaryContainer`，逐按钮覆写会漂移。
+ */
+@Composable
+private fun toolbarChipColors() = FilterChipDefaults.filterChipColors(
+    selectedContainerColor = MaterialTheme.colorScheme.primary,
+    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
+    selectedTrailingIconColor = MaterialTheme.colorScheme.onPrimary,
+)
 
 @Composable
 private fun blockStyleLabel(style: EditorBlockStyle): String = when (style) {
@@ -175,5 +220,7 @@ private val LIST_LABEL: String
     @Composable get() = stringResource(R.string.editor_tool_list)
 private val TODO_LABEL: String
     @Composable get() = stringResource(R.string.editor_tool_todo)
+private val ALIGN_CENTER_LABEL: String
+    @Composable get() = stringResource(R.string.editor_align_center)
 private val IMAGE_LABEL: String
     @Composable get() = stringResource(R.string.a11y_insert_image)

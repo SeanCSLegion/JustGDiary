@@ -51,9 +51,14 @@ object CalendarLayout {
     const val PAGE_SETTLE_DURATION_MS = 300
     const val QUICK_SETTLE_DURATION_MS = 250
 
+    /** 竖屏：首页顶栏高度（与 `HomeTopBar` 的 `heightIn(min = 52.dp)` 对应）。 */
+    const val HEADER_H = 52f
+
+    /** 竖屏：月历的大标题槽（**只在月态存在**）。 */
+    const val BIG_TITLE_H = 72f
+
     /** 竖屏：星期栏与大标题槽。 */
     const val WEEKDAY_HEADER_H = 30f
-    const val BIG_TITLE_H = 72f
 
     /** 横屏：紧凑的月标题与星期栏。 */
     const val COMPACT_MONTH_TITLE_H = 34f
@@ -66,11 +71,11 @@ object CalendarLayout {
     /**
      * 年历：标题槽、左右边距、卡片间距、迷你月内缩与标题槽。
      *
-     * [YEAR_TITLE_H] / [YEAR_TOP_PAD] 从 iOS 的 62 / 8 调小到 44 / 8：年历的标题已经在
-     * M3 顶栏里（不再有页内大标题槽），省下的 18dp 全部给卡片 —— 卡片高度直接决定
-     * 迷你网格能不能画清楚。
+     * [YEAR_TITLE_H] 与 iOS 一致取 62：页内要画出 32sp 的「2026年」大标题 + 右侧生肖。
+     * 首轮曾把它压到 44（理由是"标题已经在顶栏里了"），但那样年历页没有大标题、
+     * 视觉重心全空 —— 实测缺陷 D6 的一部分。
      */
-    const val YEAR_TITLE_H = 44f
+    const val YEAR_TITLE_H = 62f
     const val YEAR_TOP_PAD = 8f
     const val YEAR_PAD = 16f
     const val YEAR_SPACING = 6f
@@ -105,17 +110,13 @@ object CalendarLayout {
     const val PORTRAIT_MIN_AREA_H = 240f
 
     /**
-     * 月格行高的上限（dp）。
+     * 月格行高的**安全上限**（dp）。
      *
-     * **这是本轮返工的关键数字。** iOS 的竖屏月历是**整屏**的：`cellH` 由屏幕高度反算
-     * （iPhone 402×874 上是 `(874 − 72 − 30) / 6 ≈ 129`，日志里更早的版本实测 118），
-     * 而且 iOS 没有"月态下方面板"这回事 —— 日记预览只在周态里。
-     *
-     * Android 照这个意图做：月 / 年两态都占满屏幕，行高由**可用高度**反算。
-     * [MAX_CELL_H] 只是上限，防的是"平板竖屏上一格 200dp"这种退化，不是给下方面板让位
+     * 规范 §5.1：行高不封顶，`cellH = (区高 − 大标题槽 − 星期栏) / 6`。这个上限只在
+     * 平板竖屏这类极端比例上生效，防止一格高到 200dp 以上；**不是**给下方面板让位
      * （首轮把它当成"要留给面板的比例"，方向就错了 —— 面板只在周态与横屏分栏里出现）。
      */
-    const val MAX_CELL_H = 96f
+    const val SANITY_MAX_CELL_H = 200f
 
     /**
      * 月格行高的下限（dp）。低于它就要走周条降级（横屏/矮窗口）。
@@ -206,55 +207,39 @@ object CalendarLayout {
     /** 星期栏的字号：`clamp(cellW * 0.26, 11, 14)`。 */
     fun weekdayFontSize(cellW: Float): Float = clamp(cellW * 0.26f, 11f, 14f)
 
-    /** 竖屏月格行高：固定 [PORTRAIT_CELL_H]，**不再**按屏幕高度反算。 */
-    fun monthCellH(areaH: Float, rows: Int = MONTH_ROWS): Float = PORTRAIT_CELL_H
-
     /**
-     * 月态的日历区高度（dp）：整屏视图，占用除顶栏外的全部可用高。
+     * 月态日历带的总高（含大标题槽 [BIG_TITLE_H] + 星期栏 [WEEKDAY_HEADER_H] + 网格）。
      *
-     * 与旧版 `portraitAreaHeight` 的**方向性差别**：
-     *  - 旧版把它当"留给下方面板之后剩下的高度"，所以要按比例收缩；
-     *  - 新版里月/年态都是整屏（日记预览只在**周态**和**横屏分栏**出现），
-     *    所以这里有**多少给多少**，行高由上方的 [cellHeightFor] 反算、按 [MAX_CELL_H] 封顶。
-     *
-     * 下限 [PORTRAIT_MIN_AREA_H] 只在极矮窗口（多窗口拖到最小）里生效，
-     * 且不超过可用高 —— 保证返回的区间永不反转（首轮横屏崩溃就出在这里）。
+     * 调用方传入的是"顶栏之外的全部可用高"（竖屏）或"分栏左栏的可用高"。月 / 年两态都是
+     * **整屏视图**，日记预览只在周态与横屏分栏里出现，所以这里有多少给多少。
      */
-    fun monthAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float {
-        val safeAvailable = availableH.coerceAtLeast(0f)
-        val floor = minOf(PORTRAIT_MIN_AREA_H, safeAvailable)
-        return safeAvailable.coerceAtLeast(floor)
-    }
+    fun monthAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float =
+        availableH.coerceAtLeast(0f)
 
-    /** 旧名保留（单测与旧调用点仍可用），语义等同 [monthAreaHeight]。 */
+    /** 旧名保留（旧调用点仍可用），语义等同 [monthAreaHeight]。 */
     fun portraitAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float =
         monthAreaHeight(availableH, rows)
 
     /**
-     * 月格的行高：默认 [PORTRAIT_CELL_H]，矮窗口里按可用高度等比压缩（下限 36dp）。
+     * 月格的行高：**按固定 [MONTH_ROWS]（6）行等分，不封顶**。
      *
-     * 压缩只发生在"窗口比日历还矮"的极端情形（分屏、横屏未分栏），此时宁可让格子
-     * 小一点，也不要把下面的内容挤出屏幕。
-     */
-    /**
-     * 竖屏月格行高：**按可用高度反算**，夹在 [MIN_CELL_H] 与 [MAX_CELL_H] 之间。
+     * 这是规范 §5.1 的核心：iOS 的规则就是 `(区高 − 72 − 30) / 6`，行高**跨月恒定** ——
+     * 6 行月正好铺满、5 行月正好留一行白，翻月时版面不会上下抖。
      *
-     * @param areaH 月态日历区的总高（含星期栏）。
-     * @param headerH 区里除网格之外的固定高度（竖屏 = 星期栏 30；带紧凑标题的面板 = 60）。
-     * @param preferred 常规下限：可用高够时至少给这么高，避免小屏上格子偏挤。
+     * 首轮把行高封顶在 96dp 的后果是：6 行只占 576dp，屏下方空出 270dp（实测缺陷 D5）。
+     *
+     * [SANITY_MAX_CELL_H] 只在平板竖屏这类极端比例上生效，**不是**给下方面板让位。
+     * 上下界恒定满足 `MIN_CELL_H < SANITY_MAX_CELL_H`，`coerceIn` 的区间永不反转。
      */
     fun cellHeightFor(
         areaH: Float,
-        rows: Int,
-        headerH: Float = WEEKDAY_HEADER_H,
+        rows: Int = MONTH_ROWS,
+        headerH: Float = BIG_TITLE_H + WEEKDAY_HEADER_H,
         preferred: Float = PORTRAIT_CELL_H,
-    ): Float {
-        val safeRows = rows.coerceAtLeast(1)
-        val gridH = areaH - headerH
-        // [preferred] 是**内容下限**（够高时至少这么大），但它不参与夹取 ——
-        // 可用高不足时行高必须能压到 MIN_CELL_H，否则矮窗口里月历会把内容挤出屏幕。
-        return max(MIN_CELL_H, min(gridH / safeRows, MAX_CELL_H))
-    }
+    ): Float = ((areaH - headerH) / MONTH_ROWS).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
+
+    /** 网格的**实际**高度（当月行数 × 行高）。 */
+    fun monthGridHeight(rows: Int, cellH: Float): Float = max(0, rows) * cellH
 
     /**
      * 把给定的网格高度**均分**给若干行（不做任何夹取）。
@@ -287,7 +272,7 @@ object CalendarLayout {
         areaH: Float,
         showLunar: Boolean,
         rows: Int = MONTH_ROWS,
-        headerH: Float = WEEKDAY_HEADER_H,
+        headerH: Float = BIG_TITLE_H + WEEKDAY_HEADER_H,
     ): DayMetrics = monthPaneMetrics(
         cellW = monthCellW(width),
         cellH = cellHeightFor(areaH, rows, headerH),

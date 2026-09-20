@@ -1,5 +1,10 @@
 # JustGDiary Android 界面设计规范（Material 3）
 
+> ⚠️ **本文已被 [`docs/ui-design-plan.md`](ui-design-plan.md)（界面设计方案 v2）部分取代。**
+> 作废的是 §5.1（行高封顶 96dp）、§5.2（相邻月淡显可点）、§5.3（顶栏补月↔周按钮）、
+> §5.4（顶栏放 "2026年9月"）、§5.6（年历改为"月份名 + 圆点"）五条；
+> §1「首轮迁移问题清单」作为历史记录保留。**改界面以 v2 为准**，冲突处逐条列在 v2 的附录 B。
+
 日期：2026-09-18 · 环境：Android Studio 2026.1 / AGP 9.4.0 / Compose BOM 2026.09.00 /
 Material 3 1.4.0 · 设备：Pixel 10 Pro AVD（1280 × 2856 @ 480dpi = 426.7 × 952dp，fontScale 1.0）
 

@@ -5,10 +5,20 @@
 > **当前状态：M0–M9 的代码工作已完成，并已在模拟器上实测通过一轮界面返工**
 > （详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)，
 > 界面规范见 [`docs/design-spec.md`](docs/design-spec.md)）。
-> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**356 个 JVM 单测**全绿，
+> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**355 个 JVM 单测**全绿，
 > 另有 2 个脚本做跨端与 SQL 的独立校验。首页已按 Material 3 重新设计并在
 > Pixel 10 Pro AVD 上验证（竖屏 / 横屏分栏 / 深色 / TalkBack 语义，
 > 证据见 `docs/design-spec.md` §8）。
+>
+> ⚠️ **2026-09-20 复测发现界面与交互仍有多处缺陷**（含 2 条严重：搜索页永远停在
+> "正在准备搜索索引…"、年历在"旋转后切深色"时整屏消失）。新的权威规范是
+> [`docs/ui-design-plan.md`](docs/ui-design-plan.md)（界面设计方案 v2）：
+> 它给出了逐屏规范、动效几何、缺陷清单（§2）与分五批的实施顺序（§12）。
+> 下面这些"已验证"条目**只代表首轮迁移时的状态**，其中首页几何部分已被 v2 取代。
+>
+> ✅ **R2 已把 v2 的 P0–P5 落地**（见 [`docs/migration-progress.md`](docs/migration-progress.md) 的 R2 一节）：
+> 首页恢复 iOS 的整屏三态 morph、月历只画当月日期、年历恢复 12 个迷你月历、
+> 顶栏去掉自造的月/周按钮、上下滑翻月重新接线，并修掉 9 条缺陷（含 2 条严重）。
 
 ## 关键约定
 
@@ -82,7 +92,7 @@ JustGDiary/
 **已验证**（都有可复现的命令）
 
 - 编译：`clean assembleDebug` 通过；
-- 单元测试：356 条全绿，覆盖日历/morph 数学、编辑模型、`content_json` 与 iOS 的字节级一致、
+- 单元测试：355 条全绿，覆盖日历/morph 数学、编辑模型、`content_json` 与 iOS 的字节级一致、
   跨端 zip 布局、搜索筛选、足迹聚合、提醒排期、设置副作用、版面判定的临界值、内联图片尺寸规则；
 - **运行时**（Robolectric）：真开一次 SQLite 跑完 v0→v1→v3 迁移链、写入/读回/编辑/删除/搜索、
   `day_key` 重算幂等、`EditorLine` ↔ `Spannable` 往返不丢图、导出→导入的 SKIP/OVERWRITE 两种模式；
@@ -109,7 +119,9 @@ JustGDiary/
 
 | 文件 | 内容 |
 | --- | --- |
-| [`docs/design-spec.md`](docs/design-spec.md) | **界面设计规范**（iOS 设计意图 → Material 3 的对应、首页规范、首轮上机的缺陷清单与修法） |
+| [`docs/ui-design-plan.md`](docs/ui-design-plan.md) | **界面设计方案 v2（权威）** —— 三态首页、逐屏规范、设计令牌、动效几何、缺陷清单与实施顺序。改界面前先读这一篇 |
+| [`docs/design-spec.md`](docs/design-spec.md) | 首轮界面规范与上机缺陷清单（**部分条款已被 v2 取代**，见 v2 附录 B） |
+| [`docs/ios-reference/`](docs/ios-reference) | iOS 侧逐条数值提取（含 `file:line`），供对照实现 |
 | [`docs/android-migration-plan.md`](docs/android-migration-plan.md) | 迁移方案（含所有已确认的决策与理由、逐页迁移清单、风险清单） |
 | [`docs/migration-progress.md`](docs/migration-progress.md) | 逐里程碑的交付物、验证证据、与 iOS 的差异（含**有意不复制**的 iOS 缺陷清单） |
 | [`docs/migration-analysis/`](docs/migration-analysis) | 数据层 / 编辑器 / 首页日历 / 服务与平台的逐行源码分析报告 |

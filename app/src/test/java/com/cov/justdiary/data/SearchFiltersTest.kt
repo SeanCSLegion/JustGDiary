@@ -213,11 +213,19 @@ class SearchFiltersTest {
     }
 
     @Test
-    fun `total of minus one means the index is not ready`() {
-        val loading = SearchUiState(total = -1)
-        assertTrue(loading.indexNotReady)
-        val ready = SearchUiState(total = 0)
-        assertFalse(ready.indexNotReady)
-        assertTrue(ready.isEmpty)
+    fun `index not ready is a real flag, not derived from total`() {
+        // 修正前用 `total < 0` 推导"索引未就绪"，而"无条件不查库"会把 total 留成 -1，
+        // 于是搜索页永远停在"正在准备搜索索引…"。现在两者彻底解耦。
+        val fresh = SearchUiState()
+        assertFalse("未查询 ≠ 索引没好", fresh.indexNotReady)
+        assertTrue(fresh.isEmpty)
+        assertTrue("还没有结果时不显示计数", fresh.total < 0)
+
+        val rebuilding = SearchUiState(total = -1, indexing = true)
+        assertTrue(rebuilding.indexNotReady)
+
+        val rebuilt = SearchUiState(total = 0, indexing = false)
+        assertFalse(rebuilt.indexNotReady)
+        assertTrue(rebuilt.isEmpty)
     }
 }

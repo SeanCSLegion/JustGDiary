@@ -37,6 +37,8 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         val dayBlocks: List<EditBlock>? = null,
         val selectedDiary: DiaryRecord? = null,
         val weekStart: String = "monday",
+        /** `auto_time`：当日面板是否显示片段的开始时间（设置变化后要跟着刷新）。 */
+        val autoTime: Boolean = true,
     )
 
     private val _state = MutableStateFlow(State())
@@ -51,13 +53,17 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
             selectedKey = DateUtil.dayKeyOf(today),
             year = today.year,
             weekStart = container.settings.load().weekStart,
+            autoTime = container.settings.load().autoTime,
         )
         viewModelScope.launch { reload() }
     }
 
-    /** 设置变化（周起始等）后重新读一次。 */
+    /** 设置变化（周起始、auto_time 等）后重新读一次。 */
     fun refreshSettings() {
-        _state.value = _state.value.copy(weekStart = container.settings.load().weekStart)
+        _state.value = _state.value.copy(
+            weekStart = container.settings.load().weekStart,
+            autoTime = container.settings.load().autoTime,
+        )
         viewModelScope.launch { reload() }
     }
 

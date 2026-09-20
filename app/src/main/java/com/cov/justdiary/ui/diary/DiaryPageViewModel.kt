@@ -136,7 +136,14 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     private var searchJob: Job? = null
 
     /** 打开某一天。`dayKey` 为空表示"今天"。 */
-    fun open(dayKey: String?) {
+    /**
+     * 打开某一天。
+     *
+     * [startInWrite] 为 true 时，**在 `reload()` 之后**直接进入编辑态 ——
+     * 顺序很重要：`reload()` 是异步的，但它会把 `isRead` 复位成阅读态；
+     * 先 `enterWrite()` 会被它覆盖回去（实测：面板点「写日记」仍然停在阅读页）。
+     */
+    fun open(dayKey: String?, startInWrite: Boolean = false) {
         val settings = container.settings.load()
         val today = DateUtil.dayKeyForUtc(System.currentTimeMillis(), settings.dayStartHour)
         val key = dayKey?.takeIf { it.isNotBlank() } ?: today
@@ -151,7 +158,10 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             searchText = "",
             showSearch = false,
         )
-        viewModelScope.launch { reload() }
+        viewModelScope.launch {
+            reload()
+            if (startInWrite) enterWrite()
+        }
     }
 
     fun refreshSettings() {

@@ -48,6 +48,28 @@ class DateFormats(
     /** 月（大标题，`MMMM`）：zh `九月` / en `September`。 */
     fun monthFull(date: LocalDate): String = date.month.getDisplayName(TextStyle.FULL, locale)
 
+    /**
+     * 年历页右侧的干支生肖（`丙午马年`）。
+     *
+     * **只在中文下有内容**：英文用户看干支没有意义，iOS 侧同样只对中文显示
+     * （`HomeView` 的 `if AppLanguage.isZh`）。取该年 6 月的农历年，避开春节前后的跨年歧义
+     * （与页面标题的粒度一致 —— 它标的是"这一年"）。
+     */
+    fun yearZodiac(value: Int): String = if (!isChinese) {
+        ""
+    } else {
+        runCatching {
+            Lunar.yearZodiacLabel(
+                Lunar.ChineseCalendarProvider
+                    .lunarDateOf(LocalDate.of(value, 6, 1), java.time.ZoneId.systemDefault())
+                    .cycleYear,
+            )
+        }.getOrDefault("")
+    }
+
+    /** 应用语言是不是中文（农历、干支只在中文下显示）。 */
+    val isChinese: Boolean get() = locale.language.startsWith("zh")
+
     /** 星期（短）：zh `周二` / en `Tue`。 */
     fun weekdayShort(date: LocalDate): String = date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
 
@@ -132,6 +154,16 @@ class DateFormats(
     } else {
         format(template(KEY_START_TIME_LOC), time, locText)
     }
+
+    /**
+     * 片段的元信息行，**受 `auto_time` 控制**。
+     *
+     * `auto_time` 关闭时不显示开始时间，只剩地点（与 iOS 的 `vm.showsTime` 语义一致）。
+     * 注意：这只是**显示**开关 —— `start_time_utc` 照旧记录，`day_key` / `created_utc` /
+     * 排序都依赖它，跨端契约不允许把它写成 0。
+     */
+    fun blockStartLine(showTime: Boolean, time: String, locText: String): String =
+        if (showTime) startLine(time, locText) else locText
 
     // ------------------------------------------------------------------ 内部
 

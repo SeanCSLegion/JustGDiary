@@ -3,6 +3,7 @@ package com.cov.justdiary.ui.diary
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
@@ -34,6 +36,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.model.ContentPart
@@ -68,8 +71,17 @@ fun EditorScreen(
     locPrecision: String,
     locationState: LocationRules.EditorLocationState,
     modifier: Modifier = Modifier,
+    /**
+     * `auto_time` 设置：控制**是否显示**这条记录的开始时间。
+     *
+     * 关闭时不显示时间胶囊（阅读页 / 首页面板 / 分享长图也一并不显示），
+     * 但 `start_time_utc` **照旧记录** —— `day_key` / `created_utc` / 排序都依赖它，
+     * 这是跨端契约，不允许写成 0。与 iOS 的 `vm.showsTime` 同一语义。
+     */
     autoTime: Boolean = true,
     startTimeUtc: Long = System.currentTimeMillis(),
+    /** 时间胶囊的文案（由宿主用 `DateFormats` 备好，跟随语言与 12/24 小时制）。 */
+    startTimeLabel: String = "",
     onRequestLocation: () -> Unit = {},
     onPrecisionChange: (String) -> Unit = {},
     onSave: (EditorSavePayload) -> Unit = {},
@@ -153,12 +165,27 @@ fun EditorScreen(
                     ) {
                         showLocationConfirm = true
                     } else {
-                        onSave(buildPayload(state.lines, locationState, autoTime, startTimeUtc))
+                        onSave(buildPayload(state.lines, locationState, startTimeUtc))
                     }
                 },
             ) {
                 Text(SAVE_LABEL)
             }
+        }
+
+        // 时间胶囊（规范 §7.3）：`auto_time` 关闭时不显示。
+        // iOS 侧的编辑器也是"打开即记录并显示开始时间"，这里与它对齐。
+        if (autoTime && startTimeLabel.isNotEmpty()) {
+            Text(
+                text = startTimeLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(horizontal = Spacing.page, vertical = 4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
         }
 
         // 位置行
@@ -188,6 +215,9 @@ fun EditorScreen(
             isQuote = currentLine.blockStyle == com.cov.justdiary.model.ContentPartStyle.quote,
             isList = currentLine.isListItem,
             isTodo = currentLine.isTodoItem,
+            // 居中与列表/引用/待办互斥（方案 §7.4），它们不会同时为真：
+            // 开启标记时 EditorModel 会清掉 align，因此这里的值总是当前段落的真实状态。
+            isCentered = currentLine.align == EditorModel.ALIGN_CENTER,
             enabled = !state.composing,
             modifier = Modifier
                 .fillMaxWidth()
@@ -196,6 +226,17 @@ fun EditorScreen(
             onToggleQuote = { state.apply { EditorModel.toggleQuote(it, state.selection.lineIndex..state.selection.lineIndex) } },
             onToggleList = { state.apply { EditorModel.toggleMarker(it, state.selection.lineIndex, EditorLine.MarkerKind.Bullet) } },
             onToggleTodo = { state.apply { EditorModel.toggleMarker(it, state.selection.lineIndex, EditorLine.MarkerKind.Todo) } },
+            // 居中作用于当前行：`setAlignment` 落库为 `content_json` 的 `align`（只写 center）。
+            onToggleAlign = {
+                state.apply { lines ->
+                    val index = state.selection.lineIndex
+                    EditorModel.setAlignment(
+                        lines,
+                        index..index,
+                        center = lines.getOrNull(index)?.align != EditorModel.ALIGN_CENTER,
+                    )
+                }
+            },
             onToggleInline = { flag ->
                 val (from, to) = state.inlineRange
                 state.apply { lines ->
@@ -235,7 +276,7 @@ fun EditorScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showLocationConfirm = false
-                    onSave(buildPayload(state.lines, locationState, autoTime, startTimeUtc))
+                    onSave(buildPayload(state.lines, locationState, startTimeUtc))
                 }) { Text(SAVE_ANYWAY_LABEL) }
             },
             dismissButton = {
@@ -269,12 +310,21 @@ private fun LocationRow(
 ) {
     if (state is LocationRules.EditorLocationState.Hidden) return
 
-    val label = when (state) {
+    // 规范 §7.3 / 缺陷 D10：左侧只显示**状态**，动作只放右侧，两者不许同文案。
+    // "获取失败"与"历史片段没有位置"都是同一种状态（未记录地点）——
+    // 能不能重试由 isNewBlock 决定，不由文案暗示。
+    val status = when (state) {
         is LocationRules.EditorLocationState.Locating -> LOCATING_LABEL
-        is LocationRules.EditorLocationState.LocateFailed -> REFETCH_LABEL
+        is LocationRules.EditorLocationState.LocateFailed -> NOT_RECORDED_LABEL
         is LocationRules.EditorLocationState.NotRecorded -> NOT_RECORDED_LABEL
         is LocationRules.EditorLocationState.Recorded -> state.snapshot.locText
         LocationRules.EditorLocationState.Hidden -> ""
+    }
+    // 定位中是"进行中"的状态，用 primary 强调；其余状态用 onSurfaceVariant（方案 §7.3）。
+    val statusColor = if (state is LocationRules.EditorLocationState.Locating) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
     val canRefetch = LocationRules.canRefetchLocation(isNewBlock, state)
 
@@ -287,10 +337,10 @@ private fun LocationRow(
     ) {
         Icon(Icons.Filled.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
-            text = label,
+            text = status,
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = statusColor,
         )
         if (canRefetch) {
             AssistChip(onClick = onRequestLocation, label = { Text(REFETCH_LABEL) })
@@ -332,7 +382,6 @@ private fun hasChanges(
 private fun buildPayload(
     lines: List<EditorLine>,
     locationState: LocationRules.EditorLocationState,
-    autoTime: Boolean,
     startTimeUtc: Long,
 ): EditorSavePayload {
     val recorded = locationState as? LocationRules.EditorLocationState.Recorded
@@ -341,8 +390,10 @@ private fun buildPayload(
         // 编辑态不写位置（精度调整由 onPrecisionChange 单独走 updateBlockContent）
         locText = recorded?.snapshot?.locText,
         locPrecision = recorded?.snapshot?.locPrecision,
-        // 自动插入时间：让 auto_time 设置真正生效（iOS 侧是死设置，见方案 Q5）
-        startTimeUtc = if (autoTime) startTimeUtc else System.currentTimeMillis(),
+        // 开始时间**永远**记录编辑器打开的时刻，与 `auto_time` 无关：
+        // `day_key` / `created_utc` / 排序都依赖它，写 0 或改写都会破坏跨端契约。
+        // `auto_time` 只决定"要不要把它显示出来"（见 EditorScreen 的注释与方案 §7.3）。
+        startTimeUtc = startTimeUtc,
     )
 }
 

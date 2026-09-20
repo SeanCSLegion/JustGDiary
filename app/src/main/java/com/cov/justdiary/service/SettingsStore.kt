@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.SettingsKeys
 import com.cov.justdiary.model.SettingsRaw
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 设置存储。对应 iOS `SettingsStore`（`UserDefaults(suiteName: "group.com.cov.justdiary")`）。
@@ -22,6 +25,15 @@ class SettingsStore(context: Context) : SettingsRaw {
 
     @Volatile
     private var cache: AppSettings? = null
+
+    /**
+     * 设置版本号：每次 [save] / [invalidate] 自增。
+     *
+     * 对应 iOS 的 `bumpUiTick()`。UI 层订阅它来刷新**已经活着的**标签页 ——
+     * 否则在设置页改完开关，回到首页看到的还是旧值（首页 ViewModel 不会重建）。
+     */
+    private val _version = MutableStateFlow(0)
+    val version: StateFlow<Int> = _version.asStateFlow()
 
     /** 读取全部设置（带内存缓存）。 */
     fun load(): AppSettings {
@@ -48,10 +60,12 @@ class SettingsStore(context: Context) : SettingsRaw {
             .putBoolean(SettingsKeys.DYNAMIC_COLOR, settings.dynamicColor)
             .apply()
         cache = settings
+        _version.value++
     }
 
     fun invalidate() {
         cache = null
+        _version.value++
     }
 
     /** FTS 索引格式版本；与 [AppSettings.SEARCH_INDEX_VERSION_REQUIRED] 比较。 */

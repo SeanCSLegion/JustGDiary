@@ -215,16 +215,24 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
             ui.locFilter.noLoc
 
         if (query.isEmpty() && !hasFilters) {
-            _state.value = _state.value.copy(ui = ui.copy(items = emptyList(), hasMore = false, total = -1, loading = false))
+            // 无条件不查库：给「零结果 + 索引已就绪」，界面据此显示**空态**而不是转圈。
+            _state.value = _state.value.copy(
+                ui = ui.copy(items = emptyList(), hasMore = false, total = 0, loading = false, indexing = false),
+                indexing = false,
+            )
             return
         }
 
+        // 只有**真的**要重建索引时才显示"正在准备搜索索引…"
+        val needsIndex = !container.repository.searchIndexReady()
         _state.value = _state.value.copy(
-            ui = ui.copy(loading = true),
-            indexing = !container.repository.searchIndexReady(),
+            ui = ui.copy(loading = true, indexing = needsIndex),
+            indexing = needsIndex,
         )
-        runCatching { container.repository.ensureSearchIndex() }
-            .onFailure { Log.db.w("搜索索引准备失败：${it.message}") }
+        if (needsIndex) {
+            runCatching { container.repository.ensureSearchIndex() }
+                .onFailure { Log.db.w("搜索索引准备失败：${it.message}") }
+        }
 
         val range = currentRange()
         val offset = if (reset) 0 else ui.offset
@@ -233,7 +241,10 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }.onFailure { Log.db.w("搜索失败：${it.message}") }.getOrNull()
 
         if (page == null) {
-            _state.value = _state.value.copy(ui = _state.value.ui.copy(loading = false), indexing = false)
+            _state.value = _state.value.copy(
+                ui = _state.value.ui.copy(loading = false, indexing = false),
+                indexing = false,
+            )
             return
         }
         // 结果落到最新状态上（期间用户可能又改了关键词，`runSearchNow` 会取消这个协程）
@@ -242,7 +253,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         } else {
             SearchFilters.appendPage(_state.value.ui, page)
         }
-        _state.value = _state.value.copy(ui = next, indexing = false)
+        _state.value = _state.value.copy(ui = next.copy(indexing = false), indexing = false)
         apply(next)
     }
 

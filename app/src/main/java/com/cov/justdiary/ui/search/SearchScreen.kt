@@ -44,6 +44,11 @@ import com.cov.justdiary.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -54,14 +59,18 @@ import com.cov.justdiary.data.SearchFilterItem
 import com.cov.justdiary.data.SearchUiState
 import com.cov.justdiary.data.TimeRangeKind
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.LocFilter
 import com.cov.justdiary.model.SearchResultItem
+import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.SearchUtil
 import com.cov.justdiary.ui.components.EmptyState
 import com.cov.justdiary.ui.components.PageHeader
 import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
 import androidx.compose.material.icons.filled.Search
+import java.time.Instant
+import java.time.LocalDate
 
 /**
  * 搜索页。对应 iOS `Views/Search/SearchView.swift`（582 行）+ `SearchViewModel`。
@@ -103,6 +112,15 @@ fun SearchScreen(
     onResetLocation: () -> Unit = {},
 ) {
     var showLocPicker by remember { mutableStateOf(false) }
+
+    // 结果行无障碍文案里的日期/时刻：**必须**走 `DateFormats` 的语义槽位（design-system §4），
+    // 不能自己拼 —— 日期要跟随应用内语言，小时制要跟随设备。应用内语言由
+    // `AppCompatDelegate.setApplicationLocales` 生效，因此按"跟随系统"装配即可拿到当前 Locale。
+    val context = LocalContext.current
+    val formats = remember(context) { DateFormats.forContext(context, AppSettings.LANGUAGE_SYSTEM) }
+
+    // `Modifier.semantics {}` 的 lambda 不是 @Composable，文案得先取出来再用。
+    val placeholderLabel = PLACEHOLDER
     if (showLocPicker) {
         LocationPickerDialog(
             options = locOptions,
@@ -121,7 +139,8 @@ fun SearchScreen(
     Column(modifier = modifier.fillMaxSize()) {
         PageHeader(
             title = TITLE,
-            subtitle = if (state.indexNotReady) null else resultCountLabel(state.total),
+            // 还没查过（total < 0）或索引在重建时不显示计数
+            subtitle = if (state.total < 0) null else resultCountLabel(state.total),
         )
 
         // 搜索框
@@ -130,7 +149,16 @@ fun SearchScreen(
             onValueChange = onKeywordChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = Spacing.page),
+                .padding(horizontal = Spacing.page)
+                // 规范 §9.2：搜索框"现在无焦点时缺语义" —— `placeholder` 只在聚焦/为空时才渲染，
+                // 未聚焦时这一格在无障碍树里没有可读的名字。这里显式把占位文案挂成节点的
+                // 内容描述，TalkBack 扫过时能听到"搜索日记内容…"。
+                //
+                // 说明：Compose 1.12（BOM 2026.09.00）的 `Role` 只有 Button/Checkbox/Switch/
+                // RadioButton/Tab/Image/DropdownList/ValuePicker，**没有** search 档位，硬套
+                // 任何一个都会说谎；搜索语义由下方 `imeAction = ImeAction.Search` 承担，
+                // 节点本身仍是 `EditText`（`OutlinedTextField` 自带 EditableText 语义）。
+                .semantics { contentDescription = placeholderLabel },
             singleLine = true,
             placeholder = { Text(PLACEHOLDER) },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
@@ -235,6 +263,7 @@ fun SearchScreen(
         }
 
         when {
+            // ① 索引**真的**在重建（规范 §9.5）：只有这时才转圈
             state.indexNotReady -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -245,13 +274,20 @@ fun SearchScreen(
                 }
             }
 
+            // ② 未输入条件：引导态（不是"没结果"）
+            state.isEmpty && !state.hasAnyCondition -> EmptyState(
+                icon = Icons.Filled.Search,
+                text = START_TITLE,
+                hint = START_HINT,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+
+            // ③ 有条件但无结果：必须给一个"清除全部条件"的出口，否则只能一颗颗点掉胶囊
             state.isEmpty -> EmptyState(
                 icon = Icons.Filled.Search,
-                text = if (state.keyword.isBlank() && state.keywords.isEmpty()) {
-                    START_TITLE
-                } else {
-                    NO_RESULT_LABEL
-                },
+                text = NO_RESULT_LABEL,
+                actionLabel = CLEAR_ALL_LABEL,
+                onAction = onClearAll,
                 modifier = Modifier.weight(1f, fill = false),
             )
 
@@ -269,6 +305,7 @@ fun SearchScreen(
                     SearchResultRow(
                         result = result,
                         keyword = state.keywords.joinToString(" "),
+                        formats = formats,
                         onClick = { onOpenDiary(result.dayKey) },
                     )
                 }
@@ -371,9 +408,9 @@ private fun LocationPickerDialog(
                     items(filtered, key = { it.country + "\u0001" + it.region1 }) { option ->
                         LocOptionRow(
                             label = if (option.region1.isEmpty()) {
-                                "\${option.country} · \$LOC_COUNTRY_ONLY"
+                                "${option.country} · $LOC_COUNTRY_ONLY"
                             } else {
-                                "\${option.country} · \${option.region1}"
+                                "${option.country} · ${option.region1}"
                             },
                             count = option.count,
                             selected = selected.country == option.country && selected.region1 == option.region1,
@@ -497,14 +534,48 @@ private fun LocationFilterRow(
 }
 
 @Composable
-private fun SearchResultRow(result: SearchResultItem, keyword: String, onClick: () -> Unit) {
+private fun SearchResultRow(
+    result: SearchResultItem,
+    keyword: String,
+    formats: DateFormats,
+    onClick: () -> Unit,
+) {
+    // 规范 §9.6：整行只给**一个**语义节点，描述 = 日期 · 片段 · 时刻（`9月20日 · 六点半就醒了… · 8:23`）。
+    // 片段里带 `<hl>…</hl>` 高亮标记，读屏不该把标签本身念出来，先剥掉。
+    // 时刻用 `updatedUtc`（结果行上唯一可用的时间戳），走 `DateFormats` 槽位。
+    val description = remember(result, formats) {
+        val date = runCatching { LocalDate.parse(result.dayKey) }.getOrNull()
+        val dateLabel = date?.let { formats.dateOnly(it) } ?: result.dayKey
+        val body = (if (result.snippet.isNotEmpty()) result.snippet else result.summary)
+            .replace(SearchUtil.HIGHLIGHT_OPEN, "")
+            .replace(SearchUtil.HIGHLIGHT_CLOSE, "")
+            .trim()
+        val timeLabel = formats.timeOf(Instant.ofEpochMilli(result.updatedUtc))
+        buildList {
+            add(dateLabel)
+            if (body.isNotEmpty()) add(body)
+            add(timeLabel)
+        }.joinToString(" · ")
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // §11：列表行的触控目标 ≥ 48dp。内容本身约 60dp，这里只是兜底，视觉密度不变。
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(Radius.field))
-            .clickable(onClick = onClick)
+            // §9.6：原来是 `onTapGesture` 式处理，没有按钮特质；给出 Role.Button 后
+            // TalkBack/uiautomator 都能识别成可点击的按钮。涟漪仍用 `clickable` 的默认实现。
+            .clickable(
+                role = Role.Button,
+                onClick = onClick,
+            )
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(Spacing.card),
+            .padding(Spacing.card)
+            // §9.6 + §11：清掉子节点（日期徽章、摘要、片段、chevron）各自的文本，整行只留
+            // 这一条描述。点击动作与 Role 来自**外层** `clickable`，`clearAndSetSemantics`
+            // 只清它下游的语义，因此会保留（同一写法见 `CalendarDayGrid`，已上机 dump 验证）。
+            .clearAndSetSemantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Spacing.card),
     ) {
@@ -620,6 +691,8 @@ private val PREPARING_LABEL: String
     @Composable get() = stringResource(R.string.search_preparing)
 private val START_TITLE: String
     @Composable get() = stringResource(R.string.search_start_title)
+private val START_HINT: String
+    @Composable get() = stringResource(R.string.search_start_hint)
 private val NO_RESULT_LABEL: String
     @Composable get() = stringResource(R.string.search_no_result)
 private val LOAD_MORE_LABEL: String

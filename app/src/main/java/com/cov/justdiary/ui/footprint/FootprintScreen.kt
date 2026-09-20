@@ -40,6 +40,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -195,7 +200,15 @@ private fun StatsCard(state: FootprintViewState) {
 
 @Composable
 private fun StatCell(value: Int, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        // 方案 §八「统计卡」：整格**合并成一个语义节点**读作「省市 7」，不许拆成两个 Text。
+        // 数值与标签仍各自绘制（视觉与字号完全不变），只是把子节点的文本语义清掉，
+        // 换成一条「标签 + 数值」的描述，避免 TalkBack 读出「7」再读「省市」两条互不相干的节点。
+        modifier = Modifier.clearAndSetSemantics {
+            contentDescription = "$label $value"
+        },
+    ) {
         Text(
             text = value.toString(),
             style = MaterialTheme.typography.titleLarge,
@@ -255,6 +268,8 @@ fun YearBarChart(
     val barColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // 语义 lambda 不是 @Composable，标题要先在组合里取出来（`TREND_TITLE` 是 composable getter）。
+    val chartLabel = TREND_TITLE
 
     val maxDays = (yearly.maxOfOrNull { it.days } ?: 1).coerceAtLeast(1)
     val axisStyle = TextStyle(
@@ -262,7 +277,13 @@ fun YearBarChart(
         color = labelColor,
     )
 
-    Canvas(modifier = modifier) {
+    Canvas(
+        modifier = modifier
+            // 方案 §八「趋势卡」：柱状图是自绘 Canvas，drawText 画出来的年份/数值**没有语义**，
+            // 必须补无障碍描述。整张图只挂**一个**节点，读图表标题（§十一：统计数字、图表
+            // 不只靠颜色表达）；不逐柱暴露数值，否则 TalkBack 会在卡片里刷一长串数字。
+            .semantics { contentDescription = chartLabel },
+    ) {
         val axisWidth = AXIS_WIDTH.toPx()
         val labelHeight = AXIS_LABEL_HEIGHT.toPx()
         val chartHeight = size.height - labelHeight
@@ -350,12 +371,32 @@ private fun PlaceRow(
     onDayClick: (String) -> Unit,
 ) {
     val isExpanded = node.id in expanded
+    val stateLabel = if (isExpanded) EXPAND_LABEL else COLLAPSE_LABEL
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
+        // 叶子节点（市）没有点击动作，索性不挂 `clickable`：这样它只有一条静态语义，
+        // 不会被读成按钮，也不会带上多余的 disabled 状态（方案 §八：叶子节点无 chevron）。
+        val rowModifier = if (node.isLeaf) {
+            Modifier.fillMaxWidth()
+        } else {
+            Modifier
                 .fillMaxWidth()
-                .clickable(enabled = !node.isLeaf) { onToggle(node.id) }
-                .padding(start = (depth * INDENT_STEP).dp, top = 6.dp, bottom = 6.dp),
+                // `role = Role.Button`：可展开行要带按钮特质（方案 §九「结果行」同一口径，
+                // §十一 触控目标与语义）。点击动作来自这层 `clickable`，下面的
+                // `clearAndSetSemantics` 只清子节点，不会把它清掉（与 CalendarDayGrid 同理）。
+                .clickable(role = Role.Button) { onToggle(node.id) }
+        }
+        Row(
+            modifier = rowModifier
+                .padding(start = (depth * INDENT_STEP).dp, top = 6.dp, bottom = 6.dp)
+                // 方案 §八「地点清单」：名称 + 计数合并为**一个**节点读作「中国 9」，
+                // 而不是「中国」「9」两条。可展开行再用 stateDescription 暴露展开/收起
+                // （§十一 状态不只靠颜色/图形表达），叶子行不设状态、没有按钮角色。
+                .clearAndSetSemantics {
+                    contentDescription = "${node.name} ${node.count}"
+                    if (!node.isLeaf) {
+                        stateDescription = stateLabel
+                    }
+                },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.card),
         ) {
@@ -378,7 +419,9 @@ private fun PlaceRow(
             if (!node.isLeaf) {
                 Icon(
                     imageVector = if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (isExpanded) COLLAPSE_LABEL else EXPAND_LABEL,
+                    // 展开/收起已由整行的 stateDescription 表达，chevron 是纯装饰
+                    // （方案 §十一：装饰性图标显式 `null`），否则会与状态重复朗读。
+                    contentDescription = null,
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
