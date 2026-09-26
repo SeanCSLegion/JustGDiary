@@ -150,6 +150,7 @@
     <string name="search_time_from">开始</string>
     <string name="search_time_to">结束</string>
     <string name="search_time_apply">确定</string>
+    <string name="search_time_pick">选择日期</string>
     <string name="search_time_invalid">日期格式不对，请按 2026-09-01 填写</string>
     <string name="search_loc_label">地点</string>
     <string name="search_result_count">找到 %1$d 条日记</string>

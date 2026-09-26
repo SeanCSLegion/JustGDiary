@@ -12,12 +12,11 @@ enum class TimeRangeKind { All, ThisWeek, ThisMonth, ThisYear, Custom }
 /**
  * 生效条件摘要里的一个条目（对应 iOS `SearchFilterItem`）。
  *
- * `KeywordInput` 与 `Keyword` 必须分开：前者是**还没回车提交**的输入框内容，
- * 点它的 ✕ 要清空输入框；后者是已提交的关键词胶囊，点 ✕ 要从关键词列表里摘掉。
- * 两者文案可能相同，只有 kind 能区分该走哪条清法。
+ * 只有**已生效**的条件会出现在这里 —— 输入框里未回车的字不算条件，
+ * 因此也没有"未提交输入"这一种 kind（曾经有过，2026-09-26 按用户要求去掉）。
  */
 data class SearchFilterItem(val kind: Kind, val label: String) {
-    enum class Kind { KeywordInput, Keyword, Time, Location }
+    enum class Kind { Keyword, Time, Location }
 }
 
 /**
@@ -68,9 +67,15 @@ data class SearchUiState(
      * 没有条件时**不查库**（与 iOS 一致）：否则会退化成"列出全部日记"，
      * 而搜索页在无条件时应当显示空态提示而不是所有结果。
      */
+    /**
+     * 是否已经有**生效**的筛选条件。
+     *
+     * 界面据此决定"引导态"还是"没有找到匹配的日记"，所以必须与
+     * [SearchFilters.effectiveKeyword] 用同一套口径：**输入框里未回车的字不算条件**
+     * （否则打完字还没回车就会看到"没有找到"，那是假的）。
+     */
     val hasAnyCondition: Boolean
         get() = keywords.any { it.isNotBlank() } ||
-            keyword.isNotBlank() ||
             timeKind != TimeRangeKind.All ||
             locFilter.country.isNotEmpty() ||
             locFilter.noLoc
@@ -126,11 +131,8 @@ object SearchFilters {
     /**
      * 实际送给 FTS 的关键词：已提交的胶囊 + 输入框里未提交的词，用空格连接（FTS 侧是"与"）。
      */
-    fun effectiveKeyword(state: SearchUiState): String {
-        val parts = state.keywords.map { it.trim() }.filter { it.isNotEmpty() }
-        val pending = state.keyword.trim()
-        return (parts + if (pending.isNotEmpty()) listOf(pending) else emptyList()).joinToString(" ")
-    }
+    fun effectiveKeyword(state: SearchUiState): String =
+        state.keywords.map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
 
     /** 生效条件摘要（用于页面上的一行胶囊）。 */
     fun activeFilterItems(
@@ -147,11 +149,11 @@ object SearchFilters {
         noLocLabel: String = NO_LOCATION_LABEL,
     ): List<SearchFilterItem> {
         val items = mutableListOf<SearchFilterItem>()
-        // 顺序固定（规范 §1.4）：未提交的输入 → 已提交关键词 → 时间 → 地点
-        val pending = state.keyword.trim()
-        if (pending.isNotEmpty() && !state.keywords.contains(pending)) {
-            items.add(SearchFilterItem(SearchFilterItem.Kind.KeywordInput, pending))
-        }
+        // 只列**已生效**的条件。
+        //
+        // 未回车的输入**不算条件**（用户 2026-09-26 明确要求"未回车的输入不要进行搜索"）：
+        // 它既不参与查询，也就不该出现在"生效条件"这一行里 —— 否则会出现
+        // "看起来筛了、其实没筛"的假象，比不显示更糟。
         state.keywords.forEach { word ->
             if (word.isNotBlank()) items.add(SearchFilterItem(SearchFilterItem.Kind.Keyword, word))
         }

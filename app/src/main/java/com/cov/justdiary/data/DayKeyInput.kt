@@ -61,6 +61,9 @@ object DayKeyInput {
         }
     }
 
+    /** 归一化后转成 `LocalDate`（给日期选择器当初始值用）；非法返回 `null`。 */
+    fun parse(raw: String): LocalDate? = normalize(raw)?.let { LocalDate.parse(it) }
+
     /**
      * 两端都归一化，并在写反时**交换**（不报错：用户把先后写反是很自然的手误）。
      *

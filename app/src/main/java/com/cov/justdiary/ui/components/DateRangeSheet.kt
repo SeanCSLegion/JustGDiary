@@ -1,5 +1,14 @@
 package com.cov.justdiary.ui.components
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,11 +68,9 @@ fun DateRangeSheet(
     var from by remember { mutableStateOf(initialFrom ?: defaultFrom.toString()) }
     var to by remember { mutableStateOf(initialTo ?: today.toString()) }
 
-    // 只有"用户动过的那一端"才提示错误：刚打开就满屏红字很吓人
-    var touchedFrom by remember { mutableStateOf(false) }
-    var touchedTo by remember { mutableStateOf(false) }
-    val fromError = touchedFrom && DayKeyInput.normalize(from) == null
-    val toError = touchedTo && DayKeyInput.normalize(to) == null
+    // 两端只可能来自日历选择，用户已经没有"手打错"的路径了。
+    // 这里仍走一遍归一化：面板可能被传入**历史脏值**（旧版本存的 `2026-9-1`），
+    // 那种值一样会让字符串比较算出空区间。
     val normalized = DayKeyInput.normalizeRange(from, to)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -100,24 +107,17 @@ fun DateRangeSheet(
                 RangeDayField(
                     label = stringResource(R.string.search_time_from),
                     value = from,
-                    isError = fromError,
-                    onValueChange = { from = it; touchedFrom = true },
+                    onValueChange = { from = it },
                     modifier = Modifier.weight(1f),
+                    // 结束日不能早于开始日（反之亦然）：从源头上不给"空区间"的机会
+                    maxDate = DayKeyInput.parse(to),
                 )
                 RangeDayField(
                     label = stringResource(R.string.search_time_to),
                     value = to,
-                    isError = toError,
-                    onValueChange = { to = it; touchedTo = true },
+                    onValueChange = { to = it },
                     modifier = Modifier.weight(1f),
-                )
-            }
-            if (fromError || toError) {
-                Text(
-                    text = stringResource(R.string.search_time_invalid),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp),
+                    minDate = DayKeyInput.parse(from),
                 )
             }
             Row(
@@ -138,15 +138,30 @@ fun DateRangeSheet(
     }
 }
 
-/** 起止日期输入框（`YYYY-MM-DD`，带错误态）。 */
+/**
+ * 起止日期的**选择**入口（不是输入框）。
+ *
+ * 用户 2026-09-26 两次要求："日期选择不要是输入日期，而是可以有菜单之类的进行选择"。
+ * 手打日期既容易写错（`2026-9-1` 与 `2026-09-01` 字典序不同 → 静默空区间），
+ * 也完全没有必要 —— Material 3 自带 [DatePicker]。
+ *
+ * 现在是"只读展示 + 点开日历"：值仍以 `YYYY-MM-DD` 存在状态里（与查询口径一致），
+ * 但用户永远不需要亲手敲它。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RangeDayField(
     label: String,
     value: String,
-    isError: Boolean,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** 早于这一天 / 晚于这一天不可选（起止互相约束，避免选出一个空区间）。 */
+    minDate: LocalDate? = null,
+    maxDate: LocalDate? = null,
 ) {
+    var picking by remember { mutableStateOf(false) }
+    val display = DayKeyInput.normalize(value)
+
     Column(modifier = modifier) {
         Text(
             text = label,
@@ -154,19 +169,72 @@ private fun RangeDayField(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 6.dp),
         )
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .width(160.dp),
-            singleLine = true,
-            isError = isError,
+        OutlinedCard(
+            onClick = { picking = true },
+            modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(Radius.field),
-            textStyle = MaterialTheme.typography.bodyLarge,
-            placeholder = { Text(DayKeyInput.PLACEHOLDER) },
-            // 数字键盘：省得为了打减号切键盘（`-` 仍由 `normalize` 接受）
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = AppIcons.CalendarMonth,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    // 已经归一化过，展示的就是查询真正用的那个字符串
+                    text = display ?: stringResource(R.string.search_time_pick),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (display != null) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+    }
+
+    if (picking) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = (DayKeyInput.parse(value) ?: LocalDate.now())
+                .toEpochMillisUtc(),
+            selectableDates = object : SelectableDates {
+                override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                    val date = utcTimeMillis.toLocalDateUtc()
+                    if (minDate != null && date < minDate) return false
+                    if (maxDate != null && date > maxDate) return false
+                    return true
+                }
+            },
         )
+        DatePickerDialog(
+            onDismissRequest = { picking = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        state.selectedDateMillis?.let { onValueChange(it.toLocalDateUtc().toString()) }
+                        picking = false
+                    },
+                ) { Text(stringResource(R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        ) { DatePicker(state = state) }
     }
 }
+
+/** Material 的 `DatePicker` 用 **UTC 零点**的毫秒表示"哪一天"，这里做双向换算。 */
+private fun LocalDate.toEpochMillisUtc(): Long =
+    atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+private fun Long.toLocalDateUtc(): LocalDate =
+    java.time.Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()

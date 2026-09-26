@@ -161,6 +161,7 @@
     <string name="search_time_from">From</string>
     <string name="search_time_to">To</string>
     <string name="search_time_apply">Apply</string>
+    <string name="search_time_pick">Pick a date</string>
     <string name="search_time_invalid">Enter a date as 2026-09-01</string>
     <string name="search_loc_label">Place</string>
     <string name="search_result_count">%1$d entries found</string>

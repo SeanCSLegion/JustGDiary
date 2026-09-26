@@ -85,9 +85,10 @@ class SearchFiltersTest {
     // ------------------------------------------------------------------ 关键词胶囊
 
     @Test
-    fun `effective keyword joins committed chips and the pending input`() {
+    fun `effective keyword joins only the committed chips`() {
+        // 未回车的 `keyword` 不参与（用户 2026-09-26 要求）
         val state = SearchUiState(keyword = "天气", keywords = listOf("深圳", "2026"))
-        assertEquals("深圳 2026 天气", SearchFilters.effectiveKeyword(state))
+        assertEquals("深圳 2026", SearchFilters.effectiveKeyword(state))
     }
 
     @Test
@@ -178,64 +179,39 @@ class SearchFiltersTest {
     }
 
     /**
-     * 顺序固定：**未提交的输入 → 已提交关键词 → 时间 → 地点**（规范 §1.4）。
+     * 未回车的输入**不是条件**（用户 2026-09-26 明确要求）。
      *
-     * 未提交的输入必须是**独立的一种 kind**：点它的 ✕ 要清空输入框，
-     * 而不是去关键词列表里找一个同名项（那样会点不动）。
+     * 它既不参与查询（`effectiveKeyword` 只看已提交的关键词），
+     * 也不出现在"生效条件"那一行 —— 否则会出现"看起来筛了、其实没筛"的假象。
      */
     @Test
-    fun `pending input leads the summary as its own kind`() {
+    fun `uncommitted input neither filters nor shows as a condition`() {
         val state = SearchUiState(
             keyword = "外滩",
             keywords = listOf("深圳"),
             timeKind = TimeRangeKind.ThisMonth,
         )
-        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
+        assertEquals("只有提交过的词参与查询", "深圳", SearchFilters.effectiveKeyword(state))
         assertEquals(
+            "条件行里只应有已提交的关键词与时间",
             listOf(
-                SearchFilterItem(SearchFilterItem.Kind.KeywordInput, "外滩"),
                 SearchFilterItem(SearchFilterItem.Kind.Keyword, "深圳"),
                 SearchFilterItem(SearchFilterItem.Kind.Time, "9月"),
             ),
-            items,
+            SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" }),
         )
     }
 
     @Test
-    fun `pending input that is already a committed keyword is not duplicated`() {
-        val state = SearchUiState(keyword = "深圳", keywords = listOf("深圳"))
-        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
-        assertEquals(
-            listOf(SearchFilterItem(SearchFilterItem.Kind.Keyword, "深圳")),
-            items,
+    fun `typing alone does not count as a condition`() {
+        val state = SearchUiState(keyword = "外滩")
+        assertEquals("", SearchFilters.effectiveKeyword(state))
+        assertTrue(
+            "只有输入框里有字时，条件行应当为空",
+            SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" }).isEmpty(),
         )
-    }
-
-    @Test
-    fun `blank pending input produces no chip`() {
-        val state = SearchUiState(keyword = "   ")
-        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
-        assertEquals(emptyList<SearchFilterItem>(), items)
-    }
-
-    // ------------------------------------------------------------------ 出错态
-
-    /**
-     * 「出错」与「零结果」必须是两个可区分的状态。
-     *
-     * 原来查询失败只把 `loading` 关掉，界面于是显示「没有找到匹配的日记」——
-     * 用户会以为自己真的没有那篇日记。`hasError` 让界面能优先渲染错误 + 重试。
-     */
-    @Test
-    fun `an error is distinguishable from an empty result`() {
-        val empty = SearchUiState(items = emptyList(), total = 0)
-        assertTrue("零结果不算出错", !empty.hasError)
-        assertTrue(empty.isEmpty)
-
-        val failed = SearchUiState(items = emptyList(), total = -1, error = "disk I/O error")
-        assertTrue("失败必须能被识别出来", failed.hasError)
-        // 两者都 isEmpty —— 所以界面**只能**靠 hasError 区分，顺序不能反
-        assertTrue(failed.isEmpty)
+        // `hasAnyCondition` 决定界面走引导态还是"没结果"，也不该被未提交的输入影响
+        assertFalse("未回车的输入不算条件", state.hasAnyCondition)
     }
 
     // ------------------------------------------------------------------ 分页

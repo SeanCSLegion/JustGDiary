@@ -65,12 +65,23 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     private var locSearchJob: Job? = null
 
     /** 输入框变化 → 250ms 防抖后重查。 */
+    /**
+     * 输入框变化。
+     *
+     * **不触发查询** —— 只有回车（[commitKeyword]）之后那个词才生效
+     * （用户 2026-09-26：「未回车的输入还是不要进行搜索吧」）。
+     * 原来的 250ms 防抖是"边打边查"：既费电，又会让「没有找到匹配的日记」
+     * 在打字过程中反复闪，看起来像结果不稳定。
+     *
+     * 清空输入框要**重查一次**：如果之前有已提交的关键词，清空输入本身不改变条件，
+     * 但如果是"清除按钮 + 无关键词"，界面应当回到引导态。
+     */
     fun onKeywordChange(value: String) {
+        val previous = _state.value.ui.keyword
         apply(_state.value.ui.copy(keyword = value))
-        searchJob?.cancel()
-        searchJob = viewModelScope.launch {
-            delay(DEBOUNCE_MS)
-            runSearch(reset = true)
+        // 只在"从有到无"时重查一次，让空条件回到引导态；其余交给回车
+        if (previous.isNotEmpty() && value.isEmpty() && _state.value.ui.keywords.isEmpty()) {
+            runSearchNow(reset = true)
         }
     }
 
@@ -145,8 +156,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         val ui = _state.value.ui
         apply(
             when (kind) {
-                SearchFilterItem.Kind.KeywordInput -> ui.copy(keyword = "")
-                SearchFilterItem.Kind.Keyword -> ui.copy(keyword = "", keywords = emptyList())
+SearchFilterItem.Kind.Keyword -> ui.copy(keyword = "", keywords = emptyList())
                 SearchFilterItem.Kind.Time -> ui.copy(timeKind = TimeRangeKind.All, customRange = null)
                 SearchFilterItem.Kind.Location -> ui.copy(locFilter = LocFilter())
             },

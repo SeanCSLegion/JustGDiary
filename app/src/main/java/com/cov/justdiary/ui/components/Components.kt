@@ -338,8 +338,14 @@ fun PageHeader(
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        modifier = modifier.padding(bottom = 6.dp),
-        style = MaterialTheme.typography.labelMedium,
+        // ⚠️ 上边距 12dp **写在这里**，调用方只给左右内边距。
+        //
+        // 原来卡片只有 4dp 的上下内边距、标题自己又没有任何上边距，于是标题紧贴卡片上沿 ——
+        // 视觉上与卡片圆角"没有对齐"（用户反馈）。卡片圆角 16dp、标题左内边距 16dp，
+        // 上边距也该是两位数才成比例。
+        modifier = modifier.padding(top = 12.dp, bottom = 6.dp),
+        // 12sp → 14sp：`labelMedium` 在设置卡里当"章节名"用偏小（用户反馈"太小"）
+        style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

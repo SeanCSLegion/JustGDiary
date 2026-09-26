@@ -275,9 +275,7 @@ fun SearchScreen(
                         text = item.label,
                         onRemove = {
                             when (item.kind) {
-                                // 未提交的输入：清空输入框（防抖会自己重查）
-                                SearchFilterItem.Kind.KeywordInput -> onKeywordChange("")
-                                SearchFilterItem.Kind.Keyword -> onRemoveKeyword(item.label)
+                SearchFilterItem.Kind.Keyword -> onRemoveKeyword(item.label)
                                 SearchFilterItem.Kind.Time -> onTimeKindChange(TimeRangeKind.All)
                                 SearchFilterItem.Kind.Location -> {
                                     onNoLocationChange(false)

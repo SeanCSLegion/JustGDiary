@@ -44,6 +44,7 @@ import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.app.AppContainer
 import com.cov.justdiary.app.LaunchIntent
+import com.cov.justdiary.data.LunarVisibility
 import com.cov.justdiary.model.DateUtil
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.ui.diary.DiaryPageScreen
@@ -206,6 +207,12 @@ private fun TabContent(
                 dateFormats = formats,
                 dayBlocks = state.dayBlocks,
                 showTime = state.autoTime,
+                // 农历只在中文环境显示（英文界面下「廿六 / 丙午年」读不懂，
+                // 还会把日格挤成两行）。判据是**解析后**的语言，不是 "system" 字面量。
+                showLunar = LunarVisibility.showsLunar(
+                    appLanguage = container.settings.load().appLanguage,
+                    systemLanguage = java.util.Locale.getDefault().language,
+                ),
                 onYearChange = viewModel::setVisibleYear,
                 onSelectDay = viewModel::select,
                 onOpenDay = { onOpenDay(DateUtil.dayKeyOf(it)) },

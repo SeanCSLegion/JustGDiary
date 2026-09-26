@@ -254,7 +254,7 @@ private fun SettingsBody(
             SettingsCard {
                 SectionTitle(
                     text = stringResource(R.string.settings_section_general),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 MenuRow(
                     icon = SettingsIcons.language,
@@ -295,7 +295,7 @@ private fun SettingsBody(
             SettingsCard {
                 SectionTitle(
                     text = stringResource(R.string.settings_section_rules),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 ValueRow(
                     icon = SettingsIcons.dayStart,
@@ -361,7 +361,7 @@ private fun SettingsBody(
             SettingsCard {
                 SectionTitle(
                     text = stringResource(R.string.settings_section_remind),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 SwitchRow(
                     icon = SettingsIcons.reminder,
@@ -398,7 +398,7 @@ private fun SettingsBody(
             SettingsCard {
                 SectionTitle(
                     text = stringResource(R.string.settings_section_data),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 MenuRow(
                     icon = SettingsIcons.export,
@@ -426,7 +426,7 @@ private fun SettingsBody(
             SettingsCard {
                 SectionTitle(
                     text = stringResource(R.string.settings_section_about),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 0.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
                 ValueRow(
                     icon = SettingsIcons.about,
@@ -477,7 +477,7 @@ private fun SettingsBody(
 private fun SettingsCard(content: @Composable () -> Unit) {
     DiaryCard(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(vertical = 4.dp),
+        contentPadding = PaddingValues(vertical = 0.dp),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) { content() }
     }
