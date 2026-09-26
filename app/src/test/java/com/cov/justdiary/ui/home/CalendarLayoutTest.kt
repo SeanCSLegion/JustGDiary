@@ -46,7 +46,10 @@ class CalendarLayoutTest {
         assertEquals(72f, CalendarLayout.BIG_TITLE_H, 1e-6f)
         assertEquals(34f, CalendarLayout.COMPACT_MONTH_TITLE_H, 1e-6f)
         assertEquals(26f, CalendarLayout.COMPACT_WEEKDAY_HEADER_H, 1e-6f)
-        assertEquals(68f, CalendarLayout.WEEK_STRIP_H, 1e-6f)
+        // ⚠️ **有意偏离 iOS 的 68**：周条要放「选中圆 + 农历一行 + 有日记的短横线」，
+        // 在 392.7dp 宽的手机上算出来约 67–69dp —— 68 顶满就会被下沿裁掉，
+        // 中文的农历半截看不见（真机实测，用户反馈）。这里取 80 留出明确余量。
+        assertEquals(80f, CalendarLayout.WEEK_STRIP_H, 1e-6f)
         assertEquals(40f, CalendarLayout.DAY_TITLE_H, 1e-6f)
         // 年历标题槽回到 iOS 的 62：页内要画 32sp 的「2026年」+ 右侧生肖
         assertEquals(62f, CalendarLayout.YEAR_TITLE_H, 1e-6f)
