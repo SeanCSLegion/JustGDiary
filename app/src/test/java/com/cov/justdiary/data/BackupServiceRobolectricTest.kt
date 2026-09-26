@@ -242,7 +242,99 @@ class BackupServiceRobolectricTest {
         packageFile.delete()
     }
 
+    // --------------------------------------------------- 生成器造出的测试包（tools/make_test_backup.py）
+
+    /**
+     * 用 `tools/make_test_backup.py` 造出的真实备份包走一遍导入。
+     *
+     * 这一条覆盖的是"手上有数据才能测到"的那些路径，也是**导入导出本身的回归**：
+     * 包里的 88 天 / 143 片段含**编辑模式支持的全部段落样式**（title / heading / body /
+     * quote / list / todo / image）、行内样式（bold / italic / strike / underline）、
+     * 居中段落，以及 6 张真图。任何一处解码失败都会在这里露出来。
+     *
+     * 重新生成：`python3 tools/make_test_backup.py`，
+     * 然后把产物复制到 `app/src/test/resources/testdata/`。
+     */
+    @Test
+    fun `imports the generated showcase package with every style intact`(): Unit = runBlocking {
+        repository.prepare()
+        val pkg = File("src/test/resources/testdata/JustDiary_test.jdiary")
+        assertTrue("测试包应当存在（先跑 tools/make_test_backup.py）", pkg.exists())
+
+        val stats = backupService.importBackup(pkg, ImportMode.SKIP)
+        assertTrue("应当导入多天，实际 ${stats.importedDays}", stats.importedDays >= 80)
+        assertTrue("应当导入多个片段，实际 ${stats.importedBlocks}", stats.importedBlocks >= 140)
+        assertEquals("6 张图都应当被复制进来", 6, stats.importedImages)
+
+        // 段落样式：逐种确认解出来还在
+        val styles = mutableSetOf<String>()
+        val runFlags = mutableSetOf<String>()
+        var centered = 0
+        var imageRefs = 0
+        var todoWithDone = 0
+
+        // 足迹行 = 已定位的片段（顺带确认有地点的数据确实进来了）
+        val footprintDays = repository.allFootprintRows().map { it.dayKey }.toSet()
+        assertTrue("应当有带地点的天", footprintDays.isNotEmpty())
+
+        footprintDays.forEach { dayKey ->
+            val diary = repository.getDiaryByDay(dayKey) ?: return@forEach
+            repository.getBlocks(diary.id).forEach { block ->
+                ContentFlatten.parseContent(block.contentJson).forEach { part ->
+                    styles += part.style
+                    if (part.align == "center") centered++
+                    if (part.style == "image") {
+                        imageRefs++
+                        // 导入会把图片改名成 imp_*，并归一成 images/ 前缀
+                        assertTrue(
+                            "图片 src 应当被重写成 images/imp_*，实际 ${part.src}",
+                            part.src?.startsWith("images/imp_") == true,
+                        )
+                    }
+                    if (part.style == "todo" && part.done?.any { it } == true) todoWithDone++
+                    part.runs?.forEach { run ->
+                        if (run.bold == true) runFlags += "bold"
+                        if (run.italic == true) runFlags += "italic"
+                        if (run.strike == true) runFlags += "strike"
+                        if (run.underline == true) runFlags += "underline"
+                    }
+                }
+            }
+        }
+
+        assertEquals(
+            "七种段落样式都要在",
+            setOf("title", "heading", "body", "quote", "list", "todo", "image"),
+            styles,
+        )
+        assertEquals("四种行内样式都要在", setOf("bold", "italic", "strike", "underline"), runFlags)
+        assertTrue("应当有居中段落", centered > 0)
+        assertTrue("应当有图片引用", imageRefs > 0)
+        assertTrue("应当有待办（且有已完成的项）", todoWithDone > 0)
+
+        // 图片真的落盘了
+        val saved = repository.imagesDir.listFiles()?.filter { it.name.startsWith("imp_") }.orEmpty()
+        assertEquals("6 张图应当真的写到 imagesDir", 6, saved.size)
+
+        // 再导一次（SKIP）：应当整天跳过，不重复
+        val again = backupService.importBackup(pkg, ImportMode.SKIP)
+        assertEquals("SKIP 模式第二次导入应当全部跳过", 0, again.importedDays)
+        assertTrue("跳过数应当等于天数", again.skippedDays >= 80)
+    }
+
+    @Test
+    fun `generated package days are searchable after import`(): Unit = runBlocking {
+        repository.prepare()
+        val pkg = File("src/test/resources/testdata/JustDiary_test.jdiary")
+        backupService.importBackup(pkg, ImportMode.SKIP)
+
+        // 包里每天都有一句"今天走了很久…"之类的正文；用一个稳定出现的词去查
+        val hits = repository.search("咖啡", "", "9999-12-31", com.cov.justdiary.model.LocFilter(), 0)
+        assertTrue("导入的内容应当能被搜到", hits.items.isNotEmpty())
+    }
+
     // ------------------------------------------------------------------ 辅助
+
 
     private suspend fun writeDay(dayKey: String, text: String) {
         // 用 dayStartHour=4 反推一个落在这天的时刻（中午 12:00，避免跨日边界）
