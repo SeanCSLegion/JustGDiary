@@ -147,6 +147,14 @@
     <string name="search_time_week">This week</string>
     <string name="search_time_month">This month</string>
     <string name="search_time_year">This year</string>
+    <string name="search_no_result">No matching entries</string>
+    <string name="search_time_custom">Custom</string>
+    <string name="search_time_title">Custom range</string>
+    <string name="search_time_label">Time range</string>
+    <string name="search_time_from">From</string>
+    <string name="search_time_to">To</string>
+    <string name="search_time_apply">Apply</string>
+    <string name="search_loc_label">Place</string>
     <string name="search_result_count">%1$d entries found</string>
     <string name="read_search_placeholder">Search this entry…</string>
     <string name="read_search_prev">Previous match</string>
@@ -203,7 +211,6 @@
     <string name="share_chooser_title">Share entry</string>
     <string name="date_month_short">%1$d</string>
     <string name="footprint_trend_empty">No entries this year.</string>
-    <string name="search_no_result">No matching entries.</string>
     <string name="read_search_no_match">No match</string>
     <string name="read_hero_segments">%1$d moments</string>
     <string name="editor_location_precision">Precision</string>

@@ -136,6 +136,14 @@
     <string name="search_time_week">本周</string>
     <string name="search_time_month">本月</string>
     <string name="search_time_year">今年</string>
+    <string name="search_no_result">没有找到匹配的日记</string>
+    <string name="search_time_custom">自定义</string>
+    <string name="search_time_title">自定义时间范围</string>
+    <string name="search_time_label">时间范围</string>
+    <string name="search_time_from">开始</string>
+    <string name="search_time_to">结束</string>
+    <string name="search_time_apply">确定</string>
+    <string name="search_loc_label">地点</string>
     <string name="search_result_count">找到 %1$d 条日记</string>
     <string name="read_search_placeholder">在当前日记中查找…</string>
     <string name="read_search_prev">上一个匹配</string>
@@ -192,7 +200,6 @@
     <string name="share_chooser_title">分享日记</string>
     <string name="date_month_short">%1$d月</string>
     <string name="footprint_trend_empty">这一年还没有记录。</string>
-    <string name="search_no_result">没有找到匹配的日记。</string>
     <string name="read_search_no_match">无匹配</string>
     <string name="read_hero_segments">%1$d 个片段</string>
     <string name="editor_location_precision">精度</string>

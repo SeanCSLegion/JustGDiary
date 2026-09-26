@@ -6,45 +6,55 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import com.cov.justdiary.model.LocOption
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.res.stringResource
-import com.cov.justdiary.R
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -52,41 +62,54 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.cov.justdiary.R
 import com.cov.justdiary.data.SearchFilterItem
 import com.cov.justdiary.data.SearchUiState
 import com.cov.justdiary.data.TimeRangeKind
-import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.LocFilter
+import com.cov.justdiary.model.LocOption
 import com.cov.justdiary.model.SearchResultItem
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.SearchUtil
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.CountBadge
+import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.EmptyState
+import com.cov.justdiary.ui.components.InputPill
 import com.cov.justdiary.ui.components.PageHeader
+import com.cov.justdiary.ui.components.SkeletonRows
 import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
-import androidx.compose.material.icons.filled.Search
 import java.time.Instant
 import java.time.LocalDate
 
 /**
- * 搜索页。对应 iOS `Views/Search/SearchView.swift`（582 行）+ `SearchViewModel`。
+ * 搜索页。对应 iOS `Views/Search/SearchView.swift`，规范见
+ * [`docs/android-design/05-search-footprint-settings.md`](../../../../../docs/android-design/05-search-footprint-settings.md) §1。
  *
- * 结构：页头（含结果数）→ 搜索框 → **关键词胶囊行** → 时间/地点筛选 → 生效条件摘要 → 结果列表。
+ * 竖屏结构：页头（+ 计数徽标）→ 搜索框 → 筛选卡（时间范围 / 地点两组）→
+ * 条件摘要行（可逐条撤销）→ 结果列表。
+ * 平板横屏：左栏 340dp 固定放筛选，右栏放结果（筛选常驻可见，不需要再开面板）。
  *
- * 与 iOS 一致的关键行为：
- *  - 输入 250ms 防抖后查询（防抖在调用方；这里只暴露 `onKeywordChange`）；
- *  - 回车把当前词提交为一枚**可单独点掉的胶囊**，多词之间是"与"；
- *  - 命中片段用 `primary` 前景 + `primaryContainer` 背景高亮；
- *  - 结果分页 `limit 200` + "加载更多"；
- *  - 三态空状态：索引中 / 有条件无结果 / 无条件。
+ * ## 与 iOS 一致的关键行为
  *
- * 地点筛选：**未记录 / 国家 + 一级地区**。完整选择器是一个对话框，
- * 选项来自 `DiaryRepository.getLocationOptions`（按条数降序、带本地搜索、标注"仅国家"），
- * 与 iOS 的 `showLocSheet` 等价。
+ *  - 输入 250ms 防抖后查询；回车把当前词提交为一枚**可单独点掉的胶囊**，多词之间是"与"；
+ *  - 命中片段用 `primaryContainer` 底色高亮；
+ *  - 结果分页 200 + "加载更多"；
+ *  - 三态空状态：索引重建中 / 有条件无结果 / 无条件。
+ *
+ * ## 本轮修掉的三处 iOS 缺陷
+ *
+ *  1. **加载态可见**（§1.5 规则 2）：iOS 的加载分支是死代码，搜索进行中列表空白。这里给
+ *     顶部 `LinearProgressIndicator` + 骨架行。
+ *  2. **撤销条件使在途请求失效**（§1.5 规则 3）：`SearchViewModel.runSearchNow` 每次都
+ *     `searchJob?.cancel()`，旧结果不会再写回。
+ *  3. **「索引重建中」与「无结果」严格区分**：只由 `indexing` 决定，与 `total` 无关。
  */
 @Composable
 fun SearchScreen(
@@ -101,6 +124,8 @@ fun SearchScreen(
     onNoLocationChange: (Boolean) -> Unit = {},
     onLoadMore: () -> Unit = {},
     onOpenDiary: (String) -> Unit = {},
+    /** 自定义时间范围（`search_time_apply`）：两端都是 `YYYY-MM-DD`。 */
+    onApplyCustomRange: (from: String, to: String) -> Unit = { _, _ -> },
     /** 地点选择器的候选（打开时由 `SearchViewModel.loadLocationOptions` 拉取）。 */
     locOptions: List<LocOption> = emptyList(),
     noLocCount: Int = 0,
@@ -112,17 +137,17 @@ fun SearchScreen(
     onResetLocation: () -> Unit = {},
 ) {
     var showLocPicker by remember { mutableStateOf(false) }
+    var showCustomRange by remember { mutableStateOf(false) }
+    var searchFocused by remember { mutableStateOf(false) }
 
-    // 结果行无障碍文案里的日期/时刻：**必须**走 `DateFormats` 的语义槽位（design-system §4），
-    // 不能自己拼 —— 日期要跟随应用内语言，小时制要跟随设备。应用内语言由
-    // `AppCompatDelegate.setApplicationLocales` 生效，因此按"跟随系统"装配即可拿到当前 Locale。
+    // 结果行无障碍文案里的日期/时刻：**必须**走 `DateFormats` 的语义槽位，
+    // 不能自己拼 —— 日期要跟随应用内语言，小时制要跟随设备。
     val context = LocalContext.current
     val formats = remember(context) { DateFormats.forContext(context, AppSettings.LANGUAGE_SYSTEM) }
+    val split = LocalAdaptiveLayout.current.splitsMasterDetail
 
-    // `Modifier.semantics {}` 的 lambda 不是 @Composable，文案得先取出来再用。
-    val placeholderLabel = PLACEHOLDER
     if (showLocPicker) {
-        LocationPickerDialog(
+        LocationPickerSheet(
             options = locOptions,
             noLocCount = noLocCount,
             loading = locLoading,
@@ -135,31 +160,60 @@ fun SearchScreen(
             onDismiss = { showLocPicker = false },
         )
     }
-
-    Column(modifier = modifier.fillMaxSize()) {
-        PageHeader(
-            title = TITLE,
-            // 还没查过（total < 0）或索引在重建时不显示计数
-            subtitle = if (state.total < 0) null else resultCountLabel(state.total),
+    if (showCustomRange) {
+        CustomRangeSheet(
+            initialFrom = state.customRange?.from,
+            initialTo = state.customRange?.to,
+            onQuickPick = { kind -> onTimeKindChange(kind); showCustomRange = false },
+            onApply = { from, to -> onApplyCustomRange(from, to); showCustomRange = false },
+            onClear = { onTimeKindChange(TimeRangeKind.All); showCustomRange = false },
+            onDismiss = { showCustomRange = false },
         )
+    }
 
-        // 搜索框
+    val countLabel: String? = if (state.total > 0) resultCountLabel(state.total) else null
+
+    /** 筛选卡：搜索框之外的唯一筛选入口（两组 FilterChip）。 */
+    @Composable
+    fun filterPanel(modifier: Modifier = Modifier) {
+        DiaryCard(modifier = modifier, contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, 16.dp)) {
+            Column {
+                FilterGroupLabel(LABEL_TIME_RANGE)
+                TimeFilterRow(
+                    state = state,
+                    onTimeKindChange = onTimeKindChange,
+                    onOpenCustomRange = { showCustomRange = true },
+                )
+                FilterGroupLabel(LABEL_LOCATION, topPadding = 12.dp)
+                LocationFilterRow(
+                    state = state,
+                    onNoLocationChange = onNoLocationChange,
+                    onResetLocation = onResetLocation,
+                    onOpenLocPicker = {
+                        onLocSearchChange("")
+                        onOpenLocPicker()
+                        showLocPicker = true
+                    },
+                )
+            }
+        }
+    }
+
+    // `semantics {}` 的 lambda 不是 @Composable，占位文案要先取出来
+    val placeholderLabel = PLACEHOLDER
+
+    @Composable
+    fun searchField(modifier: Modifier = Modifier) {
         OutlinedTextField(
             value = state.keyword,
             onValueChange = onKeywordChange,
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = Spacing.page)
-                // 规范 §9.2：搜索框"现在无焦点时缺语义" —— `placeholder` 只在聚焦/为空时才渲染，
-                // 未聚焦时这一格在无障碍树里没有可读的名字。这里显式把占位文案挂成节点的
-                // 内容描述，TalkBack 扫过时能听到"搜索日记内容…"。
-                //
-                // 说明：Compose 1.12（BOM 2026.09.00）的 `Role` 只有 Button/Checkbox/Switch/
-                // RadioButton/Tab/Image/DropdownList/ValuePicker，**没有** search 档位，硬套
-                // 任何一个都会说谎；搜索语义由下方 `imeAction = ImeAction.Search` 承担，
-                // 节点本身仍是 `EditText`（`OutlinedTextField` 自带 EditableText 语义）。
+                .onFocusChanged { searchFocused = it.isFocused }
                 .semantics { contentDescription = placeholderLabel },
             singleLine = true,
+            shape = CircleShape,
+            textStyle = MaterialTheme.typography.bodyLarge,
             placeholder = { Text(PLACEHOLDER) },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             trailingIcon = {
@@ -174,158 +228,382 @@ fun SearchScreen(
                 imeAction = androidx.compose.ui.text.input.ImeAction.Search,
             ),
         )
+    }
 
-        // 关键词胶囊行（每个可单独点掉）
-        if (state.keywords.isNotEmpty()) {
+    /** 生效条件摘要：**每一条都能单独撤销**，最右是「清除全部」。 */
+    @Composable
+    fun summaryRow(modifier: Modifier = Modifier) {
+        if (filterItems.isEmpty()) return
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Spacing.page, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                state.keywords.forEach { word ->
-                    InputChip(
-                        selected = true,
-                        onClick = { onRemoveKeyword(word) },
-                        label = { Text(word) },
-                        trailingIcon = { Icon(Icons.Filled.Clear, contentDescription = REMOVE_LABEL) },
+                filterItems.forEach { item ->
+                    InputPill(
+                        text = item.label,
+                        onRemove = {
+                            when (item.kind) {
+                                SearchFilterItem.Kind.Keyword -> onRemoveKeyword(item.label)
+                                SearchFilterItem.Kind.Time -> onTimeKindChange(TimeRangeKind.All)
+                                SearchFilterItem.Kind.Location -> {
+                                    onNoLocationChange(false)
+                                    onResetLocation()
+                                }
+                            }
+                        },
                     )
                 }
-                TextButton(onClick = onClearAll) { Text(CLEAR_ALL_LABEL) }
+            }
+            IconButton(onClick = onClearAll) {
+                Icon(Icons.Filled.Clear, contentDescription = CLEAR_ALL_LABEL)
             }
         }
+    }
 
-        // 时间 / 地点两组条件：横屏左右并排（省约 60dp 高度），竖屏上下堆叠
-        if (LocalAdaptiveLayout.current.filtersSideBySide) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = Spacing.page),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.page),
-            ) {
-                TimeFilterRow(
-                    state = state,
-                    onTimeKindChange = onTimeKindChange,
-                    modifier = Modifier.weight(1f),
-                )
-                LocationFilterRow(
-                    state = state,
-                    onNoLocationChange = onNoLocationChange,
-                    modifier = Modifier.weight(1f),
-                    onResetLocation = onResetLocation,
-                    onOpenLocPicker = {
-                        onLocSearchChange("")
-                        onOpenLocPicker()
-                        showLocPicker = true
-                    },
-                )
-            }
-        } else {
-            TimeFilterRow(state = state, onTimeKindChange = onTimeKindChange)
-            LocationFilterRow(
-                state = state,
-                onNoLocationChange = onNoLocationChange,
-                onResetLocation = onResetLocation,
-                onOpenLocPicker = {
-                    onLocSearchChange("")
-                    onOpenLocPicker()
-                    showLocPicker = true
-                },
-            )
-        }
-
-        // 生效条件摘要
-        if (filterItems.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Spacing.page, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                filterItems.forEach { item ->
-                    Box(
+    /** 结果区（空态 / 加载 / 列表）。 */
+    @Composable
+    fun results(modifier: Modifier = Modifier) {
+        Box(modifier = modifier.fillMaxSize()) {
+            when {
+                // ① 索引**真的**在重建：只有这时才是"准备中"，与"无结果"严格区分
+                state.indexNotReady -> Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = PREPARING_LABEL,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    LinearProgressIndicator(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(Radius.field))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) {
-                        Text(
-                            text = item.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            .padding(top = 12.dp)
+                            .width(160.dp),
+                    )
+                }
+
+                // ② 搜索进行中：进度条 + 骨架行（iOS 在这里是**空白**）
+                state.loading && state.items.isEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    SkeletonRows()
+                }
+
+                // ③ 未输入条件：引导态（不是"没结果"）
+                state.isEmpty && !state.hasAnyCondition -> EmptyState(
+                    icon = Icons.Filled.Search,
+                    text = START_TITLE,
+                    hint = START_HINT,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+
+                // ④ 有条件但无结果：必须给一个"清除全部条件"的出口
+                state.isEmpty -> EmptyState(
+                    icon = Icons.Filled.Search,
+                    text = NO_RESULT_LABEL,
+                    actionLabel = CLEAR_ALL_LABEL,
+                    onAction = onClearAll,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (state.loading) {
+                        item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                    }
+                    items(state.items, key = { it.id }) { result ->
+                        SearchResultRow(
+                            result = result,
+                            formats = formats,
+                            onClick = { onOpenDiary(result.dayKey) },
                         )
                     }
-                }
-            }
-        }
-
-        when {
-            // ① 索引**真的**在重建（规范 §9.5）：只有这时才转圈
-            state.indexNotReady -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                    Text(PREPARING_LABEL, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-
-            // ② 未输入条件：引导态（不是"没结果"）
-            state.isEmpty && !state.hasAnyCondition -> EmptyState(
-                icon = Icons.Filled.Search,
-                text = START_TITLE,
-                hint = START_HINT,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-
-            // ③ 有条件但无结果：必须给一个"清除全部条件"的出口，否则只能一颗颗点掉胶囊
-            state.isEmpty -> EmptyState(
-                icon = Icons.Filled.Search,
-                text = NO_RESULT_LABEL,
-                actionLabel = CLEAR_ALL_LABEL,
-                onAction = onClearAll,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = Spacing.page,
-                    end = Spacing.page,
-                    top = 4.dp,
-                    bottom = 96.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(state.items, key = { it.id }) { result ->
-                    SearchResultRow(
-                        result = result,
-                        keyword = state.keywords.joinToString(" "),
-                        formats = formats,
-                        onClick = { onOpenDiary(result.dayKey) },
-                    )
-                }
-                if (state.hasMore) {
-                    item {
-                        TextButton(
-                            onClick = onLoadMore,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(LOAD_MORE_LABEL) }
+                    if (state.hasMore) {
+                        item {
+                            TextButton(
+                                onClick = onLoadMore,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(LOAD_MORE_LABEL) }
+                        }
                     }
                 }
             }
         }
     }
+
+    if (split) {
+        // 平板横屏：左栏固定 340dp 放筛选（常驻可见），右栏结果列表
+        Row(modifier = modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .width(340.dp)
+                    .fillMaxHeight()
+                    .padding(horizontal = Spacing.page, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                PageHeader(title = TITLE, trailing = { countLabel?.let { CountBadge(it) } })
+                searchField()
+                filterPanel(modifier = Modifier.fillMaxWidth())
+                summaryRow(modifier = Modifier.fillMaxWidth())
+            }
+            HorizontalDivider(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(1.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+            Box(modifier = Modifier.weight(1f).padding(horizontal = Spacing.page, vertical = 8.dp)) {
+                results()
+            }
+        }
+    } else {
+        Column(modifier = modifier.fillMaxSize()) {
+            // 页头自带 16dp 内边距，因此它不套在外层的内边距里（曾经用负 padding 抵消，
+            // 那是非法的 —— Compose 的 padding 不接受负值）
+            PageHeader(title = TITLE, trailing = { countLabel?.let { CountBadge(it) } })
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.page),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                searchField()
+                filterPanel()
+                summaryRow()
+            }
+            results(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = Spacing.page, vertical = 12.dp),
+            )
+        }
+    }
 }
 
-/** 时间档位的胶囊行（可横向滚动）。 */
-/** 地点选择器：本地搜索 + "未记录地点" + 按条数降序的国家/地区列表。 */
+// ---------------------------------------------------------------------- 筛选控件
+
 @Composable
-private fun LocationPickerDialog(
+private fun FilterGroupLabel(text: String, topPadding: androidx.compose.ui.unit.Dp = 0.dp) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = topPadding, bottom = 8.dp),
+    )
+}
+
+/** 时间档位的胶囊行（「自定义」打开 ModalBottomSheet，不再是一个点不动的空档）。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TimeFilterRow(
+    state: SearchUiState,
+    onTimeKindChange: (TimeRangeKind) -> Unit,
+    onOpenCustomRange: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        timeRangeOptions().forEach { (kind, label) ->
+            FilterChip(
+                selected = state.timeKind == kind,
+                onClick = { if (kind == TimeRangeKind.Custom) onOpenCustomRange() else onTimeKindChange(kind) },
+                label = { Text(label) },
+                leadingIcon = if (state.timeKind == kind) {
+                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
+                },
+            )
+        }
+    }
+}
+
+/** 地点条件的胶囊行。 */
+@Composable
+private fun LocationFilterRow(
+    state: SearchUiState,
+    onNoLocationChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    onResetLocation: () -> Unit = {},
+    onOpenLocPicker: () -> Unit = {},
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = state.locFilter.country.isEmpty() && !state.locFilter.noLoc,
+            onClick = {
+                onNoLocationChange(false)
+                onResetLocation()
+            },
+            label = { Text(ALL_LOC_LABEL) },
+            leadingIcon = if (state.locFilter.country.isEmpty() && !state.locFilter.noLoc) {
+                { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+            } else {
+                null
+            },
+        )
+        if (state.locFilter.country.isNotEmpty()) {
+            FilterChip(
+                selected = true,
+                onClick = onResetLocation,
+                label = {
+                    Text(
+                        listOf(state.locFilter.country, state.locFilter.region1)
+                            .filter { it.isNotEmpty() }
+                            .joinToString(" · "),
+                    )
+                },
+                leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            )
+        } else {
+            FilterChip(
+                selected = state.locFilter.noLoc,
+                onClick = { if (state.locFilter.noLoc) onNoLocationChange(false) else onOpenLocPicker() },
+                label = { Text(if (state.locFilter.noLoc) NO_LOCATION_LABEL_ else PICK_LOC_LABEL) },
+                leadingIcon = when {
+                    state.locFilter.noLoc -> {
+                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    }
+                    else -> {
+                        { Icon(Icons.Filled.Place, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    }
+                },
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------- 两个 ModalBottomSheet
+
+/** 自定义时间范围：三个快捷档 + 起止日期。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CustomRangeSheet(
+    initialFrom: String?,
+    initialTo: String?,
+    onQuickPick: (TimeRangeKind) -> Unit,
+    onApply: (from: String, to: String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val today = remember { LocalDate.now() }
+    val defaultFrom = remember(today) { today.withDayOfMonth(1) }
+    var from by remember { mutableStateOf(initialFrom ?: defaultFrom.toString()) }
+    var to by remember { mutableStateOf(initialTo ?: today.toString()) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+            Text(SHEET_TIME_TITLE, style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.padding(top = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = false,
+                    onClick = { onQuickPick(TimeRangeKind.ThisWeek) },
+                    label = { Text(stringResource(R.string.search_time_week)) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { onQuickPick(TimeRangeKind.ThisMonth) },
+                    label = { Text(stringResource(R.string.search_time_month)) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { onQuickPick(TimeRangeKind.ThisYear) },
+                    label = { Text(stringResource(R.string.search_time_year)) },
+                )
+            }
+            Row(
+                modifier = Modifier.padding(top = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                DayKeyField(
+                    label = LABEL_RANGE_FROM,
+                    value = from,
+                    onValueChange = { from = it },
+                    modifier = Modifier.weight(1f),
+                )
+                DayKeyField(
+                    label = LABEL_RANGE_TO,
+                    value = to,
+                    onValueChange = { to = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 20.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onClear) { Text(CLEAR_LABEL) }
+                Button(
+                    onClick = { onApply(from, to) },
+                    modifier = Modifier.padding(start = 8.dp),
+                ) { Text(APPLY_LABEL) }
+            }
+        }
+    }
+}
+
+/**
+ * 日期输入。
+ *
+ * 直接用 `YYYY-MM-DD` 文本框而不是 `DatePickerDialog`：起止两个日期是一个「区间」参数，
+ * 弹出的日历面板会遮住另一半；而且这里的输入本来就是键盘友好的。
+ */
+@Composable
+private fun DayKeyField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(Radius.field),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            placeholder = { Text("2026-09-01") },
+        )
+    }
+}
+
+/** 地点选择器：从 `AlertDialog` 改成 `ModalBottomSheet`（规范 §1.6）。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LocationPickerSheet(
     options: List<LocOption>,
     noLocCount: Int,
     loading: Boolean,
@@ -337,93 +615,85 @@ private fun LocationPickerDialog(
     onPickAll: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val trimmed = keyword.trim().lowercase()
-    val filtered = if (trimmed.isEmpty()) {
-        options
-    } else {
-        options.filter {
-            it.country.lowercase().contains(trimmed) || it.region1.lowercase().contains(trimmed)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 注意：过滤在 **ViewModel** 侧已经做过（`filteredLocOptions`），这里只按传入的候选渲染。
+    // iOS 那边是弹窗内客户端过滤 + 硬上限 20 项，榜外的地点搜不到 —— Android 走 SQL 查询。
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+            Text(LOC_TITLE, style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = keyword,
+                onValueChange = onKeywordChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                singleLine = true,
+                shape = CircleShape,
+                placeholder = { Text(LOC_SEARCH_PLACEHOLDER) },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            )
+            Text(
+                text = LOC_SORT_HINT,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            if (loading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                )
+                return@Column
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp)
+                    .padding(top = 8.dp),
+            ) {
+                item {
+                    LocOptionRow(
+                        label = LOC_ALL,
+                        count = null,
+                        selected = selected.country.isEmpty() && !selected.noLoc,
+                        onClick = onPickAll,
+                    )
+                }
+                item {
+                    LocOptionRow(
+                        label = NO_LOCATION_LABEL_,
+                        count = noLocCount,
+                        selected = selected.noLoc,
+                        onClick = onPickNoLoc,
+                    )
+                }
+                if (options.isEmpty()) {
+                    item {
+                        Text(
+                            text = LOC_EMPTY,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                    }
+                }
+                items(options, key = { it.country + "\u0001" + it.region1 }) { option ->
+                    LocOptionRow(
+                        label = if (option.region1.isEmpty()) {
+                            "${option.country} · $LOC_COUNTRY_ONLY"
+                        } else {
+                            "${option.country} · ${option.region1}"
+                        },
+                        count = option.count,
+                        selected = selected.country == option.country && selected.region1 == option.region1,
+                        onClick = { onPick(option.country, option.region1) },
+                    )
+                }
+                item { Box(modifier = Modifier.height(24.dp)) }
+            }
         }
     }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(LOC_TITLE) },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = keyword,
-                    onValueChange = onKeywordChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text(LOC_SEARCH_PLACEHOLDER) },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                )
-                Text(
-                    text = LOC_SORT_HINT,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                if (loading) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                        Text(PREPARING_LABEL, style = MaterialTheme.typography.bodySmall)
-                    }
-                    return@Column
-                }
-                LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                    item {
-                        LocOptionRow(
-                            label = LOC_ALL,
-                            count = null,
-                            selected = selected.country.isEmpty() && !selected.noLoc,
-                            onClick = onPickAll,
-                        )
-                    }
-                    item {
-                        LocOptionRow(
-                            label = NO_LOCATION_LABEL_,
-                            count = noLocCount,
-                            selected = selected.noLoc,
-                            onClick = onPickNoLoc,
-                        )
-                    }
-                    if (filtered.isEmpty()) {
-                        item {
-                            Text(
-                                text = LOC_EMPTY,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 12.dp),
-                            )
-                        }
-                    }
-                    items(filtered, key = { it.country + "\u0001" + it.region1 }) { option ->
-                        LocOptionRow(
-                            label = if (option.region1.isEmpty()) {
-                                "${option.country} · $LOC_COUNTRY_ONLY"
-                            } else {
-                                "${option.country} · ${option.region1}"
-                            },
-                            count = option.count,
-                            selected = selected.country == option.country && selected.region1 == option.region1,
-                            onClick = { onPick(option.country, option.region1) },
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(CANCEL_LABEL) }
-        },
-    )
 }
 
 @Composable
@@ -431,13 +701,15 @@ private fun LocOptionRow(label: String, count: Int?, selected: Boolean, onClick:
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.field))
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
@@ -459,98 +731,25 @@ private fun LocOptionRow(label: String, count: Int?, selected: Boolean, onClick:
     }
 }
 
-@Composable
-private fun TimeFilterRow(
-    state: SearchUiState,
-    onTimeKindChange: (TimeRangeKind) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.page),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        timeRangeOptions().forEach { (kind, label) ->
-            FilterChip(
-                selected = state.timeKind == kind,
-                onClick = { onTimeKindChange(kind) },
-                label = { Text(label) },
-            )
-        }
-    }
-}
-
-/** 地点条件的胶囊行。完整选择器（国家 + 一级地区）接仓库的地点候选，见 `SearchViewModel`。 */
-@Composable
-private fun LocationFilterRow(
-    state: SearchUiState,
-    onNoLocationChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-    onResetLocation: () -> Unit = {},
-    onOpenLocPicker: () -> Unit = {},
-) {
-    Row(
-        modifier = modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.page),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        FilterChip(
-            selected = state.locFilter.country.isEmpty() && !state.locFilter.noLoc,
-            onClick = {
-                onNoLocationChange(false)
-                onResetLocation()
-            },
-            label = { Text(ALL_LOC_LABEL) },
-        )
-        FilterChip(
-            selected = state.locFilter.noLoc,
-            onClick = { onNoLocationChange(true) },
-            label = { Text(NO_LOCATION_LABEL_) },
-        )
-        if (state.locFilter.country.isNotEmpty()) {
-            FilterChip(
-                selected = true,
-                onClick = onResetLocation,
-                label = {
-                    Text(
-                        listOf(state.locFilter.country, state.locFilter.region1)
-                            .filter { it.isNotEmpty() }
-                            .joinToString(" · "),
-                    )
-                },
-                trailingIcon = { Icon(Icons.Filled.Clear, contentDescription = REMOVE_LABEL) },
-            )
-        } else if (!state.locFilter.noLoc) {
-            FilterChip(
-                selected = false,
-                onClick = onOpenLocPicker,
-                label = { Text(PICK_LOC_LABEL) },
-                leadingIcon = { Icon(Icons.Filled.Place, contentDescription = null) },
-            )
-        }
-    }
-}
+// ---------------------------------------------------------------------- 结果行
 
 @Composable
 private fun SearchResultRow(
     result: SearchResultItem,
-    keyword: String,
     formats: DateFormats,
     onClick: () -> Unit,
 ) {
-    // 规范 §9.6：整行只给**一个**语义节点，描述 = 日期 · 片段 · 时刻（`9月20日 · 六点半就醒了… · 8:23`）。
-    // 片段里带 `<hl>…</hl>` 高亮标记，读屏不该把标签本身念出来，先剥掉。
-    // 时刻用 `updatedUtc`（结果行上唯一可用的时间戳），走 `DateFormats` 槽位。
-    val description = remember(result, formats) {
-        val date = runCatching { LocalDate.parse(result.dayKey) }.getOrNull()
-        val dateLabel = date?.let { formats.dateOnly(it) } ?: result.dayKey
+    val date = remember(result.dayKey) { runCatching { LocalDate.parse(result.dayKey) }.getOrNull() }
+    // 规范 §1.7：日期徽标用**本地化**日期（原来是 `2026-09-20` 原文）
+    val dateLabel = date?.let { formats.dateOnly(it) } ?: result.dayKey
+    val timeLabel = remember(result.updatedUtc, formats) {
+        formats.timeOf(Instant.ofEpochMilli(result.updatedUtc))
+    }
+    val description = remember(result) {
         val body = (if (result.snippet.isNotEmpty()) result.snippet else result.summary)
             .replace(SearchUtil.HIGHLIGHT_OPEN, "")
             .replace(SearchUtil.HIGHLIGHT_CLOSE, "")
             .trim()
-        val timeLabel = formats.timeOf(Instant.ofEpochMilli(result.updatedUtc))
         buildList {
             add(dateLabel)
             if (body.isNotEmpty()) add(body)
@@ -558,74 +757,64 @@ private fun SearchResultRow(
         }.joinToString(" · ")
     }
 
-    Row(
+    DiaryCard(
         modifier = Modifier
             .fillMaxWidth()
-            // §11：列表行的触控目标 ≥ 48dp。内容本身约 60dp，这里只是兜底，视觉密度不变。
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(Radius.field))
-            // §9.6：原来是 `onTapGesture` 式处理，没有按钮特质；给出 Role.Button 后
-            // TalkBack/uiautomator 都能识别成可点击的按钮。涟漪仍用 `clickable` 的默认实现。
-            .clickable(
-                role = Role.Button,
-                onClick = onClick,
-            )
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(Spacing.card)
-            // §9.6 + §11：清掉子节点（日期徽章、摘要、片段、chevron）各自的文本，整行只留
-            // 这一条描述。点击动作与 Role 来自**外层** `clickable`，`clearAndSetSemantics`
-            // 只清它下游的语义，因此会保留（同一写法见 `CalendarDayGrid`，已上机 dump 验证）。
+            // 整行只留**一条**语义：清掉子节点各自的文本，点击动作与 Role 来自外层 clickable
             .clearAndSetSemantics { contentDescription = description },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.card),
+        onClick = onClick,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(Radius.badge))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.card),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    CountBadge(dateLabel, leading = Icons.Filled.DateRange)
                     Text(
-                        text = result.dayKey,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        text = timeLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = result.summary,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                if (result.snippet.isNotEmpty()) {
+                    Text(
+                        text = highlightSnippet(result.snippet),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
                 }
             }
-            Text(
-                text = result.summary,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (result.snippet.isNotEmpty()) {
-                Text(
-                    text = highlightSnippet(result.snippet),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
 /**
  * 把 `<hl>…</hl>` 标记渲染成高亮文本。
  *
- * 与 iOS 一致：命中片段的**前景用 `primary`、背景用 `primaryContainer`**。
+ * 与 iOS 一致：命中片段**背景用 `primaryContainer`、前景用 `primary`**。
+ * 页内搜索（日记页）用的是同一套配色，两处必须一致。
  */
 @Composable
 private fun highlightSnippet(snippet: String): AnnotatedString {
@@ -655,6 +844,7 @@ private fun timeRangeOptions(): List<Pair<TimeRangeKind, String>> = listOf(
     TimeRangeKind.ThisWeek to stringResource(R.string.search_time_week),
     TimeRangeKind.ThisMonth to stringResource(R.string.search_time_month),
     TimeRangeKind.ThisYear to stringResource(R.string.search_time_year),
+    TimeRangeKind.Custom to stringResource(R.string.search_time_custom),
 )
 
 private val ALL_LOC_LABEL: String
@@ -673,8 +863,6 @@ private val LOC_COUNTRY_ONLY: String
     @Composable get() = stringResource(R.string.search_loc_country_only)
 private val LOC_EMPTY: String
     @Composable get() = stringResource(R.string.search_loc_empty)
-private val CANCEL_LABEL: String
-    @Composable get() = stringResource(R.string.cancel)
 private val TITLE: String
     @Composable get() = stringResource(R.string.search_title)
 private val PLACEHOLDER: String
@@ -683,8 +871,6 @@ private val CLEAR_LABEL: String
     @Composable get() = stringResource(R.string.search_time_clear)
 private val CLEAR_ALL_LABEL: String
     @Composable get() = stringResource(R.string.search_clear_all)
-private val REMOVE_LABEL: String
-    @Composable get() = stringResource(R.string.a11y_remove)
 private val NO_LOCATION_LABEL_: String
     @Composable get() = stringResource(R.string.search_loc_no_loc)
 private val PREPARING_LABEL: String
@@ -697,3 +883,15 @@ private val NO_RESULT_LABEL: String
     @Composable get() = stringResource(R.string.search_no_result)
 private val LOAD_MORE_LABEL: String
     @Composable get() = stringResource(R.string.search_load_more)
+private val SHEET_TIME_TITLE: String
+    @Composable get() = stringResource(R.string.search_time_title)
+private val LABEL_TIME_RANGE: String
+    @Composable get() = stringResource(R.string.search_time_label)
+private val LABEL_LOCATION: String
+    @Composable get() = stringResource(R.string.search_loc_label)
+private val LABEL_RANGE_FROM: String
+    @Composable get() = stringResource(R.string.search_time_from)
+private val LABEL_RANGE_TO: String
+    @Composable get() = stringResource(R.string.search_time_to)
+private val APPLY_LABEL: String
+    @Composable get() = stringResource(R.string.search_time_apply)

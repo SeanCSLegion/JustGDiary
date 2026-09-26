@@ -245,6 +245,7 @@ private fun TabContent(
                 onClearAll = viewModel::clearAll,
                 onTimeKindChange = viewModel::setTimeKind,
                 onNoLocationChange = viewModel::setNoLocation,
+                onApplyCustomRange = viewModel::applyCustomRange,
                 onLoadMore = viewModel::loadMore,
                 onOpenDiary = onOpenDay,
                 locOptions = state.locOptions,
