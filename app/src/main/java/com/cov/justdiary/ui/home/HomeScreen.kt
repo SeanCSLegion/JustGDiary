@@ -1001,12 +1001,17 @@ private fun PagerViewport(
             .fillMaxWidth()
             .height(bandH.dp)
             .clipToBounds(),
+        // ⚠️ 每一页都要**自己居中**：日历与年历都限宽 `min(640, 内容宽)`，
+        // 而这里的 Box 是整宽的 —— 少了 `TopCenter`，宽屏（平板竖屏）上日历会贴左边，
+        // 右边空出一大块（实测回归：包了这一层之后丢的）。
+        contentAlignment = Alignment.TopCenter,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(bandH.dp)
                 .graphicsLayer { translationY = offsetPx },
+            contentAlignment = Alignment.TopCenter,
         ) {
             if (showNext) {
                 Box(
@@ -1014,6 +1019,7 @@ private fun PagerViewport(
                         .fillMaxWidth()
                         .height(bandH.dp)
                         .graphicsLayer { translationY = pagePx },
+                    contentAlignment = Alignment.TopCenter,
                 ) { page(1) }
             }
             if (showPrev) {
@@ -1022,6 +1028,7 @@ private fun PagerViewport(
                         .fillMaxWidth()
                         .height(bandH.dp)
                         .graphicsLayer { translationY = -pagePx },
+                    contentAlignment = Alignment.TopCenter,
                 ) { page(-1) }
             }
             page(0)
