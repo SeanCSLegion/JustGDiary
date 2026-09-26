@@ -726,11 +726,14 @@ fun HomeScreen(
             val onDayClick: (LocalDate) -> Unit = { date ->
                 val key = DateUtil.dayKeyOf(date)
                 when {
-                    // 月态：点日期 = **整屏 morph 进周态**并选中（与 iOS `openDay` 一致）
-                    !weekMode -> {
-                        selectedKey = key
-                        setWeekMode(true)
-                    }
+                    // 月态：**先选中，再点同一格才进周态**（用户 2026-09-26 要求）。
+                    //
+                    // 原来是"点任意一天直接 morph 进周态"—— 用户反馈那样太容易误进：
+                    // 想换一天看看，结果整屏切走了。现在两步走：
+                    //   第一次点 → 只改选中（停留月态，当日面板/胶囊跟着变）
+                    //   再点已选中的那天 → 进周态
+                    !weekMode && key != selectedKey -> selectedKey = key
+                    !weekMode -> setWeekMode(true)
                     // 周态：点另一天 = 换选中
                     key != selectedKey -> selectedKey = key
                     // 未来日期：只给一条 Snackbar，不打开日记（规范 §6.3）
@@ -793,6 +796,11 @@ fun HomeScreen(
         fun monthArgsAt(key: Int, withMorph: Boolean): CalendarSectionArgs {
             val first = CalendarGrid.monthFirstOfMonthKey(key)
             val weeks = CalendarGrid.displayedWeeks(first, weekStart)
+            // **一个判据，四处共用**：紧凑形态、标签简写、标签缩进、大标题。
+            // 原来"是否紧凑"看 `p > 0.01`、而"标签用简写还是全写"看 `withMorph` ——
+            // 两者不一致时，当前月会以**紧凑行高**显示**全写**的「九月」（实测 dump 到
+            // 「九月」出现两次）。这类"同一件事两处判断"正是前面踩过的坑。
+            val compact = !(withMorph && p > 0.01f)
             return calendarArgs.copy(
                 displayed = weeks,
                 monthFirst = first,
@@ -809,23 +817,31 @@ fun HomeScreen(
                 // 其它字段（metrics / cellHeight / selectedKey / todayKey / flags）与月份无关，
                 // 沿用是对的；只有标题是**跟着月份走**的。
                 // 紧凑月用**简写**标签（中文 `11月`、英文 `Nov`）；固定区与当前月仍用全写。
-                monthTitleLabel = if (withMorph) {
-                    monthTitleText(first, dateFormats, context)
-                } else {
+                monthTitleLabel = if (compact) {
                     monthCompactTitleText(first, dateFormats, context)
+                } else {
+                    monthTitleText(first, dateFormats, context)
                 },
-                // 非当前月走**紧凑形态**：小号内联标签、不画星期栏 ——
-                // 大标题与星期栏由顶部钉住层提供，只有一份（用户给的 iOS 参考版面）。
-                compactMonth = !withMorph,
+                // 紧凑形态的判据**不是"是不是当前月"，而是"morph 是否真的在进行"**。
+                //
+                // ⚠️ 原来是 `!withMorph`（当前月不紧凑）—— 于是当前月那一块比别人
+                // **高 72 + 30 − 34 = 68dp**。滚动停稳、`monthKey` 一更新，这一块的高度就变，
+                // 整列内容跟着跳一下，看起来就是"滚动结束后才刷新真实日期、界面闪一下"
+                // （用户实测反馈）。
+                //
+                // 现在：**空闲时所有月份块几何完全一致**（都是紧凑形态，大标题与星期栏
+                // 只由顶部钉住层提供一份）；只有 morph 真正开始（p > 0.01）时，
+                // 当前块才换成带大标题 + 星期栏的形态 —— morph 的行位移几何需要它。
+                compactMonth = compact,
                 // 非当前月：把标签怼到"1 号那一列"上（`displayed` 的首行里 1 号的下标）
-                titleIndentDp = if (withMorph) {
+                titleIndentDp = if (!compact) {
                     0f
                 } else {
                     val col = weeks.first().indexOfFirst { it.dayOfMonth == 1 }
                         .coerceAtLeast(0)
                     col * CalendarLayout.monthCellW(calendarArgs.calendarW)
                 },
-                showBigTitle = withMorph && calendarArgs.showBigTitle,
+                showBigTitle = !compact && calendarArgs.showBigTitle,
                 fadeForYear = if (withMorph) calendarArgs.fadeForYear else 0f,
             )
         }
