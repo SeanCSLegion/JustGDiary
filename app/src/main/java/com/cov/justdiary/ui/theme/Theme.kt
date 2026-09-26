@@ -25,6 +25,18 @@ import com.cov.justdiary.model.AppSettings
  */
 val LocalIncreasedContrast = staticCompositionLocalOf { false }
 
+/**
+ * 系统「减弱动态效果 / 关闭动画」是否开启。
+ *
+ * iOS 侧对应 `@Environment(\.accessibilityReduceMotion)`：开启时两条 morph 从 400ms 的
+ * 位移退化为 180ms 的**纯交叉淡入**（`docs/android-design/01-design-system.md` §6.1）。
+ *
+ * Android 没有与之等价的公开 API，判据取系统动画缩放：
+ * `Settings.Global.ANIMATOR_DURATION_SCALE == 0`（开发者选项里"动画关闭"，
+ * 也是无障碍设置里"移除动画"的落点）。
+ */
+val LocalReduceMotion = staticCompositionLocalOf { false }
+
 /** 动态取色不可用（或用户关闭）时的回落色板：只覆写品牌相关的语义角色，其余用 M3 基线。 */
 private val FallbackLightScheme = lightColorScheme(
     primary = BrandLightPrimary,
@@ -68,7 +80,10 @@ fun JustDiaryTheme(
         else -> FallbackLightScheme
     }
 
-    CompositionLocalProvider(LocalIncreasedContrast provides isHighContrastEnabled(context)) {
+    CompositionLocalProvider(
+        LocalIncreasedContrast provides isHighContrastEnabled(context),
+        LocalReduceMotion provides isReduceMotionEnabled(context),
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = justDiaryTypography(fontScale),
@@ -76,6 +91,14 @@ fun JustDiaryTheme(
         )
     }
 }
+
+/** 系统是否关闭了动画（对应 iOS 的"减弱动态效果"）。取不到时按未开启处理。 */
+fun isReduceMotionEnabled(context: Context): Boolean = runCatching {
+    Settings.Global.getFloat(context.contentResolver, ANIMATOR_DURATION_SCALE, 1f) == 0f
+}.getOrDefault(false)
+
+/** 系统动画缩放的比例值名（0 = 关闭动画）。 */
+private const val ANIMATOR_DURATION_SCALE = "animator_duration_scale"
 
 /**
  * 读取系统的"高对比文字"设置；取不到时按关闭处理。

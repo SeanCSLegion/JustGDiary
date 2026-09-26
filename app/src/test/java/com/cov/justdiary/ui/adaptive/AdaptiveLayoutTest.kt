@@ -64,17 +64,28 @@ class AdaptiveLayoutTest {
     }
 
     @Test
-    fun `split needs 700dp of content width`() {
-        assertFalse(layout(699f, 400f).splitsMasterDetail)
-        assertTrue(layout(700f, 400f).splitsMasterDetail)
+    fun `split needs 548_5dp of content width`() {
+        // 548.5 = 2×16(页边距) + 16.5(栏间距+分隔线) + 260(主栏最窄) + 240(详情栏最窄)
+        assertFalse(layout(548.4f, 400f).splitsMasterDetail)
+        assertTrue(layout(548.5f, 400f).splitsMasterDetail)
     }
 
     @Test
     fun `side safe areas count against the content width`() {
-        // 横屏有侧边系统占位时：874 - 62 = 812 ≥ 700 仍然分栏
+        // 横屏有侧边系统占位时：874 - 62 = 812 ≥ 548.5 仍然分栏
         assertTrue(layout(874f, 402f, leading = 62f).splitsMasterDetail)
-        // 扣完不够 700 就不分栏（iOS 的 750pt 场景正是这条）
-        assertFalse(layout(750f, 382f, leading = 62f).splitsMasterDetail)
+        // 扣完不够就不分栏
+        assertFalse(layout(600f, 382f, leading = 62f).splitsMasterDetail)
+        // 刚好卡在临界：600 - 51.5 = 548.5
+        assertTrue(layout(600f, 382f, leading = 51.5f).splitsMasterDetail)
+    }
+
+    @Test
+    fun `tablet portrait never splits even at 800dp wide`() {
+        // 平板竖屏 800×1280：宽度远超阈值，但宽 < 高 → 保持单栏（与 iOS 一致）
+        assertFalse(layout(800f, 1280f).splitsMasterDetail)
+        // 平板横屏 1280×800（已扣侧栏 96dp → 内容 1184）→ 分栏
+        assertTrue(layout(1184f, 800f).splitsMasterDetail)
     }
 
     @Test
@@ -84,9 +95,18 @@ class AdaptiveLayoutTest {
     }
 
     @Test
-    fun `master width is clamped to 280 through 440`() {
-        assertEquals(280f, layout(402f, 874f).masterWidth, 0.001f)
+    fun `master width is clamped to 260 through 440`() {
+        assertEquals(260f, layout(402f, 874f).masterWidth, 0.001f)
         assertEquals(440f, layout(1400f, 800f).masterWidth, 0.001f)
+    }
+
+    @Test
+    fun `master width leaves at least 240dp for the detail column at the split threshold`() {
+        // 分栏下沿：内容 548.5 → 主栏 clamp(252.31, 260, 440) = 260，
+        // 详情栏 = 548.5 - 260 - 32(页边距) - 16.5(间距) = 240
+        val l = layout(548.5f, 400f)
+        val detail = l.contentWidth - l.masterWidth - 32f - 16.5f
+        assertEquals(240f, detail, 0.01f)
     }
 
     // ------------------------------------------------------------------ 设置列数

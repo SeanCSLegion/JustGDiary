@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>JustGDiary · Android 设计稿总览</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 24px; max-width: 1800px; }
+  .card2 { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(15,20,35,.10); display: flex; flex-direction: column; }
+  .card2 img { width: 100%; display: block; background: #E9EBF0; }
+  .card2 .meta { padding: 14px 16px 16px; }
+  .card2 .meta .t { font-size: 15px; font-weight: 600; }
+  .card2 .meta .d { font-size: 12.5px; color: var(--board-ink-2); margin-top: 4px; line-height: 1.5; }
+  .card2 a { color: #2563EB; text-decoration: none; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="board">
+  <div class="board-head">
+    <span class="board-kicker">JustGDiary · Android 设计稿</span>
+    <h1>设计稿总览</h1>
+    <div class="sub">
+      七块板面，覆盖四个标签页的每一个界面 —— 月 / 周 / 年三态、日记阅读 / 编辑 / 分享、
+      搜索、足迹、设置，以及全部弹层、空态、深色与平板横竖屏。
+      设计规范正文在 <code>docs/android-design/</code>。
+    </div>
+    <div class="meta">单位 1 CSS px = 1 dp · 截图 2x · 手机 412 × 915 dp · 平板 1280 × 800 / 800 × 1280 dp</div>
+  </div>
+
+  <div class="section">
+    <h2>板面</h2>
+    <div class="sec-sub">点任意一张可放大查看原图。</div>
+    <div class="grid" id="g"></div>
+  </div>
+</div>
+
+<script>
+const BOARDS = [
+  ["02-home", "首页 · 三态日历（月 / 周 / 年）", "月态亮/深/空、周态满/空、年态 12 个迷你月历、平板横屏分栏、平板竖屏。"],
+  ["03-diary", "日记 · 阅读 / 编辑 / 分享", "顶栏三态、Hero 卡、条目卡、格式栏 9 键、键盘与光标避让、分享 ModalBottomSheet、平板横屏。"],
+  ["04-search", "搜索 · 足迹", "搜索空态/结果/加载/无结果、自定义时间与地点面板、平板横屏筛选+结果；足迹统计、柱状图、三级树、平板横屏并排。"],
+  ["05-settings", "设置 · 对话框 · 弹层", "五张卡、条件行、深色、平板两列；小时滚轮面板；四类对话框；多选态；未来日期 Snackbar。"],
+  ["07-extras", "图片 · 地点 · 忙碌态 · 下拉菜单", "插图后的编辑卡、地点精度菜单、图片全屏预览、备份忙碌遮罩、语言下拉菜单。"],
+  ["08-flows", "交互流程与动效分解", "三态状态机、月→周与月→年 morph 的逐帧几何、手势地图（含「故意没有的手势」）、日记页/搜索/返回栈状态机、组件状态矩阵。"],
+  ["06-design-system", "设计系统 · 自适应与导航", "颜色角色亮/深、动态取色四变体、排版梯级、形状与海拔、组件速查、三种窗口尺寸类、动效令牌表。"],
+];
+document.getElementById("g").innerHTML = BOARDS.map(([id, t, d]) => `
+  <div class="card2">
+    <a href="png/${id}.png" target="_blank"><img src="png/${id}.png" alt="${t}" loading="lazy"></a>
+    <div class="meta">
+      <div class="t">${t}</div>
+      <div class="d">${d}</div>
+      <div style="margin-top:8px"><a href="board-${id}.html" target="_blank">查看可交互的 HTML 源</a>
+      &nbsp;·&nbsp; <a href="png/${id}.png" target="_blank">打开原图</a></div>
+    </div>
+  </div>`).join("");
+</script>
+</body>
+</html>

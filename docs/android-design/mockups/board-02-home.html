@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>02 · 首页三态</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   首页 · 竖屏三态 + 平板两向
+   几何全部取自 iOS Views/Home/CalendarLayout.swift 与 CalendarPaneViews.swift，
+   单位换成 dp；顶栏/底栏换成 Material 3 的 64 / 80。
+   ========================================================================== */
+
+const G = {
+  TOPBAR: 64, NAVBAR: 80, GESTURE: 24, STATUS: 32,
+  BIG_TITLE: 72, WEEKDAY: 30, WEEK_STRIP: 68, DAY_TITLE: 40,
+  YEAR_TITLE: 62, YEAR_PAD: 16, YEAR_SPACING: 6, YEAR_TITLE_GAP: 8,
+  COMPACT_TITLE: 34, COMPACT_WEEKDAY: 26,
+};
+const dayFont = h => Math.min(20, Math.max(13, h * 0.34));
+const lunarFont = h => Math.min(11, Math.max(9, h * 0.18));
+
+/* ---- 顶栏：左侧导航胶囊 + 右侧「今天」胶囊（M3 assist chip） ---- */
+function homeHeader(opt) {
+  const left = opt.mode === "year" ? "" :
+    `<div class="chip lead" style="height:40px;padding:0 16px 0 10px;color:var(--on-surface)">
+       ${icon("chevron_left", { size: 20 })}<span style="font-weight:600">${opt.capsule}</span></div>`;
+  const right = opt.hideToday ? "" :
+    `<div class="chip elev" style="height:40px;padding:0 16px;color:var(--on-surface);gap:6px">
+       ${icon("calendar_today", { size: 18 })}<span style="font-weight:500">${opt.todayLabel || "今天"}</span></div>`;
+  const rightEl = opt.todayInColumn
+    ? `<div class="sp"></div>` : right;
+  return `<div class="topbar" style="padding:0 12px 0 12px">${left}<div class="sp"></div>${rightEl}</div>`;
+}
+
+/* ---- 月态 ---- */
+function monthPane(w, areaH, opt) {
+  const cellH = Math.floor((areaH - G.BIG_TITLE - G.WEEKDAY) / 6);
+  const rows = opt.rows === undefined ? 5 : opt.rows;                  // 2026-09 占 5 行
+  const gridH = cellH * rows;
+  const spacer = areaH - G.BIG_TITLE - G.WEEKDAY - gridH;
+  const grid = monthGridHTML({ w, cellH, rows, selected: opt.selected, today: opt.today,
+    has: opt.has, futureFrom: opt.futureFrom, showLunar: true, lead: 1, days: 30 });
+  return `<div style="height:${areaH}px;display:flex;flex-direction:column">
+    <div style="height:${G.BIG_TITLE}px;display:flex;align-items:center;padding:0 20px">
+      <span style="font-size:32px;font-weight:400;letter-spacing:0">${opt.title || "九月"}</span>
+    </div>
+    ${weekdayHeader(w)}
+    ${grid}
+    <div style="height:${Math.max(0, spacer)}px"></div>
+  </div>`;
+}
+
+function weekdayHeader(w) {
+  const labels = ["一","二","三","四","五","六","日"];
+  return `<div style="display:grid;grid-template-columns:repeat(7,1fr);height:${G.WEEKDAY}px;align-items:center">
+    ${labels.map(l => `<div style="text-align:center;font-size:13px;color:var(--on-surface-variant)">${l}</div>`).join("")}
+  </div>`;
+}
+
+/** 月格：每行 7 格；首行不画分隔线；整行为空也不画。 */
+function monthGridHTML(o) {
+  const dFont = dayFont(o.cellH), lFont = lunarFont(o.cellH);
+  const LUNAR = ["二十","廿一","廿二","廿三","廿四","廿五","廿六","廿七","廿八","廿九",
+    "八月","初二","初三","初四","初五","初六","初七","初八","初九","初十",
+    "十一","十二","十三","十四","十五","十六","十七","十八","十九","二十"];
+  let out = `<div style="display:grid;grid-template-columns:repeat(7,1fr)">`;
+  for (let r = 0; r < o.rows; r++) {
+    for (let c = 0; c < 7; c++) {
+      const d = r * 7 + c - o.lead + 1;
+      const inMonth = d >= 1 && d <= o.days;
+      const top = r === 0 ? "border-top-color:transparent;" : "";
+      if (!inMonth) { out += `<div style="height:${o.cellH}px;${top}"></div>`; continue; }
+      const isSel = d === o.selected, isToday = d === o.today;
+      const isFuture = o.futureFrom && d >= o.futureFrom;
+      const mark = o.has.includes(d) && !isSel && !isToday;
+      const markW = Math.min(20, Math.round((o.w || 412) / 7 * 0.5));
+      const dim = isFuture && !isSel && !isToday ? "opacity:.35;" : "";
+      // 今天 = 主色圆环；选中 = 主色实心圆；两者重合时实心圆优先。
+      const ring = (isSel || isToday)
+        ? `<div style="position:absolute;width:${Math.min(48, o.cellH * 0.52)}px;height:${Math.min(48, o.cellH * 0.52)}px;border-radius:999px;
+             background:${isSel ? "var(--primary)" : "transparent"};border:${isSel ? "0" : "2px solid var(--primary)"}"></div>`
+        : "";
+      const ink = isSel ? "color:var(--on-primary)" : (isToday ? "color:var(--primary)" : "");
+      out += `<div style="height:${o.cellH}px;position:relative;display:flex;flex-direction:column;
+          align-items:center;justify-content:center;border-top:1px solid var(--outline-variant);${dim}${top}">
+        ${ring}
+        <div style="display:flex;flex-direction:column;align-items:center;gap:2px;z-index:1;${ink}">
+          <span style="font-size:${dFont}px;line-height:1.1;font-variant-numeric:tabular-nums">${d}</span>
+          <span style="font-size:${lFont}px;line-height:1.15;${isSel?"color:var(--on-primary)":(isToday?"color:var(--primary)":"color:var(--on-surface-variant)")}">${LUNAR[d-1]}</span>
+        </div>
+        ${mark ? `<div style="position:absolute;bottom:10px;width:${markW}px;height:2px;border-radius:1px;background:var(--primary)"></div>` : ""}
+      </div>`;
+    }
+  }
+  return out + `</div>`;
+}
+
+/* ---- 周态 ---- */
+function weekPane(w, areaH, opt) {
+  const days = [21,22,23,24,25,26,27];
+  const lunar = ["十一","十二","十三","十四","十五","十六","十七"];
+  const strip = `<div style="display:grid;grid-template-columns:repeat(7,1fr)">` + days.map((d,i) => {
+    const sel = d === opt.selected;
+    return `<div style="height:${G.WEEK_STRIP}px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;gap:2px">
+      ${sel ? `<div style="position:absolute;width:44px;height:44px;border-radius:999px;background:var(--primary)"></div>` : ""}
+      <span style="font-size:20px;line-height:1.1;z-index:1;${sel?"color:var(--on-primary)":"color:var(--on-surface)"}">${d}</span>
+      <span style="font-size:11px;z-index:1;${sel?"color:var(--on-primary)":"color:var(--on-surface-variant)"}">${lunar[i]}</span>
+      ${(d===25) && !sel ? `<div style="position:absolute;bottom:6px;width:20px;height:2px;border-radius:1px;background:var(--primary)"></div>`:""}
+    </div>`;
+  }).join("") + `</div>`;
+  const rest = areaH - G.WEEKDAY - G.WEEK_STRIP;
+  return `<div style="height:${areaH}px;display:flex;flex-direction:column">
+    ${weekdayHeader(w)}${strip}
+    <div style="height:1px;background:var(--outline-variant)"></div>
+    <div style="height:${G.DAY_TITLE}px;display:flex;align-items:center;gap:10px;padding:0 20px">
+      <span style="font-size:15px;font-weight:600">9月26日 周六</span>
+      <span style="font-size:12px;color:var(--on-surface-variant)">丙午年八月十六</span>
+    </div>
+    <div style="height:1px;background:var(--outline-variant)"></div>
+    <div style="flex:1;overflow:hidden;padding:18px 20px 0">${dayBlocks(opt.variant || "full")}</div>
+  </div>`;
+}
+
+/* 当日卡片列表（周态下方面板 / 平板右栏共用） */
+function dayBlocks(variant) {
+  const entries = [
+    { time: "21:40", loc: "", title: "字体样式自检",
+      body: ["这一段是正文，用来和下面的标题、引用对比字号。", "#heading 小标题",
+             "> 引用块比正文小一级，并且有自己的底色。", "这一段带<b>粗体</b>、<i>斜体</i>、<u>下划线</u>和<s>删除线</s>。",
+             "|这一行是居中的正文。"],
+      todo: ["验证标题层级", "验证引用底色", "验证行距"] },
+    { time: "09:15", loc: "浦东新区 · 上海市 · 中国", title: "上海出差",
+      body: ["从浦东机场出来，磁悬浮只用了八分钟。晚上在外滩走了一圈。"], todo: [] },
+  ];
+  const list = variant === "empty" ? "" : entries.slice(0, variant === "short" ? 1 : 2).map(e => `
+    <div class="card" style="margin-bottom:16px">
+      ${(e.time || e.loc) ? `<div style="font-size:12.5px;color:var(--on-surface-variant);display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
+        ${e.time ? `<span style="display:flex;align-items:center;gap:6px">${icon("schedule",{size:14})}${e.time}</span>` : ""}
+        ${e.loc ? `<span style="display:flex;align-items:center;gap:6px">${icon("place",{size:14})}${e.loc}</span>` : ""}
+      </div>` : ""}
+      ${richText(e)}
+    </div>`).join("");
+  if (variant === "empty") {
+    return `<div style="text-align:center;padding-top:40px">
+      <div style="color:var(--on-surface-variant);opacity:.6;display:flex;justify-content:center">${icon("edit",{size:28})}</div>
+      <div style="font-size:15px;color:var(--on-surface-variant);margin-top:12px">这一天还没有日记</div>
+      <div class="btn filled" style="margin:16px auto 0;width:fit-content">写日记</div>
+    </div>`;
+  }
+  return list + `<div class="btn filled" style="width:100%;height:48px">继续写今天的日记</div>`;
+}
+
+function richText(e) {
+  let out = "";
+  e.body.forEach(p => {
+    if (p.startsWith("#heading ")) out += `<div class="rt"><div class="heading">${p.slice(9)}</div></div>`;
+    else if (p.startsWith("> ")) out += `<div class="rt"><div class="quote">${p.slice(2)}</div></div>`;
+    else if (p.startsWith("|")) out += `<div class="rt"><div class="rp center">${p.slice(1)}</div></div>`;
+    else out += `<div class="rt"><div class="rp">${p}</div></div>`;
+  });
+  if (e.todo.length) out += `<div class="rt" style="margin-top:4px">${e.todo.map((t,i) =>
+    `<div class="todo"><span class="cbox ${i<2?"on":""}"></span><span style="${i<2?"text-decoration:line-through;color:var(--on-surface-variant)":""}">${t}</span></div>`).join("")}</div>`;
+  return out;
+}
+
+/* ---- 年态 ---- */
+function yearPane(w, areaH, opt) {
+  const cardW = Math.floor((w - G.YEAR_PAD * 2 - G.YEAR_SPACING * 2) / 3);
+  const cardH = Math.floor((areaH - G.YEAR_TITLE - G.YEAR_TITLE_GAP - G.YEAR_SPACING * 3) / 4);
+  const months = [];
+  const ENTRY = { 5: [3,4,8,15,21,27], 9: [1,8,12,25,26], 3: [7,19], 6: [2,11,30], 1: [1,9,17,28], 10: [5,14], 12: [6,24] };
+  let out = `<div style="height:${areaH}px;padding:0 ${G.YEAR_PAD}px;display:flex;flex-direction:column">
+    <div style="height:${G.YEAR_TITLE}px;display:flex;align-items:center">
+      <span style="font-size:32px;font-weight:400">2026年</span>
+    </div>
+    <div style="height:${G.YEAR_TITLE_GAP}px"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,${cardW}px);gap:${G.YEAR_SPACING}px">`;
+  for (let m = 1; m <= 12; m++) {
+    const has = ENTRY[m] || [];
+    const todayD = m === 9 ? 26 : null;
+    const lead = opt.leads ? opt.leads[m-1] : [3,6,6,2,4,0,2,5,1,3,6,1][m-1];
+    const days = [31,28,31,30,31,30,31,31,30,31,30,31][m-1];
+    out += `<div class="mini" style="height:${cardH}px;padding:6px">
+      <div style="height:17px;font-size:13px;font-weight:600;padding-left:2px;${has.length?"":"color:var(--on-surface-variant)"}">${m}月</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr)">`;
+    ["一","二","三","四","五","六","日"].forEach(x => out += `<i style="font-style:normal;font-size:9px;line-height:14px;text-align:center;color:var(--on-surface-variant)">${x}</i>`);
+    const rows = Math.ceil((lead + days) / 7);
+    for (let i = 0; i < rows * 7; i++) {
+      const d = i - lead + 1;
+      if (d < 1 || d > days) { out += `<i style="font-style:normal;font-size:11px;line-height:16px;text-align:center;color:transparent">0</i>`; continue; }
+      const isHas = has.includes(d), isToday = d === todayD;
+      out += `<i style="font-style:normal;font-size:11px;line-height:16px;text-align:center;font-variant-numeric:tabular-nums;
+        ${isToday ? "background:var(--primary);color:var(--on-primary);border-radius:999px;font-weight:600;" :
+          isHas ? "font-weight:700;color:var(--primary);" : "color:var(--on-surface)"}">${d}</i>`;
+    }
+    out += `</div></div>`;
+  }
+  return out + `</div></div>`;
+}
+
+/* ---- 组装：竖屏 ---- */
+function homePortrait(opt) {
+  const bodyH = opt.h - G.STATUS - G.GESTURE;          // 859
+  const contentH = bodyH - G.NAVBAR;                    // 779
+  const calH = contentH - G.TOPBAR;                     // 715
+  let pane;
+  if (opt.mode === "month") pane = monthPane(opt.w, calH, opt);
+  else if (opt.mode === "week") pane = weekPane(opt.w, calH, opt);
+  else pane = yearPane(opt.w, calH, opt);
+  const capsule = opt.mode === "year" ? "2026年" : (opt.mode === "week" ? "九月" : "2026年");
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+      ${homeHeader({ mode: opt.mode, capsule, todayLabel: opt.todayLabel })}
+      ${pane}
+    </div>
+    ${navbar("home")}`;
+  return phone(html, { dark: opt.dark, time: opt.time || "9:41" });
+}
+
+/* ---- 组装：平板横屏（分栏） ---- */
+function homeTabletLandscape(opt) {
+  const W = 1280, H = 800;
+  const contentW = W - 96;                 // 减导航栏
+  const pad = 24, gutter = 24;
+  const masterW = Math.min(440, Math.max(280, Math.round(contentW * 0.44)));
+  const detailW = contentW - masterW - pad * 2 - gutter;
+  const areaH = H - G.STATUS - G.GESTURE - 24;
+  const cellH = Math.floor((areaH - G.COMPACT_TITLE - G.COMPACT_WEEKDAY) / 6);
+  const grid = monthGridHTML({ cellH, rows: 5, selected: 26, today: 26, has: [8, 25],
+    futureFrom: 27, lead: 1, days: 30 });
+  const html = `<div style="flex:1;display:flex;min-height:0">
+    ${rail("home", { fab: false })}
+    <div style="flex:1;display:flex;padding:${pad}px ${pad}px 0;gap:${gutter}px;min-width:0">
+      <div style="width:${masterW}px;flex:none;display:flex;flex-direction:column">
+        <div style="height:${G.COMPACT_TITLE}px;display:flex;align-items:center">
+          <span style="font-size:24px;font-weight:500">九月</span>
+          <span style="font-size:14px;color:var(--on-surface-variant);margin-left:10px">2026年</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);height:${G.COMPACT_WEEKDAY}px;align-items:center">
+          ${["一","二","三","四","五","六","日"].map(l=>`<div style="text-align:center;font-size:12px;color:var(--on-surface-variant)">${l}</div>`).join("")}
+        </div>
+        ${grid}
+        <div style="flex:1"></div>
+        <div style="font-size:12px;color:var(--on-surface-variant);padding:12px 0 0;display:flex;align-items:center;gap:6px">
+          ${icon("unfold_more",{size:16})}上下滑翻月 · 无年份入口
+        </div>
+      </div>
+      <div style="width:1px;background:var(--outline-variant);flex:none"></div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+        <div style="height:44px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:15px;font-weight:600">9月26日 周六</span>
+          <span style="font-size:12px;color:var(--on-surface-variant)">丙午年八月十六</span>
+          <div style="flex:1"></div>
+          <div class="chip elev" style="height:32px;padding:0 14px;color:var(--on-surface);gap:6px">
+            ${icon("calendar_today",{size:16})}<span style="font-weight:500;font-size:13px">今天</span></div>
+        </div>
+        <div style="height:1px;background:var(--outline-variant)"></div>
+        <div style="flex:1;overflow:hidden;padding:16px 0 0;display:flex;justify-content:center">
+          <div style="width:100%;max-width:560px">${dayBlocks("short")}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  return `<div class="device tablet land${opt.dark ? " dark" : ""}"><div class="screen">${statusbar("9:41")}${html}</div></div>`;
+}
+
+/* ---- 组装：平板竖屏（三态 morph + 侧栏） ---- */
+function homeTabletPortrait(opt) {
+  const W = 800, H = 1280;
+  const contentW = W - 96;
+  const contentH = H - G.STATUS - G.GESTURE;
+  const calH = contentH - 8;
+  const mw = Math.min(640, contentW);               // 日历限宽居中
+  const cellH = Math.floor((calH - G.BIG_TITLE - G.WEEKDAY) / 6);
+  const grid = monthGridHTML({ cellH, rows: 5, selected: 26, today: 26, has: [8, 25],
+    futureFrom: 27, lead: 1, days: 30 });
+  const html = `<div style="flex:1;display:flex;min-height:0">
+    ${rail("home", { fab: false })}
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;padding:0 24px">
+      ${homeHeader({ mode: "month", capsule: "2026年" })}
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center">
+        <div style="width:${mw}px">
+          <div style="height:${G.BIG_TITLE}px;display:flex;align-items:center">
+            <span style="font-size:32px;font-weight:400">九月</span>
+          </div>
+          ${weekdayHeader(mw)}
+          ${grid}
+        </div>
+      </div>
+    </div>
+  </div>`;
+  return `<div class="device tablet${opt.dark ? " dark" : ""}"><div class="screen">${statusbar("9:41")}${html}</div></div>`;
+}
+
+/* ========================================================================== */
+const B = [];
+
+B.push(section("1 · 首页 —— 月态（竖屏主场景）",
+  `顶栏 = M3 small top app bar 64dp：左侧「导航胶囊」（outlined assist chip，`+
+  `月态读 <code>2026年</code> → 点它去年历），右侧「今天」（elevated assist chip，标签是相对日）。`+
+  `日历区 = 大标题槽 72 + 星期栏 30 + 6 行格（<code>cellH = (区高 − 102) / 6</code>）。`+
+  `2026-09 只占 5 行，第 6 行留白 —— 格子尺寸对每个月都一样，翻月时不会跳。`,
+  `<div class="row">
+    ${shot("月态 · 竖屏 · 亮色", "今天 = 1.5dp 主色圆环；选中 = 实心圆 + onPrimary；有日记 = 日号下方 <code>min(20, cellW×0.5)</code> × 2dp 主色短横；未来日期 = 整格 alpha 0.35。",
+      homePortrait({ w: 412, h: 915, mode: "month", selected: 26, today: 26, has: [8, 25], futureFrom: 27 }),
+      [{ t: "P0" }, { t: "412 × 915 dp", k: "p" }], 432)}
+    ${shot("月态 · 竖屏 · 深色", "深色下所有角色跟随 <code>colorScheme</code>；动态取色开启时主色取自壁纸。",
+      homePortrait({ w: 412, h: 915, mode: "month", selected: 26, today: 26, has: [8, 25], futureFrom: 27, dark: true, time: "21:08" }),
+      [{ t: "深色", k: "dark" }], 432)}
+    ${shot("月态 · 竖屏 · 空数据", "<b>今天 3 日 = 主色圆环</b>（仅描边），<b>选中 10 日 = 主色实心圆</b>；4 日起为未来日期，用 <code>onSurfaceVariant</code>。无日记时整屏没有任何短横标记。",
+      homePortrait({ w: 412, h: 915, mode: "month", selected: 10, today: 3, has: [], futureFrom: 4, dark: false }),
+      [{ t: "空态" }], 432)}
+  </div>`));
+
+B.push(section("2 · 首页 —— 周态与年态（竖屏）",
+  `周态：星期栏 + 68dp 周条 + 分隔线 + 40dp 日期标题行 + 当日日记卡片；`+
+  `周条只占 1 行，其余高度全部给内容。年态：顶栏左胶囊隐藏（iOS 同），`+
+  `12 个迷你月历按 3 × 4 排列，卡内只有日号、不画农历。`,
+  `<div class="row">
+    ${shot("周态 · 竖屏", "点月态里任意一天 → 整屏 morph 进周态（滑动，600ms → Android 用 M3 <code>emphasized</code> 400ms）。顶栏左胶囊变成 <code>‹ 九月</code>，点它回月态。",
+      homePortrait({ w: 412, h: 915, mode: "week", selected: 26, today: 26, has: [8, 25], variant: "full" }),
+      [{ t: "P0" }], 432)}
+    ${shot("周态 · 竖屏 · 空态", "这一天没有日记：图标 + 文案 + 一枚 filled 按钮（仅当「该日」不是未来时出现）。",
+      homePortrait({ w: 412, h: 915, mode: "week", selected: 28, today: 26, has: [8, 25], variant: "empty" }),
+      [{ t: "空态" }], 432)}
+    ${shot("年态 · 竖屏", "迷你月：<code>3 列 × 4 行</code>，卡片 <code>(W−32−12)/3 × (H−62−8−18)/4</code>；有日记的日号用主色加粗，今天 = 实心圆。点某个月 → 缩放 morph 回该月。",
+      homePortrait({ w: 412, h: 915, mode: "year", selected: 26, today: 26 }),
+      [{ t: "P0" }], 432)}
+  </div>`));
+
+B.push(section("3 · 首页 —— 平板（横屏分栏 / 竖屏三态）",
+  `平板 ≥600dp 起换成 <b>NavigationRail</b>；横屏（宽 &gt; 高且内容宽 ≥700dp）走<b>左右分栏</b>：`+
+  `左栏月历（紧凑标题 34 + 星期栏 26，上下滑翻月），右栏选中日。竖屏保持竖屏那套三态 morph，`+
+  `只把日历限宽 640dp 居中。`,
+  `<div class="row">
+    ${shot("横屏 · 平板 1280 × 800", "顶栏整条隐藏：<b>分栏下没有年份入口、没有周态</b>（与 iOS 的 <code>settleToMonth()</code> 一致）。左栏只有上下滑翻月与点日期；「今天」在右栏标题行。",
+      homeTabletLandscape({}), [{ t: "横屏", k: "p" }, { t: "1280 × 800 dp" }], 1304)}
+    ${shot("横屏 · 平板 · 深色", "分栏下左栏月历可降级：可用高不足时自动换成「周条」（一行），保证内容永不被压扁。",
+      homeTabletLandscape({ dark: true }), [{ t: "深色", k: "dark" }], 1304)}
+    ${shot("竖屏 · 平板 800 × 1280", "侧栏 96dp + 日历限宽 640dp 居中；年/月/周三态与 morph 与手机完全一致。",
+      homeTabletPortrait({}), [{ t: "竖屏", k: "p" }, { t: "800 × 1280 dp" }], 824)}
+  </div>`));
+
+renderBoard({
+  title: "首页 · 三态日历（月 / 周 / 年）",
+  sub: `整屏三态 morph 是这一屏的全部交互：点日期 = 月→周（滑动），点年月胶囊 = 月→年（缩放），` +
+       `上下滑 = 翻月/翻年，左右滑 = 周态下翻周。视觉全部换成 Material 3：顶栏 64dp、` +
+       `胶囊用 assist chip、Toast 用 Snackbar、底栏用 NavigationBar。`,
+  meta: "参照：iOS JustADiary/Views/Home/{HomeView,CalendarLayout,CalendarPaneViews,DayContentView}.swift · Android 现有实现 ui/home/",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

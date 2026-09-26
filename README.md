@@ -19,6 +19,16 @@
 > ✅ **R2 已把 v2 的 P0–P5 落地**（见 [`docs/migration-progress.md`](docs/migration-progress.md) 的 R2 一节）：
 > 首页恢复 iOS 的整屏三态 morph、月历只画当月日期、年历恢复 12 个迷你月历、
 > 顶栏去掉自造的月/周按钮、上下滑翻月重新接线，并修掉 9 条缺陷（含 2 条严重）。
+>
+> 📐 **2026-09-26：Android 设计规范 v3 已定稿** ——
+> **[`docs/android-design/`](docs/android-design/README.md)** 是**当前唯一的权威界面规范**
+> （取代 `docs/design-spec.md` 与 `docs/ui-design-plan.md` v2；v2 的 8 处自相矛盾已在
+> [README §5](docs/android-design/README.md) 逐条裁决）。
+> 依据是 iOS 最新代码（commit `0b07050`）的逐行分析，IOS 侧证据在 `docs/ios-reference/v3-*.md`。
+> 三条前提：**视觉 = Material 3 / Material You**、**层级与交互对齐 iOS**、
+> **手机锁竖屏、横屏只在平板上出现**。
+> 逐屏设计稿（含横屏与深色）见 **[`docs/android-design/mockups/`](docs/android-design/mockups/index.html)**；
+> 差距清单与实施批次见 [`docs/android-design/07-ios-map-and-plan.md`](docs/android-design/07-ios-map-and-plan.md)。
 
 ## 关键约定
 
@@ -27,7 +37,8 @@
 | 应用包名（applicationId） | `com.cov.justdiary` |
 | 与 iOS 版的关系 | 包名与 iOS 版**完全一致**；debug 也**不加** `applicationIdSuffix` |
 | minSdk / targetSdk / compileSdk | 33 / 36 / 37 |
-| 设计语言 | **Material 3 + 动态取色（Material You）+ 原生自适应导航**；不模仿 iOS 的 Liquid Glass，界面按 Google 规范重新设计，只对齐功能、交互与动画 |
+| 设计语言 | **Material 3 + 动态取色（Material You）+ 原生自适应导航**；不模仿 iOS 的 Liquid Glass，界面按 Google 规范重新设计，只对齐功能、交互与动画（详见 [`docs/android-design/01-design-system.md`](docs/android-design/01-design-system.md)） |
+| 方向 | **手机锁竖屏**（`sw < 600dp` → `SCREEN_ORIENTATION_PORTRAIT`）；**平板允许横竖屏**（`sw ≥ 600dp` → `FULL_SENSOR`）。横屏界面只是平板设计 |
 | 第三方 UI 库 | **零**（不引入任何玻璃/模糊库；柱状图等自绘） |
 | 默认分支 | `main` |
 

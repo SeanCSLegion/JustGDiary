@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>07 · 图片、地点与忙碌态</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   编辑器周边的附加界面：位置精度菜单 / 插图后的编辑卡 / 图片全屏预览 /
+   忙碌遮罩 / 语言与主题下拉菜单
+   iOS 参考：DiaryPageView.swift（locationRow、showPhotoPicker）、MediaViews.swift、
+            Components.swift（BusyOverlay、Menu）
+   ========================================================================== */
+
+const A = { STATUS: 32, GESTURE: 24, TOPBAR: 64 };
+
+function editorTopBar() {
+  return `<div class="topbar" style="padding:0 8px">
+    <div class="iconbtn">${icon("back")}</div><div class="sp"></div>
+    <div class="iconbtn">${icon("image")}</div>
+    <div class="iconbtn">${icon("history")}</div>
+    <div class="iconbtn on">${icon("check")}</div>
+  </div>`;
+}
+
+function formatBar() {
+  const b = (n, on) => `<div class="fb ${on ? "on" : ""}">${icon(n, { size: 20 })}</div>`;
+  return `<div class="formatbar">${b("format_size")}${b("align_center")}<div class="sep"></div>${b("list")}${b("quote")}${b("checklist")}<div class="sep"></div>${b("bold", true)}${b("italic")}${b("strikethrough")}${b("underline")}</div>`;
+}
+
+/* 1 · 图片插入后的编辑卡 */
+function editorWithImage(opt) {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    ${editorTopBar()}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+      <div style="width:380px">
+        <div class="card" style="padding:16px">
+          <div class="metapill" style="margin-bottom:10px">${icon("schedule",{size:13})}21:40</div>
+          <div class="rt">
+            <div style="font-size:22px;line-height:28px;font-weight:500">外滩的夜</div>
+            <div class="rp">从浦东机场出来，磁悬浮只用了八分钟。</div>
+            <div style="height:${opt.tall ? 220 : 150}px;background:linear-gradient(140deg,#C9D6E8,#9FB3CC);border-radius:12px;margin:10px 0;display:flex;align-items:center;justify-content:center;color:#44536B;font-size:12px">
+              图片 · 宽度 = 正文列宽，无最大高度上限，圆角 12dp
+            </div>
+            <div class="rp">晚上在外滩走了一圈。<span style="display:inline-block;width:2px;height:17px;background:var(--primary);vertical-align:-3px"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="keyboard" style="height:230px">
+      <div class="krow">${["q","w","e","r","t","y","u","i","o","p"].map(k=>`<div class="k">${k}</div>`).join("")}</div>
+      <div class="krow">${["a","s","d","f","g","h","j","k","l"].map(k=>`<div class="k">${k}</div>`).join("")}</div>
+      <div class="krow"><div class="k wide">⇧</div>${["z","x","c","v","b","n","m"].map(k=>`<div class="k">${k}</div>`).join("")}<div class="k wide">⌫</div></div>
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:8px;display:flex;justify-content:center;padding:0 12px">${formatBar()}</div>
+  </div>`;
+  return phone(html, { time: "21:32" });
+}
+
+/* 2 · 图片全屏预览 */
+function imagePreview() {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;background:#0C0E13;position:relative">
+    <div class="topbar flat" style="padding:0 8px;background:transparent;color:#E2E2E9">
+      <div class="iconbtn" style="color:#E2E2E9">${icon("close")}</div>
+      <div class="sp"></div>
+      <div class="iconbtn" style="color:#E2E2E9">${icon("download")}</div>
+      <div class="iconbtn" style="color:#E2E2E9">${icon("share")}</div>
+    </div>
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:0 12px">
+      <div style="width:100%;height:420px;background:linear-gradient(140deg,#C9D6E8,#9FB3CC);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#44536B;font-size:12px">
+        双击缩放 · 双指捏合 · 下滑关闭
+      </div>
+    </div>
+    <div style="text-align:center;color:#C4C6D0;font-size:12px;padding-bottom:18px">2026-09-08 21:32 · 2048 × 1536</div>
+  </div>`;
+  return `<div class="device phone dark"><div class="screen">${statusbar("21:33")}${html}</div></div>`;
+}
+
+/* 3 · 位置精度菜单（编辑已有片段） */
+function locationMenu() {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    ${editorTopBar()}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+      <div style="width:380px">
+        <div class="card" style="padding:16px">
+          <div class="metapill" style="margin-bottom:10px">${icon("schedule",{size:13})}21:40</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span style="display:flex;color:var(--on-surface-variant)">${icon("place",{size:16})}</span>
+            <span style="font-size:14px">中国 · 上海市 · 浦东新区</span>
+            <div style="flex:1"></div>
+            <span style="font-size:13px;color:var(--primary);font-weight:500">显示精度</span>
+          </div>
+          <div class="rt"><div class="rp">从浦东机场出来，磁悬浮只用了八分钟。</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;right:16px;top:120px;background:var(--surface-container-high);border-radius:12px;box-shadow:var(--shadow-2);padding:8px 0;width:240px">
+      ${[["精确 · 浦东新区", true], ["到城市 · 上海市", false], ["到省份 · 中国", false], ["不显示地点", false]].map(r => `
+        <div style="display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;font-size:15px;${r[1] ? "color:var(--primary);font-weight:600" : ""}">
+          ${r[1] ? icon("check", { size: 20 }) : `<span style="width:20px"></span>`}${r[0]}
+        </div>`).join("")}
+      <div style="height:1px;background:var(--outline-variant);margin:6px 0"></div>
+      <div style="height:48px;padding:0 16px;display:flex;align-items:center;font-size:15px;color:var(--error)">删除地点</div>
+    </div>
+    <div class="scrim" style="background:rgba(0,0,0,.16)"></div>
+    ${navbar("home")}
+  </div>`;
+  return phone(html, { time: "21:35" });
+}
+
+/* 4 · 忙碌遮罩（导出 / 导入备份） */
+function busyOverlay() {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    <div style="padding:8px 16px 0"><span style="font-size:28px;font-weight:400">设置</span></div>
+    <div style="flex:1;overflow:hidden;padding:16px 16px 0">
+      <div class="group"><div class="ghead">数据</div>
+        <div style="display:flex;align-items:center;gap:16px;min-height:64px;padding:10px 16px">
+          <div class="licon" style="width:40px;height:40px">${icon("upload",{size:20})}</div>
+          <div style="flex:1"><div style="font-size:16px">导出全部日记</div>
+            <div style="font-size:13px;color:var(--on-surface-variant);margin-top:2px">生成 .jdiary 备份包</div></div>
+          ${icon("chevron_right",{size:20,style:"color:var(--on-surface-variant)"})}
+        </div>
+      </div>
+    </div>
+    ${navbar("settings")}
+    <div class="scrim"></div>
+    <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--surface-container-high);border-radius:28px;padding:28px 36px;display:flex;flex-direction:column;align-items:center;gap:16px;box-shadow:var(--shadow-3)">
+      <div style="width:44px;height:44px;border-radius:999px;border:4px solid var(--primary-container);border-top-color:var(--primary);transform:rotate(30deg)"></div>
+      <div style="font-size:13px;color:var(--on-surface)">正在生成备份…</div>
+    </div>
+  </div>`;
+  return phone(html, { time: "21:40" });
+}
+
+/* 5 · 语言 / 主题下拉菜单（M3 DropdownMenu） */
+function languageMenu() {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    <div style="padding:8px 16px 0"><span style="font-size:28px;font-weight:400">设置</span></div>
+    <div style="flex:1;overflow:hidden;padding:16px 16px 0">
+      <div class="group"><div class="ghead">通用</div>
+        <div style="display:flex;align-items:center;gap:16px;min-height:64px;padding:10px 16px;background:var(--surface-container-high)">
+          <div class="licon" style="width:40px;height:40px">${icon("language",{size:20})}</div>
+          <div style="flex:1"><div style="font-size:16px">语言</div>
+            <div style="font-size:13px;color:var(--on-surface-variant);margin-top:2px">应用内显示语言</div></div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:14px;color:var(--on-surface-variant)">跟随系统</span>
+            ${icon("chevron_right",{size:20,style:"color:var(--on-surface-variant)"})}</div>
+        </div>
+      </div>
+    </div>
+    <div style="position:absolute;right:16px;top:130px;background:var(--surface-container-high);border-radius:12px;box-shadow:var(--shadow-2);padding:8px 0;width:220px">
+      ${[["跟随系统", true], ["中文", false], ["English", false]].map(r => `
+        <div style="display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;font-size:15px;${r[1] ? "color:var(--primary);font-weight:600" : ""}">
+          ${r[1] ? icon("check", { size: 20 }) : `<span style="width:20px"></span>`}${r[0]}
+        </div>`).join("")}
+    </div>
+    <div class="scrim" style="background:rgba(0,0,0,.16)"></div>
+    ${navbar("settings")}
+  </div>`;
+  return phone(html, { time: "21:42" });
+}
+
+const B = [];
+
+B.push(section("1 · 编辑器的图片与地点",
+  `图片宽度 = <b>正文列宽</b>（不设最大高度），圆角 12dp，上下各 10dp 段距；` +
+  `旋转屏幕只重新按列宽适配图片，<b>不动文本与光标</b>。` +
+  `地点行的左半是<b>状态</b>（地名）、右半才是<b>动作</b>（显示精度 / 重新获取位置）—— 两者文案不得重复。`,
+  `<div class="row">
+    ${shot("插图后的编辑卡", "图片是正文里的一个「块」，前后各有段距；光标在图片下方仍可见（caret-not-hidden）。",
+      editorWithImage({}), [{ t: "P0" }], 432)}
+    ${shot("地点精度菜单（编辑已有片段）", "编辑已有片段<b>只能改显示精度</b>，菜单里没有「重新获取位置」；只有新建片段才取一次位置。",
+      locationMenu(), [{ t: "P0" }], 432)}
+  </div>`));
+
+B.push(section("2 · 图片全屏预览与忙碌态",
+  `图片点开是全屏预览（阅读态与编辑态共用）：下滑或点关闭退出，双击在「适宽 / 原始」之间切换。` +
+  `所有耗时操作（导出 / 导入备份）统一用 <b>不可取消的忙碌遮罩</b>：全屏 scrim + 圆角卡片 + 不确定进度。`,
+  `<div class="row">
+    ${shot("图片全屏预览", "深色沉浸底（不跟随主题）；顶栏三个动作：关闭 / 保存到相册 / 分享。",
+      imagePreview(), [{ t: "P1" }], 432)}
+    ${shot("忙碌遮罩 · 导出备份", "文案按动作区分：「正在生成备份…」/「正在导入备份…」；遮罩期间不接受任何输入。",
+      busyOverlay(), [{ t: "P1" }], 432)}
+    ${shot("下拉菜单 · 语言", "M3 <code>DropdownMenu</code>：当前项用 <code>primary</code> + 勾选，非当前项用 <code>onSurface</code>；菜单锚在行尾。",
+      languageMenu(), [{ t: "P1" }], 432)}
+  </div>`));
+
+renderBoard({
+  title: "图片 · 地点 · 忙碌态 · 下拉菜单",
+  sub: `这些是主流程之外的「补位界面」，但它们最容易在移植时被简化掉。` +
+       `三条必须保留的规则：<b>图片宽度跟正文列宽走</b>、<b>地点行左状态右动作</b>、` +
+       `<b>忙碌遮罩不可取消</b>（备份导入中途取消会留下半写状态）。`,
+  meta: "参照：iOS JustADiary/Views/Diary/{DiaryPageView,MediaViews}.swift、Views/Components/Components.swift",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

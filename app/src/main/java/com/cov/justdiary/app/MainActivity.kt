@@ -1,6 +1,7 @@
 package com.cov.justdiary.app
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -14,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.cov.justdiary.JustDiaryApplication
+import com.cov.justdiary.R
 import com.cov.justdiary.service.Log
 import com.cov.justdiary.ui.root.RootScreen
 import com.cov.justdiary.ui.settings.SettingsViewModel
@@ -49,6 +51,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
+        applyOrientationPolicy()
         super.onCreate(savedInstanceState)
         LaunchIntent.consume(intent)
         DebugFlags.consume(intent)
@@ -87,6 +90,24 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             runCatching { settingsViewModel.onForeground() }
                 .onFailure { Log.app.w("回前台重排提醒失败：${it.message}") }
+        }
+    }
+
+    /**
+     * 方向策略：**手机锁竖屏，平板自由旋转**（设计规范 §1）。
+     *
+     * 判据用 `sw600dp`（最小宽度）而不是当前宽度：后者会随旋转变化，
+     * 也会在折叠屏展开时跳变 —— 那样会出现"展开后突然允许横屏"的怪异行为。
+     *
+     * 在 `onCreate` 最前面调用，避免先按系统方向渲染一帧再转回来。
+     * 注意 targetSdk 36 起，Android 16 对**大屏**（`sw ≥ 600dp`）会忽略方向声明 ——
+     * 这与本策略一致（大屏本来就要自由旋转），手机上的锁定仍然生效。
+     */
+    private fun applyOrientationPolicy() {
+        requestedOrientation = if (resources.getBoolean(R.bool.is_tablet)) {
+            ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 }

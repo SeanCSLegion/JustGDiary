@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>03 · 日记页</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   日记页 · 阅读 / 编辑 / 分享
+   结构照抄 iOS Views/Diary/DiaryPageView.swift；控件换成 Material 3：
+   悬浮玻璃顶栏 → TopAppBar 64dp；底部无动作栏（iOS 也没有）；
+   格式栏 → 悬浮 Surface（28dp 圆角、tonal elevation）；分享 sheet → ModalBottomSheet。
+   ========================================================================== */
+
+const DIA = { STATUS: 32, GESTURE: 24, NAVBAR: 80, TOPBAR: 64, FORMAT: 56, KEYBOARD: 268 };
+
+/* 正文列宽：min(660, 宽 − 32)；卡片内边距 16（M3 卡片），文字宽 = 列宽 − 32 */
+function column(w) { return Math.min(660, w - 32); }
+
+function heroCard(opt) {
+  const sub = opt.empty
+    ? `<div style="font-size:13px;color:var(--on-surface-variant);margin-top:2px">这一天没有留下日记。</div>`
+    : `<div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+         ${opt.showTime ? `<span style="font-size:13px;color:var(--on-surface-variant)">21:40</span>` : ""}
+         <span style="font-size:13px;color:var(--on-surface-variant)">1 个片段</span>
+       </div>
+       <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:13px;color:var(--on-surface-variant)">
+         ${icon("place", { size: 14 })}浦东新区 · 上海市 · 中国
+       </div>`;
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:20px;font-weight:500">9月8日 周二</span>
+      ${opt.today ? `<span style="font-size:12px;font-weight:500;background:var(--primary);color:var(--on-primary);border-radius:999px;padding:3px 8px">今日</span>` : ""}
+    </div>
+    ${sub}
+  </div>`;
+}
+
+function entryCard(opt) {
+  const parts = [
+    { k: "title", t: "字体样式自检" },
+    { k: "body", t: "这一段是正文，用来和下面的标题、引用对比字号。" },
+    { k: "heading", t: "小标题" },
+    { k: "quote", t: "引用块比正文小一级，并且有自己的底色。" },
+    { k: "body", t: "这一段带<b>粗体</b>、<i>斜体</i>、<u>下划线</u>和<s>删除线</s>。" },
+    { k: "body center", t: "这一行是居中的正文。" },
+  ];
+  const body = parts.map(p => {
+    const isCenter = p.k.includes("center");
+    const cls = p.k.replace(" center", "") === "body" ? "rp" : p.k.replace(" center", "");
+    return `<div class="${cls}" style="${isCenter ? "text-align:center;" : ""}">${p.t}</div>`;
+  }).join("") + `<div class="todo"><span class="cbox on"></span><span style="text-decoration:line-through;color:var(--on-surface-variant)">验证标题层级</span></div>
+    <div class="todo"><span class="cbox on"></span><span style="text-decoration:line-through;color:var(--on-surface-variant)">验证引用底色</span></div>
+    <div class="todo"><span class="cbox"></span><span>验证行距</span></div>`;
+  return `<div class="card" style="padding:16px">
+    ${opt.showTime ? `<div class="timeslot" style="margin-bottom:2px">${icon("schedule",{size:14})}21:40</div>` : ""}
+    <div style="font-size:12px;color:var(--on-surface-variant);display:flex;align-items:center;gap:6px;margin-bottom:8px">
+      ${icon("place",{size:13})}浦东新区 · 上海市 · 中国
+    </div>
+    <div class="rt">${body}</div>
+  </div>`;
+}
+
+function diaryTopBar(mode) {
+  const back = `<div class="iconbtn">${icon("back")}</div>`;
+  let actions = "";
+  if (mode === "read") actions = ["search", "edit", "share"].map(i => `<div class="iconbtn">${icon(i)}</div>`).join("");
+  if (mode === "edit") actions = ["image", "history", "check"].map((i, k) =>
+    `<div class="iconbtn ${k===2?"on":""}">${icon(i)}</div>`).join("");
+  if (mode === "select") actions = `<div class="iconbtn" style="color:var(--error)">${icon("delete")}</div>`;
+  return `<div class="topbar" style="padding:0 8px">${back}<div class="sp"></div>${actions}</div>`;
+}
+
+/* 阅读态 */
+function diaryRead(opt) {
+  const w = opt.w, col = column(w);
+  const bodyH = opt.h - DIA.STATUS - DIA.GESTURE - DIA.NAVBAR;
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    ${diaryTopBar("read")}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+      <div style="width:${col}px;flex:1;overflow:hidden">
+        ${opt.search ? `<div class="searchbar" style="height:52px;margin-bottom:12px">
+            ${icon("search",{size:20})}<span style="flex:1;font-size:15px;color:var(--on-surface)">字体</span>
+            <span style="font-size:12px;background:var(--primary-container);color:var(--on-primary-container);border-radius:999px;padding:2px 8px">1/3</span>
+            <div class="iconbtn" style="width:40px;height:40px">${icon("expand_more",{size:22,style:"transform:rotate(180deg)"})}</div>
+            <div class="iconbtn" style="width:40px;height:40px">${icon("expand_more",{size:22})}</div>
+          </div>` : ""}
+        ${heroCard({ today: opt.today !== false, empty: opt.empty, showTime: true })}
+        ${opt.empty ? "" : entryCard({ showTime: true })}
+      </div>
+    </div>
+    ${navbar("home")}
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:52" });
+}
+
+/* 编辑态（含键盘与格式栏） */
+function diaryEdit(opt) {
+  const w = opt.w, col = column(w);
+  const keyboard = opt.keyboard !== false;
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    ${diaryTopBar("edit")}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center;min-height:0">
+      <div style="width:${col}px;flex:1;overflow:hidden">
+        <div class="card" style="padding:16px">
+          <div class="metapill" style="margin-bottom:10px">${icon("schedule",{size:13})}21:40</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:13px;color:var(--on-surface-variant)">浦东新区 · 上海市 · 中国</span>
+            <span style="font-size:13px;color:var(--primary);font-weight:500">重新获取位置</span>
+          </div>
+          <div class="rt">
+            <div class="title">字体样式自检</div>
+            <div class="body">这一段是正文，用来和下面的标题、引用对比字号。<span style="display:inline-block;width:2px;height:18px;background:var(--primary);vertical-align:-4px"></span></div>
+            <div class="heading">小标题</div>
+          </div>
+          <div style="color:var(--on-surface-variant);font-size:15px;margin-top:4px">开始记录这一刻的想法…</div>
+        </div>
+      </div>
+    </div>
+    ${keyboard ? `<div class="keyboard">
+      <div class="krow">${["q","w","e","r","t","y","u","i","o","p"].map(k=>`<div class="k">${k}</div>`).join("")}</div>
+      <div class="krow">${["a","s","d","f","g","h","j","k","l"].map(k=>`<div class="k">${k}</div>`).join("")}</div>
+      <div class="krow"><div class="k wide">⇧</div>${["z","x","c","v","b","n","m"].map(k=>`<div class="k">${k}</div>`).join("")}<div class="k wide">⌫</div></div>
+      <div class="krow"><div class="k wide">?123</div><div class="k">，</div><div class="k space">中文</div><div class="k">。</div><div class="k wide">↵</div></div>
+    </div>` : ""}
+    <div style="position:absolute;left:0;right:0;bottom:${keyboard ? 8 : 24}px;display:flex;justify-content:center;padding:0 12px">
+      <div class="formatbar">${formatButtons()}</div>
+    </div>
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:53" });
+}
+
+/** 格式栏 9 项：段落样式 · 居中 ‖ 列表 · 引用 · 待办 ‖ B I S U */
+function formatButtons(active) {
+  const on = active || ["bold"];
+  const b = (name, label, force) =>
+    `<div class="fb ${(force === undefined ? on.includes(name) : force) ? "on" : ""}" title="${label}">${icon(name, { size: 20 })}</div>`;
+  return [
+    b("format_size", "段落样式", false),
+    b("align_center", "居中", false),
+    `<div class="sep"></div>`,
+    b("list", "列表", false),
+    b("quote", "引用", false),
+    b("checklist", "待办", false),
+    `<div class="sep"></div>`,
+    b("bold", "粗体"),
+    b("italic", "斜体"),
+    b("strikethrough", "删除线"),
+    b("underline", "下划线"),
+  ].join("");
+}
+
+/* 分享：ModalBottomSheet（长图预览 + 动作） */
+function shareSheet(opt) {
+  const w = opt.w, col = column(w);
+  const longImage = `<div style="background:var(--surface-container-lowest);border-radius:12px;border:1px solid var(--outline-variant);padding:18px 16px;color:var(--on-surface)">
+    <div style="font-size:19px;font-weight:600">9月8日 周二</div>
+    <div style="font-size:12px;color:var(--on-surface-variant);margin-top:2px">21:40 · 浦东新区 · 上海市 · 中国</div>
+    <div style="height:1px;background:var(--outline-variant);margin:12px 0"></div>
+    <div class="rt">
+      <div class="timeslot" style="margin-bottom:4px">${icon("schedule",{size:13})}21:40</div>
+      <div style="font-size:22px;line-height:30px;margin-bottom:6px">字体样式自检</div>
+      <div class="rp" style="font-size:14px;line-height:21px;margin-bottom:6px">这一段是正文，用来和下面的标题、引用对比字号。</div>
+      <div class="heading" style="font-size:17px;line-height:24px;margin-bottom:6px">小标题</div>
+      <div class="quote" style="font-size:12.5px;line-height:18px;padding:5px 8px;margin-bottom:6px">引用块比正文小一级，并且有自己的底色。</div>
+      <div class="rp" style="font-size:14px;line-height:21px">这一段带<b>粗体</b>、<i>斜体</i>、<u>下划线</u>和<s>删除线</s>。</div>
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--on-surface-variant);margin-top:16px">一页时光</div>
+  </div>`;
+
+  const bodyH = opt.h - DIA.STATUS - DIA.GESTURE - DIA.NAVBAR;
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    ${diaryTopBar("read")}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+      <div style="width:${col}px;flex:1;overflow:hidden">
+        ${opt.search ? `<div class="searchbar" style="height:52px;margin-bottom:12px">
+            ${icon("search",{size:20})}<span style="flex:1;font-size:15px;color:var(--on-surface)">字体</span>
+            <span style="font-size:12px;background:var(--primary-container);color:var(--on-primary-container);border-radius:999px;padding:2px 8px">1/3</span>
+            <div class="iconbtn" style="width:40px;height:40px">${icon("expand_more",{size:22,style:"transform:rotate(180deg)"})}</div>
+            <div class="iconbtn" style="width:40px;height:40px">${icon("expand_more",{size:22})}</div>
+          </div>` : ""}
+        ${heroCard({ today: opt.today !== false, empty: opt.empty, showTime: true })}
+        ${opt.empty ? "" : entryCard({ showTime: true })}
+      </div>
+    </div>
+    ${navbar("home")}
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:52" });
+}
+
+/* 编辑态（含键盘与格式栏） */
+function diaryEdit(opt) {
+  const w = opt.w, col = column(w);
+  const keyboard = opt.keyboard !== false;
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    ${diaryTopBar("edit")}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center;min-height:0">
+      <div style="width:${col}px;flex:1;overflow:hidden">
+        <div class="card" style="padding:16px">
+          <div class="metapill" style="margin-bottom:10px">${icon("schedule",{size:13})}21:40</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <span style="font-size:13px;color:var(--on-surface-variant)">浦东新区 · 上海市 · 中国</span>
+            <span style="font-size:13px;color:var(--primary);font-weight:500">重新获取位置</span>
+          </div>
+          <div class="rt">
+            <div class="title">字体样式自检</div>
+            <div class="body">这一段是正文，用来和下面的标题、引用对比字号。<span style="display:inline-block;width:2px;height:18px;background:var(--primary);vertical-align:-4px"></span></div>
+            <div class="heading">小标题</div>
+          </div>
+          <div style="color:var(--on-surface-variant);font-size:15px;margin-top:4px">开始记录这一刻的想法…</div>
+        </div>
+      </div>
+    </div>
+    ${keyboard ? `<div class="keyboard">
+      <div class="krow">${["q","w","e","r","t","y","u","i","o","p"].map(k=>`<div class="k">${k}</div>`).join("")}</div>
+      <div class="krow">${["a","s","d","f","g","h","j","k","l"].map(k=>`<div class="k">${k}</div>`).join("")}</div>
+      <div class="krow"><div class="k wide">⇧</div>${["z","x","c","v","b","n","m"].map(k=>`<div class="k">${k}</div>`).join("")}<div class="k wide">⌫</div></div>
+      <div class="krow"><div class="k wide">?123</div><div class="k">，</div><div class="k space">中文</div><div class="k">。</div><div class="k wide">↵</div></div>
+    </div>` : ""}
+    <div style="position:absolute;left:0;right:0;bottom:${keyboard ? 8 : 24}px;display:flex;justify-content:center;padding:0 12px">
+      <div class="formatbar">${formatButtons()}</div>
+    </div>
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:53" });
+}
+
+/** 格式栏 9 项：段落样式 · 居中 ‖ 列表 · 引用 · 待办 ‖ B I S U */
+function formatButtons(active) {
+  const on = active || ["bold"];
+  const b = (name, label, force) =>
+    `<div class="fb ${(force === undefined ? on.includes(name) : force) ? "on" : ""}" title="${label}">${icon(name, { size: 20 })}</div>`;
+  return [
+    b("format_size", "段落样式", false),
+    b("align_center", "居中", false),
+    `<div class="sep"></div>`,
+    b("list", "列表", false),
+    b("quote", "引用", false),
+    b("checklist", "待办", false),
+    `<div class="sep"></div>`,
+    b("bold", "粗体"),
+    b("italic", "斜体"),
+    b("strikethrough", "删除线"),
+    b("underline", "下划线"),
+  ].join("");
+}
+
+/* 分享：ModalBottomSheet（长图预览 + 动作） */
+function shareSheet(opt) {
+  const w = opt.w, col = column(w);
+  const longImage = `<div style="background:var(--surface-container-lowest);border-radius:12px;border:1px solid var(--outline-variant);padding:18px 16px;color:#1A1B20;font-family:var(--font)">
+    <div style="font-size:19px;font-weight:600">9月8日 周二</div>
+    <div style="font-size:12px;color:#5A5D68;margin-top:2px">21:40 · 浦东新区 · 上海市 · 中国</div>
+    <div class="hr" style="background:#E2E2E9;margin:12px 0"></div>
+    <div class="rt" style="color:#1A1B20">
+      <div class="timeslot" style="color:#2563EB;margin-bottom:4px">${icon("schedule",{size:13})}21:40</div>
+      <div style="font-size:22px;line-height:30px;margin-bottom:6px">字体样式自检</div>
+      <div style="font-size:14px;line-height:21px;margin-bottom:6px">这一段是正文，用来和下面的标题、引用对比字号。</div>
+      <div style="font-size:17px;line-height:24px;font-weight:500;margin-bottom:6px">小标题</div>
+      <div style="font-size:12.5px;line-height:18px;background:#EDEDF4;border-radius:4px;padding:5px 8px;margin-bottom:6px">引用块比正文小一级，并且有自己的底色。</div>
+      <div style="font-size:14px;line-height:21px">这一段带<b>粗体</b>、<i>斜体</i>、<u>下划线</u>和<s>删除线</s>。</div>
+    </div>
+    <div style="text-align:center;font-size:11px;color:#8E9099;margin-top:16px">一页时光</div>
+  </div>`;
+
+  const bodyH = opt.h - DIA.STATUS - DIA.GESTURE - DIA.NAVBAR;
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    ${diaryTopBar("read")}
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+      <div style="width:${col}px">
+        ${heroCard({ today: true, showTime: true })}
+        <div style="opacity:.35">${entryCard({ showTime: true })}</div>
+      </div>
+    </div>
+    ${navbar("home")}
+    <div class="scrim"></div>
+    <div class="sheet" style="max-height:none;padding:8px 0 20px">
+      <div class="handle"></div>
+      <div class="stitle">分享长图</div>
+      <div style="padding:4px 24px 0;font-size:12.5px;color:var(--on-surface-variant)">JustDiary-2026-09-08.png · 1160 × 1680</div>
+      <div style="padding:14px 24px;display:flex;justify-content:center">
+        <div style="width:200px">${longImage}</div>
+      </div>
+      <div style="padding:0 24px;display:flex;gap:12px">
+        <div class="btn filled" style="flex:1;height:48px">${icon("share",{size:18})}分享…</div>
+        <div class="btn tonal" style="flex:1;height:48px">${icon("download",{size:18})}保存到相册</div>
+      </div>
+      <div style="padding:14px 24px 0;font-size:12px;color:var(--on-surface-variant);line-height:1.6">
+        「分享…」拉起系统分享面板（Android Sharesheet）：「保存到相册」写入 <code>Pictures/JustGDiary</code>。
+      </div>
+    </div>
+  </div>`;
+  return phone(html, { dark: opt.dark, time: "13:54" });
+}
+
+/* 平板横屏：日记页仍是单列，只是列宽被 660 卡住居中 */
+function diaryTabletLandscape(opt) {
+  const W = 1280, H = 800;
+  const col = 660;
+  const html = `<div style="flex:1;display:flex;min-height:0">
+    ${rail("home", { fab: false })}
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      ${diaryTopBar("read")}
+      <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+        <div style="width:${col}px">
+          ${heroCard({ today: true, showTime: true })}
+          ${entryCard({ showTime: true })}
+        </div>
+      </div>
+    </div>
+  </div>`;
+  return `<div class="device tablet land${opt.dark ? " dark" : ""}"><div class="screen">${statusbar("13:52")}${html}${gesturebar()}</div></div>`;
+}
+
+const B = [];
+
+B.push(section("1 · 日记阅读态",
+  `顶栏 = M3 <b>TopAppBar 64dp</b>（iOS 的悬浮玻璃胶囊收成标准顶栏）：返回 + 搜索 / 编辑 / 分享。`+
+  `「编辑」只在<b>今天</b>出现（历史日记默认只读）。正文列宽 <code>min(660, 屏宽 − 32)</code> 居中，`+
+  `阅读与编辑用<b>同一条列宽</b> —— 进出编辑卡片时文字不会左右跳。`,
+  `<div class="row">
+    ${shot("阅读态 · 竖屏", "Hero 卡常驻（即使是空的一天）。日期 20sp medium，右侧「今日」胶囊只在当天出现；第二行是首条时间 + 「N 个片段」+ 地点。",
+      diaryRead({ w: 412, h: 915 }), [{ t: "P0" }], 432)}
+    ${shot("阅读态 · 空的一天", "没有独立空态视图：Hero 卡把元信息行换成「这一天没有留下日记。」，顶栏保留写日记入口。",
+      diaryRead({ w: 412, h: 915, empty: true, today: true, time: "13:55" }), [{ t: "空态" }], 432)}
+    ${shot("阅读态 · 页内搜索", "点搜索图标展开页内搜索栏：命中计数 <code>当前/总数</code> + 上/下一个步进按钮；命中文字用 <code>primaryContainer</code> 底色高亮。",
+      diaryRead({ w: 412, h: 915, search: true, time: "13:56" }), [{ t: "P1" }], 432)}
+    ${shot("阅读态 · 深色", "深色下卡片 = <code>surfaceContainerLow</code>，正文 <code>onSurface</code>，引用块 = <code>surfaceContainerHigh</code>。",
+      diaryRead({ w: 412, h: 915, dark: true, time: "21:12" }), [{ t: "深色", k: "dark" }], 432)}
+  </div>`));
+
+B.push(section("2 · 日记编辑态",
+  `顶栏右侧换成 3 个动作：插入图片 / 放弃修改 / 保存（保存是<b>实心主色</b>的 active 态）。`+
+  `卡片内是时间胶囊（<code>primaryContainer</code>）+ 地点行 + 输入区；`+
+  `底部悬浮格式栏 9 个按钮，<b>顺序固定</b>，与 iOS 逐项一致：`+
+  `<code>段落样式 · 居中 ‖ 列表 · 引用 · 待办 ‖ B I S U</code>。`,
+  `<div class="row">
+    ${shot("编辑态 · 竖屏 · 键盘弹起", "格式栏贴在键盘上方 8dp；点格式栏按钮<b>不收起键盘</b>。光标始终保持在格式栏上沿之上 8dp（caret-not-hidden）。",
+      diaryEdit({ w: 412, h: 915 }), [{ t: "P0" }], 432)}
+    ${shot("编辑态 · 键盘收起", "键盘收起时格式栏落到手势条上方 24dp，靠点顶栏空白 / 下拉手势收起。",
+      diaryEdit({ w: 412, h: 915, keyboard: false, time: "13:58" }), [{ t: "P1" }], 432)}
+    ${shot("编辑态 · 深色", "格式栏 = <code>surfaceContainerHigh</code> + 28dp 圆角 + elevation 2；active 按钮 = <code>secondaryContainer</code> 胶囊底。",
+      diaryEdit({ w: 412, h: 915, dark: true, time: "21:15" }), [{ t: "深色", k: "dark" }], 432)}
+  </div>`));
+
+B.push(section("3 · 分享与横屏",
+  `iOS 的「一步到长图预览 + 系统分享」在 Android 落成 <b>ModalBottomSheet</b>：`+
+  `上半是长图预览（可滚动、限宽 720），下半是两个动作 —— 「分享…」拉起系统 Sharesheet（<code>ACTION_SEND</code>），`+
+  `「保存到相册」写入 <code>Pictures/JustGDiary</code>。长图文件名沿用 <code>JustDiary-&lt;dayKey&gt;.png</code>。`,
+  `<div class="row">
+    ${shot("分享面板 · 竖屏", "面板自己不画标题栏（iOS 同）：预览顶部就是日期，条目行就是文件名。长图水印用应用名「一页时光」。",
+      shareSheet({ w: 412, h: 915 }), [{ t: "P0" }], 432)}
+    ${shot("分享面板 · 深色", "长图本身跟随当前主题（深色下渲染深色版长图），这样分享出去与屏幕上看到的一致。",
+      shareSheet({ w: 412, h: 915, dark: true }), [{ t: "深色", k: "dark" }], 432)}
+    ${shot("阅读态 · 平板横屏 1280 × 800", "日记页横屏<b>不分栏</b>（分栏是首页的功能）：正文列宽被 660dp 卡住居中，两侧留白。",
+      diaryTabletLandscape({}), [{ t: "横屏", k: "p" }], 1304)}
+  </div>`));
+
+renderBoard({
+  title: "日记 · 阅读 / 编辑 / 分享",
+  sub: `这一屏是「内容层」：卡片、正文排版、图片、待办清单全部按 Material 3 的容器与排版角色重画，` +
+       `但<b>层级、几何比例与交互结果</b>逐条对齐 iOS —— 包括「阅读列宽 = 编辑列宽」「格式栏 9 键固定顺序」` +
+       `「分享一步到位」这三条容易在移植中走样的规则。`,
+  meta: "参照：iOS JustADiary/Views/Diary/{DiaryPageView,RichTextView,RichEngine,ShareSheetView}.swift · Android 现有实现 ui/diary/",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

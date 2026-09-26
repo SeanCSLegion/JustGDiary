@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>05 · 设置与系统弹层</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   设置页 + 对话框 / 弹层 / 提示
+   iOS 参考：Views/Settings/SettingsView.swift、Views/Components/Components.swift
+   Android 落法：单列卡片列表（手机）→ 两列（≥700dp）→ 三列（≥1000dp）；
+   行 = 56dp、分隔线左缩进 72dp（与文字左对齐）；「菜单行」→ M3 DropdownMenu；
+   「取值行」→ 打开 ModalBottomSheet；「开关行」→ 整行可点 + Switch。
+   ========================================================================== */
+
+const G = { STATUS: 32, GESTURE: 24, NAVBAR: 80, TOPBAR: 64 };
+
+function settingRow(o) {
+  const sub = o.sub ? `<div style="font-size:13px;color:var(--on-surface-variant);margin-top:2px">${o.sub}</div>` : "";
+  let trail = "";
+  if (o.type === "switch") trail = `<div class="switch ${o.on ? "on" : ""}"></div>`;
+  else if (o.value !== undefined) trail = `<div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:14px;color:var(--on-surface-variant)">${o.value}</span>
+      ${icon("chevron_right", { size: 20, style: "color:var(--on-surface-variant)" })}</div>`;
+  else trail = `${icon("chevron_right", { size: 20, style: "color:var(--on-surface-variant)" })}`;
+  return `<div style="display:flex;align-items:center;gap:16px;min-height:${o.h || 64}px;padding:10px 16px">
+    <div class="licon" style="width:40px;height:40px">${icon(o.icon, { size: 20 })}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:16px">${o.title}</div>${sub}
+    </div>
+    ${trail}
+  </div>`;
+}
+
+function group(title, rows) {
+  return `<div class="group">
+    <div class="ghead">${title}</div>
+    ${rows.map((r, i) => i ? `<div style="height:1px;background:var(--outline-variant);margin-left:72px"></div>` : "").concat("").length ? rows.map((r, i) =>
+      (i ? `<div style="height:1px;background:var(--outline-variant);margin-left:72px"></div>` : "") + settingRow(r)).join("") : ""}
+  </div>`;
+}
+
+const GENERAL = [
+  { icon: "language", title: "语言", sub: "应用内显示语言", value: "跟随系统" },
+  { icon: "dark_mode", title: "主题", sub: "浅色、深色或跟随系统", value: "跟随系统" },
+];
+const RULES = [
+  { icon: "schedule", title: "新一天的开始时间", sub: "这个时间前算前一天", value: "凌晨 4:00" },
+  { icon: "calendar_month", title: "一周从哪一天开始", sub: "日历以周几开头", value: "周一" },
+  { icon: "schedule", title: "自动记录时间", sub: "只影响是否显示", type: "switch", on: true },
+  { icon: "place", title: "自动插入地点", sub: "需要位置信息权限", type: "switch", on: true },
+  { icon: "my_location", title: "位置权限", sub: "地点只存在本机", value: "精确" },
+  { icon: "edit", title: "允许修改 / 删除历史日记", sub: "历史日期只能改，不能新增", type: "switch", on: false },
+];
+const REMIND = [
+  { icon: "notifications", title: "写日记提醒", sub: "当天未写日记时提醒我", type: "switch", on: true },
+  { icon: "schedule", title: "提醒时间", sub: "每天提醒一次", value: "晚上 9:00" },
+];
+const DATA = [
+  { icon: "upload", title: "导出全部日记", sub: "生成 .jdiary 备份包" },
+  { icon: "download", title: "导入备份", sub: "从其他设备恢复日记" },
+];
+const ABOUT = [
+  { icon: "info", title: "版本", value: "1.0（36）" },
+];
+
+function settingsContent(cols) {
+  const groups = [
+    ["通用", GENERAL], ["日记规则", RULES], ["提醒", REMIND], ["数据", DATA], ["关于", ABOUT],
+  ];
+  if (cols === 1) return groups.map(([t, rows]) => group(t, rows)).join("");
+  // 多列：按列宽切成 cols 条竖列
+  const per = Math.ceil(groups.length / cols);
+  const columns = [];
+  for (let i = 0; i < cols; i++) columns.push(groups.slice(i * per, (i + 1) * per));
+  return `<div style="display:flex;gap:16px;align-items:flex-start">
+    ${columns.map(col => `<div style="flex:1;min-width:0">${col.map(([t, rows]) => group(t, rows)).join("")}</div>`).join("")}
+  </div>`;
+}
+
+function settingsScreen(opt) {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="padding:8px 16px 0"><span style="font-size:28px;font-weight:400">设置</span></div>
+    <div style="flex:1;overflow:hidden;padding:16px 16px 0">
+      ${settingsContent(1)}
+    </div>
+    ${navbar("settings")}
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:51" });
+}
+
+function settingsTablet() {
+  const html = `<div style="flex:1;display:flex;min-height:0">
+    ${rail("settings", { fab: false })}
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:16px 24px 0">
+      <span style="font-size:28px;font-weight:400">设置</span>
+      <div style="margin-top:16px;flex:1;overflow:hidden">${settingsContent(2)}</div>
+    </div>
+  </div>`;
+  return `<div class="device tablet land"><div class="screen">${statusbar("13:51")}${html}${gesturebar()}</div></div>`;
+}
+
+/* ---------- 系统弹层 ---------- */
+
+function hourSheet() {
+  const hours = [2, 3, 4, 5, 6];
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="padding:8px 16px 0"><span style="font-size:28px;font-weight:400">设置</span></div>
+    <div style="flex:1;overflow:hidden;padding:16px 16px 0">${group("日记规则", RULES.slice(0, 2))}</div>
+    ${navbar("settings")}
+    <div class="scrim"></div>
+    <div class="sheet">
+      <div class="handle"></div>
+      <div class="stitle">新一天的开始时间</div>
+      <div style="text-align:center;padding:12px 0 4px">
+        <div style="display:flex;justify-content:center;gap:0;align-items:center;height:180px;position:relative">
+          <div style="position:absolute;left:24px;right:24px;top:50%;height:44px;transform:translateY(-50%);background:var(--secondary-container);border-radius:8px"></div>
+          <div style="position:relative;display:flex;flex-direction:column;gap:0;font-size:20px;color:var(--on-surface-variant)">
+            ${hours.map((h, i) => `<div style="height:44px;line-height:44px;${i === 2 ? "color:var(--on-surface);font-weight:600" : ""}">凌晨 ${h}:00</div>`).join("")}
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 24px 0"><div class="btn text" style="font-weight:600">保存</div></div>
+    </div>
+  </div>`;
+  return phone(html, { time: "13:56" });
+}
+
+function dialogScreen(kind) {
+  let title, body, actions, extra = "";
+  if (kind === "discard") {
+    title = "放弃修改？";
+    body = "这段内容还没有保存，放弃后无法恢复。";
+    actions = `<div class="btn text">取消</div><div class="btn text" style="color:var(--error)">放弃</div>`;
+  } else if (kind === "delete") {
+    title = "删除选中的 2 段日记？";
+    body = "删除后无法恢复。";
+    actions = `<div class="btn text">取消</div><div class="btn text" style="color:var(--error)">删除</div>`;
+  } else if (kind === "import") {
+    title = "导入方式";
+    body = "备份里有 12 天日记与目标设备重复。";
+    actions = `<div class="btn text">取消</div><div class="btn text">跳过已有</div><div class="btn text" style="color:var(--error)">覆盖已有</div>`;
+  } else {
+    title = "导入完成";
+    body = "新增 8 天，跳过 12 天，覆盖 0 天（共 34 个编辑块、12 张图片）。";
+    actions = `<div class="btn text" style="font-weight:600">好</div>`;
+  }
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <div style="padding:8px 16px 0"><span style="font-size:28px;font-weight:400">设置</span></div>
+    <div style="flex:1;overflow:hidden;padding:16px 16px 0">${group("数据", DATA)}</div>
+    ${navbar("settings")}
+    <div class="scrim"></div>
+    <div class="dialog">
+      <div class="dt">${title}</div>
+      <div class="db">${body}</div>
+      <div class="da">${actions}</div>
+    </div>
+  </div>`;
+  return phone(html, { time: "13:55" });
+}
+
+/* 多选态 + Snackbar */
+function selectMode() {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    <div class="topbar" style="padding:0 8px">
+      <div class="iconbtn">${icon("close")}</div>
+      <div class="title lead" style="font-size:20px">已选择 2 项</div>
+      <div class="sp"></div>
+      <div class="iconbtn" style="color:var(--error)">${icon("delete")}</div>
+    </div>
+    <div style="flex:1;overflow:hidden;padding:10px 0 0;display:flex;flex-direction:column;align-items:center">
+      <div style="width:380px">
+        <div class="card" style="margin-bottom:12px;outline:2px solid var(--primary);outline-offset:-2px">
+          <div style="display:flex;gap:10px">
+            <span style="color:var(--primary);display:flex">${icon("check_circle",{size:20})}</span>
+            <div style="flex:1">
+              <div class="timeslot">${icon("schedule",{size:14})}21:40</div>
+              <div class="rt" style="margin-top:6px"><div style="font-size:22px;line-height:28px">字体样式自检</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:12px;outline:2px solid var(--primary);outline-offset:-2px">
+          <div style="display:flex;gap:10px">
+            <span style="color:var(--primary);display:flex">${icon("check_circle",{size:20})}</span>
+            <div style="flex:1">
+              <div class="timeslot">${icon("schedule",{size:14})}09:15</div>
+              <div class="rt" style="margin-top:6px"><div class="rp">从浦东机场出来，磁悬浮只用了八分钟。</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div style="display:flex;gap:10px">
+            <span style="color:var(--on-surface-variant);display:flex">${icon("check_circle",{size:20})}</span>
+            <div style="flex:1"><div style="font-size:14px;color:var(--on-surface-variant)">这一天没有留下日记。</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="snackbar" style="bottom:20px">
+      <span>长按卡片进入多选；再长按可取消</span>
+      <span class="act">知道了</span>
+    </div>
+    ${navbar("home")}
+  </div>`;
+  return phone(html, { time: "13:57" });
+}
+
+/* 未来日期 Snackbar */
+function futureSnackbar() {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+    ${topbar({ leading: `<div class="iconbtn">${icon("back")}</div>`, title: "9月28日 周一" })}
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-bottom:80px">
+      <div style="color:var(--on-surface-variant);opacity:.5">${icon("dark_mode", { size: 40 })}</div>
+      <div style="font-size:16px;color:var(--on-surface-variant);margin-top:14px">这一天还没到</div>
+    </div>
+    <div class="snackbar"><span>这一天还没到，不能写日记</span><span class="act">知道了</span></div>
+    ${navbar("home")}
+  </div>`;
+  return phone(html, { time: "13:58" });
+}
+
+const B = [];
+
+B.push(section("1 · 设置页（竖屏 / 平板 / 深色）",
+  `五张卡固定顺序：<b>通用 → 日记规则 → 提醒 → 数据 → 关于</b>。行高 64dp、图标徽标 40dp、` +
+  `分隔线左缩进 72dp（与<b>文字</b>左对齐，不对齐图标）。三种行类型各有明确的可点范围：` +
+  `<b>取值行</b>整行可点开面板、<b>菜单行</b>整行可点开下拉、<b>开关行</b>整行可点（不必精确点中开关）。`,
+  `<div class="row">
+    ${shot("设置 · 竖屏", "「位置权限」行只在「自动插入地点」打开时出现；「提醒时间」只在提醒打开时出现 —— 条件行是这套设置的结构特征。",
+      settingsScreen({}), [{ t: "P0" }], 432)}
+    ${shot("设置 · 深色", "开关 = M3 Switch（primary 轨道 / onPrimary 滑块）；图标徽标 = <code>secondaryContainer</code>。",
+      settingsScreen({ dark: true, time: "21:24" }), [{ t: "深色", k: "dark" }], 432)}
+    ${shot("设置 · 平板横屏两列", "≥700dp 起两列、≥1000dp 起三列；卡片按列均分，列内顺序不变。侧栏导航与手机底栏指同一组目的地。",
+      settingsTablet(), [{ t: "横屏", k: "p" }], 1304)}
+  </div>`));
+
+B.push(section("2 · 取值行打开的面板",
+  `iOS 的 <code>.sheet(.medium)</code> 滚轮 → M3 <b>ModalBottomSheet</b> + <code>Picker</code> 语义。` +
+  `时刻文案跟随系统 12/24 小时制与语义时段（凌晨 / 上午 / 中午 / 下午 / 晚上），不写死。`,
+  `<div class="row">
+    ${shot("「新一天的开始时间」滚轮", "改这一项会<b>重算所有日记的归属日</b>；有冲突时保存后追加一条说明弹窗（iOS 同）。",
+      hourSheet(), [{ t: "P1" }], 432)}
+  </div>`));
+
+B.push(section("3 · 对话框与提示（M3 Dialog / Snackbar）",
+  `iOS 的 <code>confirmationDialog</code> / <code>alert</code> 换成 M3 <b>AlertDialog</b>：` +
+  `确认键放<b>右下</b>、破坏性动作用 <code>error</code> 色（iOS 侧覆盖按钮没有破坏性配色，这里修正）。` +
+  `iOS 那个「只有取消一个按钮」的 info 弹窗，一律改成单键「好」。`,
+  `<div class="row">
+    ${shot("放弃修改 · 破坏性确认", "编辑态返回时拦截。主键在右、用 <code>error</code> 色；文案说明「无法恢复」。",
+      dialogScreen("discard"), [{ t: "P0" }], 432)}
+    ${shot("删除多选 · 破坏性确认", "标题带上数量（「删除选中的 2 段日记？」），让用户不必回忆选了几段。",
+      dialogScreen("delete"), [{ t: "P1" }], 432)}
+    ${shot("导入方式 · 三选一", "跳过 / 覆盖 / 取消；覆盖是破坏性 → 用 <code>error</code> 色，与「跳过」在视觉上分开。",
+      dialogScreen("import"), [{ t: "P0" }], 432)}
+    ${shot("导入完成 · 单键信息框", "单键弹窗的确认键是「好」，不是「取消」（修正 iOS 的一处文案缺陷）。",
+      dialogScreen("done"), [{ t: "修正 iOS 缺陷", k: "warn" }], 432)}
+  </div>`));
+
+B.push(section("4 · 多选态与 Snackbar",
+  `多选只存在于日记阅读态：长按任意片段卡进入，顶栏换成「关闭 + 已选择 N 项 + 删除」。` +
+  `所有短暂提示统一用 M3 <b>Snackbar</b>（iOS 用玻璃 toast），落在底栏之上 20dp。`,
+  `<div class="row">
+    ${shot("阅读态多选", "被选中的卡加 2dp <code>primary</code> 描边 + 左侧 <code>check_circle</code>；顶栏右侧是唯一的破坏性动作。",
+      selectMode(), [{ t: "P1" }], 432)}
+    ${shot("未来日期提示", "点未来日期不打开编辑器，只给一条 Snackbar —— 这是「未来不可写」的唯一反馈通道。",
+      futureSnackbar(), [{ t: "P1" }], 432)}
+  </div>`));
+
+renderBoard({
+  title: "设置 · 对话框 · 弹层",
+  sub: `设置页是纯 M3 列表：卡片分组 + 56/64dp 行 + 语义图标徽标。三条平台化改写 —— ` +
+       `<b>Snackbar 取代玻璃 toast</b>、<b>AlertDialog 取代 confirmationDialog</b>、` +
+       `<b>ModalBottomSheet 取代 sheet(.medium)</b> —— 并顺手修掉 iOS 侧三处已知文案/配色缺陷。`,
+  meta: "参照：iOS JustADiary/Views/Settings/SettingsView.swift、Views/Components/Components.swift · Android 现有实现 ui/settings/",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

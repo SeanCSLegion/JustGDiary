@@ -29,7 +29,10 @@ import kotlin.math.roundToInt
  * | --- | --- | --- |
  * | 主导航形态 | `<600dp` 底栏 / `≥600dp` 侧栏 | Material 3 窗口尺寸类（决策 Q10） |
  * | 内容分栏与列数 | `<700` / `700–999` / `≥1000dp` | iOS `AdaptiveLayout` 阈值原样保留（决策 Q17） |
- * | 首页左右分栏 | 内容宽 `≥700dp` **且** 宽 > 高 | `splitsMasterDetail`（竖屏够宽也保持年/月/周三态 morph） |
+ * | 首页左右分栏 | 内容宽 `≥548.5dp` **且** 宽 > 高 | `splitsMasterDetail`（竖屏够宽也保持年/月/周三态 morph） |
+ *
+ * 548.5 = 2×16(页边距) + 16.5(栏间距 + 0.5 分隔线) + 260(主栏最窄) + 240(详情栏最窄)。
+ * 这是 iOS 的当前值（v2 文档里的 700 是旧值，已作废，见设计规范 README 裁决 #7）。
  *
  * 全部是纯计算，因此可以在 JVM 上把临界值逐条断言（见 `AdaptiveLayoutTest`）。
  */
@@ -56,9 +59,9 @@ data class AdaptiveLayout(
     /**
      * 主栏（月历）宽度。
      *
-     * 7 列每格至少 ~40dp 才好点，因此取"内容宽的 46%"并夹在 280…440 之间 ——
+     * 7 列每格至少 ~37dp 才好点，因此取"内容宽的 46%"并夹在 260…440 之间 ——
      * 更宽只是把格子拉大，不会让内容更好读。iOS 在 750dp 内容宽下得到 345dp，
-     * 与设计稿一致；Android 内容宽更大时按同一公式放大。
+     * 与设计稿一致；Android 内容宽更大时按同一公式放大（平板横屏到 440 封顶）。
      */
     val masterWidth: Float
         get() = min(MASTER_MAX_WIDTH, max(MASTER_MIN_WIDTH, (contentWidth * MASTER_WIDTH_RATIO).roundToInt().toFloat()))
@@ -121,11 +124,11 @@ data class AdaptiveLayout(
         /** 设置页两列的下沿（与 iOS 的 `columnCount` 一致）。 */
         const val SETTINGS_TWO_COLUMN_MIN_WIDTH = 680f
 
-        /** 首页/足迹分栏的最小内容宽度。 */
-        const val SPLIT_MIN_CONTENT_WIDTH = 700f
+        /** 首页/足迹分栏的最小内容宽度（iOS 当前值；v2 的 700 已作废）。 */
+        const val SPLIT_MIN_CONTENT_WIDTH = 548.5f
 
         const val MASTER_WIDTH_RATIO = 0.46f
-        const val MASTER_MIN_WIDTH = 280f
+        const val MASTER_MIN_WIDTH = 260f
         const val MASTER_MAX_WIDTH = 440f
 
         const val PAGE_PADDING = 16f

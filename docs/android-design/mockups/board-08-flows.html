@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>08 · 交互流程与动效分解</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+<style>
+  .diagram { background:#fff; border-radius:12px; padding:20px 22px; box-shadow:0 1px 3px rgba(15,20,35,.08); }
+  .node { border-radius:12px; padding:10px 14px; font-size:13px; font-weight:600; text-align:center; line-height:1.35; }
+  .node small { display:block; font-weight:400; font-size:11px; color:#5A5D68; margin-top:2px; }
+  .n-m { background:#DBEAFE; color:#123A6B; }
+  .n-w { background:#E8DEF8; color:#3A2A5C; }
+  .n-y { background:#D7F0D2; color:#1D3D14; }
+  .n-r { background:#FFE1DD; color:#7A1414; }
+  .n-g { background:#EDEDF4; color:#2A2C33; }
+  .arrow { color:#74777F; font-size:16px; align-self:center; }
+  .lbl { font-size:11px; color:#5A5D68; text-align:center; line-height:1.3; }
+  .flow { display:flex; align-items:stretch; gap:8px; flex-wrap:wrap; }
+  .vflow { display:flex; flex-direction:column; gap:6px; }
+  .frame { display:inline-block; vertical-align:top; }
+  .frame .cap2 { font-size:11px; color:#5A5D68; text-align:center; margin-top:6px; font-variant-numeric:tabular-nums; }
+  .canvasbox { position:relative; background:var(--surface, #F9F9FF); border:1px solid #C4C6D0; border-radius:8px; overflow:hidden; }
+</style>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   08 · 交互流程与动效分解
+   把「三态状态机」「两条 morph 的逐帧几何」「手势地图」「各页状态机」
+   「返回栈」「组件状态」画成图 —— 这些是文字规范里最容易读漏的部分。
+   ========================================================================== */
+
+const FW = 360, FH = 520;                       // 分解图的画布（= 日历区）
+const C = {
+  title: 72, weekday: 30, strip: 68, dayTitle: 40,
+  yearTitle: 62, yearPad: 16, yearGap: 6, miniPad: 6, miniTitle: 17,
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+const cellH = (FH - C.title - C.weekday) / 6;
+const cardW = (FW - C.yearPad * 2 - C.yearGap * 2) / 3;
+const cardH = (FH - C.yearTitle - 8 - C.yearGap * 3) / 4;
+function cardRect(m) { const c = (m - 1) % 3, r = Math.floor((m - 1) / 3);
+  return { x: C.yearPad + c * (cardW + C.yearGap), y: C.yearTitle + 8 + r * (cardH + C.yearGap), w: cardW, h: cardH }; }
+
+/** 一帧：月 → 周（expand = t） */
+function frameMW(t) {
+  const titleH = lerp(C.title, 0, t);
+  const selRow = 3;                                    // 2026-09-26 在网格第 4 行（0 基 3）
+  const selY0 = C.title + C.weekday + selRow * cellH;
+  const selY = lerp(selY0, C.weekday, t);
+  const selH = lerp(cellH, C.strip, t);
+  let rows = "";
+  for (let r = 0; r < 6; r++) {
+    if (r === selRow) continue;
+    const h = lerp(cellH, 0, t);
+    if (h < 0.5) continue;
+    rows += `<div style="position:absolute;left:0;right:0;top:${C.title + C.weekday + r * cellH}px;height:${h}px;
+      border-top:1px solid rgba(196,198,208,${1 - t});opacity:${1 - t};display:flex;align-items:center;justify-content:center">
+      <span style="font-size:11px;color:#8E9099">第 ${r + 1} 行</span></div>`;
+  }
+  const contentA = t;
+  return `<div class="canvasbox" style="width:${FW}px;height:${FH}px">
+    <div style="position:absolute;left:20px;top:0;height:${titleH}px;display:flex;align-items:center;overflow:hidden;opacity:${1 - t}">
+      <span style="font-size:${lerp(32, 20, t)}px;font-weight:400">九月</span></div>
+    <div style="position:absolute;left:0;right:0;top:${titleH}px;height:${C.weekday}px;display:grid;grid-template-columns:repeat(7,1fr);align-items:center">
+      ${["一","二","三","四","五","六","日"].map(x => `<div style="text-align:center;font-size:12px;color:#44474F">${x}</div>`).join("")}
+    </div>
+    ${rows}
+    <div style="position:absolute;left:0;right:0;top:${selY}px;height:${selH}px;border-top:1px solid rgba(196,198,208,${1 - t});display:grid;grid-template-columns:repeat(7,1fr);align-items:center">
+      ${[21,22,23,24,25,26,27].map((d, i) => `<div style="text-align:center;position:relative">
+        ${d === 26 ? `<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:${Math.min(44, selH * 0.62)}px;height:${Math.min(44, selH * 0.62)}px;border-radius:999px;background:#2563EB"></div>` : ""}
+        <span style="position:relative;font-size:${lerp(19, 20, t)}px;${d === 26 ? "color:#fff" : "color:#1A1B20"}">${d}</span></div>`).join("")}
+    </div>
+    <div style="position:absolute;left:0;right:0;top:${C.weekday + C.strip + 20}px;bottom:0;opacity:${contentA};transform:translateY(${(1 - t) * 24}px);padding:12px 16px">
+      <div style="height:1px;background:#C4C6D0;margin-bottom:12px"></div>
+      <div style="background:#F3F3FA;border-radius:10px;padding:12px;font-size:11px;color:#5A5D68">21:40 · 字体样式自检<br><span style="color:#8E9099">这一段是正文…</span></div>
+    </div>
+  </div>`;
+}
+
+/** 一帧：月 → 年（zoom = t） */
+function frameMY(t) {
+  const m = 9;
+  const cr = cardRect(m);
+  const gridTo = { x: cr.x + C.miniPad, y: cr.y + C.miniPad + C.miniTitle, w: cr.w - C.miniPad * 2, h: cr.h - C.miniPad * 2 - C.miniTitle };
+  const gridFrom = { x: 0, y: C.title + C.weekday, w: FW, h: FH - C.title - C.weekday };
+  const titleFrom = { x: 20, y: 0, w: 200, h: C.title };
+  const titleTo = { x: cr.x + C.miniPad, y: cr.y + C.miniPad, w: cr.w - C.miniPad * 2, h: C.miniTitle };
+  const g = { x: lerp(gridFrom.x, gridTo.x, t), y: lerp(gridFrom.y, gridTo.y, t), w: lerp(gridFrom.w, gridTo.w, t), h: lerp(gridFrom.h, gridTo.h, t) };
+  const ti = { x: lerp(titleFrom.x, titleTo.x, t), y: lerp(titleFrom.y, titleTo.y, t), h: lerp(titleFrom.h, titleTo.h, t) };
+  const scale = lerp(1.6, 1, t);
+  let year = "";
+  if (t > 0.02) {
+    year = `<div style="position:absolute;left:0;top:0;width:${FW}px;height:${FH}px;opacity:${t};transform:scale(${scale});transform-origin:${cr.x + cr.w / 2}px ${cr.y + cr.h / 2}px">
+      <div style="position:absolute;left:16px;top:0;height:${C.yearTitle}px;display:flex;align-items:center"><span style="font-size:32px">2026年</span></div>
+      ${Array.from({ length: 12 }, (_, i) => { const r = cardRect(i + 1);
+        return `<div style="position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${i + 1 === m ? "#EDEDF4" : "#F3F3FA"};border-radius:12px"></div>`; }).join("")}
+    </div>`;
+  }
+  const dFont = lerp(19, 11, t);
+  return `<div class="canvasbox" style="width:${FW}px;height:${FH}px">
+    ${year}
+    <div style="position:absolute;left:${ti.x}px;top:${ti.y}px;height:${ti.h}px;display:flex;align-items:center;overflow:hidden;z-index:2">
+      <span style="font-size:${lerp(32, 13, t)}px;font-weight:${lerp(400, 600, t)}">九月</span></div>
+    <div style="position:absolute;left:${g.x}px;top:${g.y}px;width:${g.w}px;height:${g.h}px;z-index:2;opacity:${1 - t * 0.92}">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);height:${lerp(C.weekday, 14, t)}px;align-items:center">
+        ${["一","二","三","四","五","六","日"].map(x => `<div style="text-align:center;font-size:${lerp(12, 9, t)}px;color:#44474F">${x}</div>`).join("")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr)">
+        ${Array.from({ length: 35 }, (_, i) => { const d = i; const row = Math.floor(i / 7);
+          const visible = d >= 1 && d <= 30;
+          return `<div style="height:${(g.h - lerp(C.weekday, 14, t)) / 5}px;display:flex;align-items:center;justify-content:center">
+            <span style="font-size:${dFont}px;${d === 26 ? "background:#2563EB;color:#fff;border-radius:999px;padding:0 4px" : ""};color:${visible ? "#1A1B20" : "transparent"}">${visible ? d : 0}</span></div>`; }).join("")}
+      </div>
+    </div>
+  </div>`;
+}
+
+function strip(fn, frames, title) {
+  return `<div class="diagram">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px">${title}</div>
+    <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+      ${frames.map(t => `<div class="frame">${fn(t)}<div class="cap2">t = ${t.toFixed(2)}</div></div>`).join("")}
+    </div>
+  </div>`;
+}
+
+/* ---------- 状态机 ---------- */
+function stateMachine() {
+  return `<div class="diagram">
+    <div style="font-size:13px;font-weight:600;margin-bottom:16px">首页三态状态机（竖屏 / 平板竖屏）</div>
+    <div class="flow" style="align-items:center;gap:12px">
+      <div class="node n-m" style="min-width:150px">month 月态<small>冷启动恒为此态</small></div>
+      <div class="vflow" style="gap:4px">
+        <div class="arrow">→</div><div class="lbl">点任意日期<br>expand 0→1 · 400ms 滑动</div>
+      </div>
+      <div class="node n-w" style="min-width:150px">week 周态<small>星期栏 + 周条 + 当日内容</small></div>
+      <div class="vflow" style="gap:4px">
+        <div class="arrow">↖</div><div class="lbl">点 <b>‹ 九月</b><br>expand 1→0</div>
+      </div>
+    </div>
+    <div class="flow" style="align-items:center;gap:12px;margin-top:20px">
+      <div class="node n-y" style="min-width:150px">year 年态<small>3 × 4 迷你月历</small></div>
+      <div class="vflow" style="gap:4px">
+        <div class="arrow">↖</div><div class="lbl">点迷你月<br>zoom 1→0 · 400ms 缩放<br><span style="color:#8E9099">锚点 = 该月卡片中心</span></div>
+      </div>
+      <div class="node n-m" style="min-width:150px;opacity:.6">月态</div>
+      <div class="vflow" style="gap:4px">
+        <div class="arrow">↗</div><div class="lbl">点 <b>‹ 2026年</b><br>zoom 0→1</div>
+      </div>
+      <div class="node n-g" style="min-width:120px">同一枚胶囊</div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#3C4149">
+      <span class="tag">年态左胶囊隐藏</span>
+      <span class="tag">年态返回键 → 月态</span>
+      <span class="tag">点 <b>今天</b>：年态先回当月；月/周态滚动到今天</span>
+      <span class="tag warn">morph 中禁止一切输入</span>
+      <span class="tag">平板横屏：只有月态</span>
+    </div>
+  </div>`;
+}
+
+function gestureMap() {
+  const cell = (t, d) => `<div style="text-align:center;font-size:11px;line-height:1.4">${t}<div style="color:#8E9099;font-size:10.5px">${d}</div></div>`;
+  return `<div class="diagram">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px">手势地图</div>
+    <div style="display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#2563EB;margin-bottom:8px">月态</div>
+        <div style="width:190px;height:270px;border:2px solid #C4C6D0;border-radius:14px;position:relative;background:#fff">
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:30px;color:#2563EB">↕</div>
+          <div style="position:absolute;left:8px;right:8px;top:10px;text-align:center;font-size:10.5px;color:#5A5D68">上下滑 = 翻月（选中日不动）</div>
+          <div style="position:absolute;left:8px;right:8px;bottom:10px;text-align:center;font-size:10.5px;color:#5A5D68">点日期 = 进周态</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#6B4EA8;margin-bottom:8px">周态</div>
+        <div style="width:190px;height:270px;border:2px solid #C4C6D0;border-radius:14px;position:relative;background:#fff">
+          <div style="position:absolute;left:8px;right:8px;top:8px;height:64px;border:1px dashed #6B4EA8;border-radius:8px"></div>
+          <div style="position:absolute;left:50%;top:40px;transform:translate(-50%,-50%);font-size:22px;color:#6B4EA8">↔</div>
+          <div style="position:absolute;left:8px;right:8px;top:78px;text-align:center;font-size:10.5px;color:#5A5D68">左右滑 = 翻周（选中日跟着走）</div>
+          <div style="position:absolute;left:8px;right:8px;bottom:10px;text-align:center;font-size:10.5px;color:#5A5D68">点日期 = 换选中日</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#2E6B22;margin-bottom:8px">年态</div>
+        <div style="width:190px;height:270px;border:2px solid #C4C6D0;border-radius:14px;position:relative;background:#fff">
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:30px;color:#2E6B22">↕</div>
+          <div style="position:absolute;left:8px;right:8px;top:10px;text-align:center;font-size:10.5px;color:#5A5D68">上下滑 = 翻年</div>
+          <div style="position:absolute;left:8px;right:8px;bottom:10px;text-align:center;font-size:10.5px;color:#5A5D68">点迷你月 = 回该月</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#7A1414;margin-bottom:8px">没有的手势</div>
+        <div style="width:190px;height:270px;border:2px dashed #E0B4B4;border-radius:14px;background:#FFF7F6;padding:16px;font-size:11.5px;color:#7A1414;line-height:1.9">
+          ✕ 捏合缩放<br>
+          ✕ 长按<br>
+          ✕ 双击<br>
+          ✕ 横滑翻月<br>
+          ✕ 下拉刷新<br>
+          <div style="color:#5A5D68;margin-top:10px;line-height:1.6">iOS 也没有这些。<br>加进来会与既有手势抢识别，也会绕过 morph 的锚点几何。</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function pageMachines() {
+  const box = (title, color, items) => `<div class="diagram" style="min-width:300px;flex:1">
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:${color}">${title}</div>
+    <div class="vflow" style="gap:8px">${items}</div></div>`;
+  const step = (n, t, d) => `<div style="display:flex;gap:10px;align-items:flex-start">
+      <span style="flex:none;width:20px;height:20px;border-radius:999px;background:#EDEDF4;font-size:11px;display:flex;align-items:center;justify-content:center;color:#3C4149">${n}</span>
+      <div style="font-size:12px;line-height:1.5"><b>${t}</b><div style="color:#5A5D68">${d}</div></div></div>`;
+  return `<div style="display:flex;gap:20px;flex-wrap:wrap">
+    ${box("日记页状态机", "#2563EB", [
+      step("1", "阅读态（默认）", "顶栏：← / 搜索 / 写日记（仅当天） / 分享"),
+      step("2", "点卡片 → 编辑态", "顶栏换成：← / 插图 / 放弃 / 保存；底部悬浮格式栏"),
+      step("3", "长按 400ms → 多选态", "顶栏换成：✕ / 已选择 N 项 / 删除（error 色）"),
+      step("4", "点分享 → 分享面板", "ModalBottomSheet + 长图预览 + 分享… / 保存到相册"),
+      step("5", "编辑态返回", "有未保存内容 → 「放弃修改？」；内容为空 → 直接关闭"),
+    ])}
+    ${box("搜索页状态机", "#6B4EA8", [
+      step("1", "无关键词 && 无筛选", "引导空态「搜索你的日记」"),
+      step("2", "有关键词或筛选", "条件摘要行出现 + 250ms 防抖后执行"),
+      step("3", "执行中", "LinearProgressIndicator + 骨架行（**不是空白**）"),
+      step("4", "有结果", "结果列表，每页 200 条；命中词 primaryContainer 高亮"),
+      step("5", "无结果", "「没有找到匹配的日记」+「清除全部条件」"),
+      step("6", "索引重建中", "「正在准备搜索索引…」，**与「无结果」严格区分**"),
+    ])}
+    ${box("返回栈与预测性返回", "#7A1414", [
+      step("1", "首页 · 年态", "→ 月态（不退出应用）"),
+      step("2", "首页 · 周态", "→ 月态"),
+      step("3", "首页 · 月态", "→ 交还系统"),
+      step("4", "日记编辑态", "拦截 → 「放弃修改？」"),
+      step("5", "日记多选态", "→ 阅读态（不关路由）"),
+      step("6", "深链进入编辑器", "→ 回到「日记」标签的月态"),
+    ])}
+  </div>`;
+}
+
+function componentStates() {
+  const row = (name, cells) => `<tr><td style="font-weight:600;white-space:nowrap">${name}</td>${cells.map(c => `<td>${c}</td>`).join("")}</tr>`;
+  return `<div class="diagram">
+    <div style="font-size:13px;font-weight:600;margin-bottom:14px">组件状态矩阵</div>
+    <table class="spec">
+      <tr><th>组件</th><th>默认</th><th>按下 / 悬停</th><th>选中 / 激活</th><th>禁用</th></tr>
+      ${row("按钮", [
+        `<span class="btn filled" style="height:36px">保存</span>`,
+        `<span class="btn filled" style="height:36px;filter:brightness(.94)">保存</span>`,
+        `<span class="btn filled" style="height:36px;filter:brightness(.88)">保存</span>`,
+        `<span class="btn filled" style="height:36px;opacity:.38">保存</span>`])}
+      ${row("FilterChip", [
+        `<span class="chip">本周</span>`,
+        `<span class="chip" style="filter:brightness(.96)">本周</span>`,
+        `<span class="chip on">${icon("check",{size:16})}本周</span>`,
+        `<span class="chip" style="opacity:.38">本周</span>`])}
+      ${row("IconButton", [
+        `<span class="iconbtn" style="color:#44474F">${icon("share",{size:22})}</span>`,
+        `<span class="iconbtn" style="color:#44474F;background:#E7E8EE">${icon("share",{size:22})}</span>`,
+        `<span class="iconbtn" style="color:#2563EB;background:#DBEAFE">${icon("share",{size:22})}</span>`,
+        `<span class="iconbtn" style="color:#44474F;opacity:.38">${icon("share",{size:22})}</span>`])}
+      ${row("Switch", [
+        `<span class="switch"></span>`, `<span class="switch" style="filter:brightness(.96)"></span>`,
+        `<span class="switch on"></span>`, `<span class="switch" style="opacity:.38"></span>`])}
+      ${row("卡片（可点）", [
+        `<span class="card" style="display:inline-block;padding:8px 14px;font-size:12px">条目卡</span>`,
+        `<span class="card" style="display:inline-block;padding:8px 14px;font-size:12px;background:#E7E8EE">条目卡</span>`,
+        `<span class="card" style="display:inline-block;padding:8px 14px;font-size:12px;outline:2px solid #2563EB;outline-offset:-2px">条目卡</span>`,
+        `<span class="card" style="display:inline-block;padding:8px 14px;font-size:12px;opacity:.38">条目卡</span>`])}
+      ${row("日历格", [
+        `<span style="display:inline-flex;width:44px;height:44px;align-items:center;justify-content:center;font-size:15px">26</span>`,
+        `<span style="display:inline-flex;width:44px;height:44px;align-items:center;justify-content:center;font-size:15px;border-radius:999px;background:#E7E8EE">26</span>`,
+        `<span style="display:inline-flex;width:44px;height:44px;align-items:center;justify-content:center;font-size:15px;border-radius:999px;background:#2563EB;color:#fff">26</span>`,
+        `<span style="display:inline-flex;width:44px;height:44px;align-items:center;justify-content:center;font-size:15px;opacity:.35">26</span>`])}
+    </table>
+    <div style="margin-top:12px;font-size:12px;color:#5A5D68;line-height:1.7">
+      「选中」列在日历格上画的是<b>选中日</b>（实心圆）；<b>今天</b>是同一位置的 1.5dp 圆环；<b>未来日期</b>是整格 alpha 0.35。<br>
+      禁用一律 <code>alpha 0.38</code> + 不响应点击；焦点（键盘）用 2dp <code>primary</code> 外描边。
+    </div>
+  </div>`;
+}
+
+/* ========================================================================== */
+const B = [];
+
+B.push(section("1 · 首页三态状态机",
+  `三个态、四条迁移。**可见性由 <code>mode</code> 决定，不由动画值决定** —— 违反这条就会出现
+   「旋转 + 切深色后年历整屏消失」。`,
+  stateMachine()));
+
+B.push(section("2 · 月 → 周 morph 逐帧分解",
+  `大标题槽 <code>72 → 0</code>；星期栏上移到 y=0；<b>选中那一行</b>从它在月网格里的位置滑到
+   <code>y=30</code>、高度 <code>cellH → 68</code>；其余行高度压到 0 并淡出；农历与分隔线插值；
+   当日内容从下方 24dp 淡入上移。曲线 <code>easing.emphasized</code>，时长 400ms。`,
+  strip(frameMW, [0, 0.25, 0.5, 0.75, 1], "expand：0 → 1")));
+
+B.push(section("3 · 月 → 年 morph 逐帧分解",
+  `年历层从 <code>scale 1.6</code> 收到 1 并淡入，<b>锚点 = 源月卡片中心</b>；
+   月份标题与大标题槽从「大标题矩形」插值到「该月卡片的标题矩形」；
+   网格矩形从整月网格插值到迷你网格；日号字号 <code>19 → 11</code>。`,
+  strip(frameMY, [0, 0.25, 0.5, 0.75, 1], "zoom：0 → 1")));
+
+B.push(section("4 · 手势地图",
+  `两端的共同原则：**手势结果少而确定**。翻月不改选中日（横屏除外），翻周带着选中日走，
+   点日期在竖屏进周态、在横屏只换选中。`,
+  gestureMap()));
+
+B.push(section("5 · 各页状态机与返回栈",
+  `三张图分别回答：日记页有哪四种形态、搜索有哪六种状态、返回键在每一层该去哪。`,
+  pageMachines()));
+
+B.push(section("6 · 组件状态矩阵",
+  `每个可交互组件必须有<b>四态</b>的可见表达。R3 之前的日历格与年历卡片完全没有按下反馈 —— 那是硬性违规。`,
+  componentStates()));
+
+renderBoard({
+  title: "交互流程与动效分解",
+  sub: `文字规范里最容易读漏的三件事：<b>状态迁移的触发条件</b>、<b>morph 每一帧长什么样</b>、
+       <b>哪些手势是故意没有的</b>。这一板把它们画出来，实现时可以直接对着比对。`,
+  meta: "配合 docs/android-design/03-home.md §1 §6 §7、04-diary.md §1、05-search-footprint-settings.md §1.5 阅读",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

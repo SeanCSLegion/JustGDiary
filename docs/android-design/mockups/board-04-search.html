@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>04 · 搜索与足迹</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   搜索页 + 足迹页
+   iOS 参考：Views/Search/SearchView.swift、Views/Footprint/FootprintView.swift
+   Android 落法：搜索框 = M3 SearchBar（常驻，不做二段式 morph）；
+   条件面板 = 卡片内的 FilterChip 组；条件摘要 = 可逐条删除的 InputChip 行；
+   无结果 = M3 空态；加载 = LinearProgressIndicator（修掉 iOS 的「搜索中列表空白」）。
+   ========================================================================== */
+
+const S = { STATUS: 32, GESTURE: 24, NAVBAR: 80, TOPBAR: 64 };
+
+function pageHeader(title, trailing, opt = {}) {
+  return `<div style="padding:${opt.padTop || 8}px 16px 0">
+    <div style="display:flex;align-items:baseline;gap:10px">
+      <span style="font-size:28px;font-weight:400">${title}</span>
+      <div style="flex:1"></div>
+      ${trailing || ""}
+    </div>
+  </div>`;
+}
+
+/* ---------- 搜索页 ---------- */
+
+function searchField(focused, value) {
+  return `<div class="searchbar" style="height:56px">
+    ${icon("search", { size: 22 })}
+    <span style="flex:1;font-size:16px;color:${value ? "var(--on-surface)" : "var(--on-surface-variant)"}">${value || "搜索日记内容…"}</span>
+    ${value ? `<div class="iconbtn" style="width:40px;height:40px">${icon("close", { size: 20 })}</div>` : ""}
+    ${focused ? `<span style="font-size:14px;font-weight:500;color:var(--primary);padding:0 8px">取消</span>` : ""}
+  </div>`;
+}
+
+function filterPanel(opt = {}) {
+  const time = ["全部时间", "本周", "本月", "今年", "自定义"];
+  const timeOn = opt.timeOn === undefined ? 0 : opt.timeOn;
+  const chips = (arr, on) => arr.map((t, i) =>
+    `<span class="chip ${i === on ? "on" : ""}">${i === on && on !== 0 ? icon("check", { size: 18 }) : ""}${t}</span>`).join("");
+  const row = (label, inner, extra = "") => `<div style="margin-top:12px">
+      <div style="font-size:12.5px;color:var(--on-surface-variant);margin-bottom:8px">${label}</div>
+      <div class="chiprow">${inner}${extra}</div>
+    </div>`;
+  return `<div class="card" style="padding:12px 16px 16px">
+    ${row("时间范围", chips(time, timeOn))}
+    ${row("地点", `<span class="chip ${opt.locOn ? "on" : ""}">${opt.locOn ? icon("check",{size:18}) : ""}全部地点</span>`,
+      `<span class="chip ${opt.locPicked ? "on" : ""}">${opt.locPicked ? icon("check",{size:18}) : icon("place",{size:18})}${opt.locPicked || "选择地点…"}</span>`)}
+  </div>`;
+}
+
+function summaryRow(items) {
+  if (!items.length) return "";
+  return `<div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+    <div style="display:flex;gap:8px;overflow:hidden;flex:1">
+      ${items.map(t => `<span class="chip on" style="background:var(--primary-container);color:var(--on-primary-container);gap:6px">${t}${icon("close",{size:14})}</span>`).join("")}
+    </div>
+    <div class="iconbtn" style="color:var(--on-surface-variant)">${icon("close", { size: 22 })}</div>
+  </div>`;
+}
+
+function resultItem(o) {
+  return `<div style="padding:14px 16px;border-bottom:1px solid var(--outline-variant)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:13px;font-weight:600;color:var(--primary);background:var(--primary-container);border-radius:999px;padding:2px 10px">${o.date}</span>
+      <span style="font-size:12px;color:var(--on-surface-variant)">${o.time || ""}</span>
+      <div style="flex:1"></div>
+      <span style="font-size:12px;color:var(--on-surface-variant)">${o.loc || ""}</span>
+    </div>
+    <div style="font-size:16px;line-height:24px;margin-top:8px">${o.title}</div>
+    <div style="font-size:14px;line-height:22px;color:var(--on-surface-variant);margin-top:4px">${o.snippet}</div>
+  </div>`;
+}
+
+function searchScreen(opt) {
+  const w = opt.w;
+  const bodyH = opt.h - S.STATUS - S.GESTURE - S.NAVBAR;
+  let content;
+  if (opt.state === "empty") {
+    content = `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-bottom:60px">
+      <div style="color:var(--on-surface-variant);opacity:.55">${icon("search", { size: 44 })}</div>
+      <div style="font-size:18px;font-weight:500;margin-top:18px">搜索你的日记</div>
+      <div style="font-size:14px;color:var(--on-surface-variant);margin-top:6px">输入关键词，或选择时间与地点筛选</div>
+    </div>`;
+  } else if (opt.state === "loading") {
+    content = `<div style="flex:1">
+      <div style="height:4px;background:var(--surface-container-highest);position:relative;overflow:hidden">
+        <div style="position:absolute;left:0;top:0;bottom:0;width:40%;background:var(--primary);border-radius:2px"></div></div>
+      <div style="padding:16px">
+        ${[1,2,3].map(i => `<div style="margin-bottom:20px">
+          <div style="height:14px;width:38%;background:var(--surface-container-high);border-radius:7px"></div>
+          <div style="height:14px;width:88%;background:var(--surface-container-high);border-radius:7px;margin-top:10px"></div>
+          <div style="height:14px;width:64%;background:var(--surface-container-high);border-radius:7px;margin-top:8px"></div>
+        </div>`).join("")}
+      </div></div>`;
+  } else if (opt.state === "noresult") {
+    content = `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-bottom:80px">
+      <div style="color:var(--on-surface-variant);opacity:.55">${icon("search_off", { size: 44 })}</div>
+      <div style="font-size:18px;font-weight:500;margin-top:18px">没有找到匹配的日记</div>
+      <div style="font-size:14px;color:var(--on-surface-variant);margin-top:6px">试试更短的关键词，或放宽时间与地点</div>
+      <div class="btn text" style="margin-top:14px">清除全部条件</div>
+    </div>`;
+  } else {
+    content = `<div style="flex:1;overflow:hidden">
+      ${[
+        { date: "9月8日 周二", time: "21:40", loc: "上海 · 浦东新区",
+          title: '字体样式<b>自检</b>',
+          snippet: '这一段是正文，用来和下面的标题、引用对比字号。<b>字</b>号由系统「文字大小」解析。' },
+        { date: "9月8日 周二", time: "09:15", loc: "上海 · 浦东新区",
+          title: '<b>上海</b>出差',
+          snippet: '从浦东机场出来，磁悬浮只用了八分钟。晚上在外滩走了一圈。' },
+        { date: "5月18日 周一", time: "10:30", loc: "上海 · 浦东新区",
+          title: '<b>上海</b>出差',
+          snippet: '从浦东机场出来，磁悬浮只用了八分钟。晚上在外滩走了一圈。' },
+      ].map(resultItem).join("")}
+    </div>`;
+  }
+
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    ${pageHeader("搜索", opt.count ? `<span style="font-size:12px;background:var(--primary-container);color:var(--on-primary-container);border-radius:999px;padding:3px 10px">找到 ${opt.count} 条日记</span>` : "")}
+    <div style="padding:12px 16px 0">${searchField(opt.focused, opt.query)}</div>
+    ${opt.showPanel === false ? "" : `<div style="padding:10px 16px 0">${filterPanel(opt)}</div>`}
+    <div style="padding:0 16px">${summaryRow(opt.summary || [])}</div>
+    ${content}
+    ${navbar("search")}
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:51" });
+}
+
+/* 自定义时间 / 地点选择：M3 ModalBottomSheet */
+function searchSheet(kind) {
+  const isTime = kind === "time";
+  const content = isTime
+    ? `<div style="padding:0 24px">
+        <div style="display:flex;gap:8px;margin-bottom:18px">
+          ${["本周","本月","今年"].map(t => `<span class="chip">${t}</span>`).join("")}
+        </div>
+        <div style="display:flex;gap:12px">
+          <div style="flex:1"><div style="font-size:12px;color:var(--on-surface-variant);margin-bottom:6px">开始</div>
+            <div class="textfield" style="height:48px;border-radius:12px;border:1px solid var(--outline)">2026/09/01</div></div>
+          <div style="flex:1"><div style="font-size:12px;color:var(--on-surface-variant);margin-bottom:6px">结束</div>
+            <div class="textfield" style="height:48px;border-radius:12px;border:1px solid var(--outline)">2026/09/30</div></div>
+        </div>
+      </div>`
+    : `<div style="padding:0 24px">
+        <div class="searchbar" style="height:48px;margin-bottom:12px">${icon("search",{size:20})}
+          <span style="font-size:15px;color:var(--on-surface-variant)">搜索地点…</span></div>
+        <div class="list" style="border-radius:12px">
+          ${[["中国 · 上海市 · 浦东新区", 14], ["中国 · 上海市", 3], ["中国 · 北京市 · 朝阳区", 2],
+             ["美国 · 加利福尼亚州 · 旧金山", 2], ["日本 · 东京都 · 涩谷区", 1]].map((r,i) => `
+            <div class="listrow" style="min-height:52px;padding:8px 12px;${i?"border-top:1px solid var(--outline-variant)":"border-top:none"}">
+              <div style="flex:1;font-size:14px">${r[0]}</div>
+              <span style="font-size:12px;color:var(--on-surface-variant)">${r[1]} 篇</span>
+              ${i===0?`<span style="color:var(--primary)">${icon("check",{size:20})}</span>`:""}
+            </div>`).join("")}
+        </div>
+        <div style="font-size:12.5px;color:var(--on-surface-variant);margin-top:12px">未记录地点 · 3 篇</div>
+      </div>`;
+  const empty = `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding-bottom:60px">
+      <div style="color:var(--on-surface-variant);opacity:.55">${icon("search", { size: 40 })}</div>
+      <div style="font-size:16px;color:var(--on-surface-variant);margin-top:14px">输入关键词开始搜索</div>
+    </div>`;
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    ${pageHeader("搜索")}
+    <div style="padding:12px 16px 0">${searchField(false, "")}</div>
+    ${empty}
+    <div class="scrim"></div>
+    <div class="sheet">
+      <div class="handle"></div>
+      <div class="stitle">${isTime ? "自定义时间范围" : "选择地点"}</div>
+      <div style="flex:1;overflow:hidden">${content}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:18px 24px 0">
+        <div class="btn text">清除</div><div class="btn text" style="color:var(--primary);font-weight:600">确定</div>
+      </div>
+    </div>
+    ${navbar("search")}
+  </div>`;
+  return phone(html, { time: "13:52" });
+}
+
+/* 平板横屏：筛选左栏 + 结果右栏 */
+function searchTablet() {
+  const html = `<div style="flex:1;display:flex;min-height:0">
+    ${rail("search", { fab: false })}
+    <div style="flex:1;display:flex;min-width:0">
+      <div style="width:340px;flex:none;padding:16px 8px 0 16px;overflow:hidden">
+        ${pageHeader("搜索", "")}
+        <div style="padding:10px 0 0">${searchField(false, "上海")}</div>
+        <div style="padding:10px 0 0">${filterPanel({ locOn: false, locPicked: "中国 · 上海市" })}</div>
+      </div>
+      <div style="width:1px;background:var(--outline-variant);margin:16px 0"></div>
+      <div style="flex:1;min-width:0;padding:16px 16px 0 16px;display:flex;flex-direction:column">
+        <div style="font-size:13px;color:var(--on-surface-variant);margin-bottom:10px">找到 3 条日记</div>
+        <div style="flex:1;overflow:hidden">
+          ${[{ date: "9月8日 周二", time: "21:40", loc: "上海 · 浦东新区", title: '字体样式<b>自检</b>',
+              snippet: '这一段是正文，用来和下面的标题、引用对比字号。' },
+             { date: "9月8日 周二", time: "09:15", loc: "上海 · 浦东新区", title: '<b>上海</b>出差',
+              snippet: '从浦东机场出来，磁悬浮只用了八分钟。' }].map(resultItem).join("")}
+        </div>
+      </div>
+    </div>
+  </div>`;
+  return `<div class="device tablet land"><div class="screen">${statusbar("13:51")}${html}${gesturebar()}</div></div>`;
+}
+
+/* ---------- 足迹页 ---------- */
+
+function footprintScreen(opt) {
+  const w = opt.w;
+  const years = ["全部", "2026", "2025", "2024", "自定义"];
+  const stats = [["7","省市"],["9","城市"],["4","国家"],["14","片段"],["13","天数"]];
+  const bars = [{ y: 2024, v: 4 }, { y: 2025, v: 6 }, { y: 2026, v: 3 }];
+  const maxV = 6;
+  const tree = [
+    { name: "中国", n: 9, open: true, children: [
+      { name: "上海市", n: 6, open: true, children: [ { name: "浦东新区", n: 4 }, { name: "黄浦区", n: 2 } ] },
+      { name: "北京市", n: 2, open: false, children: [] },
+      { name: "浙江省", n: 1, open: false, children: [] } ] },
+    { name: "美国", n: 2, open: false, children: [] },
+    { name: "日本", n: 2, open: false, children: [] },
+    { name: "法国", n: 1, open: false, children: [] },
+  ];
+  const node = (n, depth) => `
+    <div style="display:flex;align-items:center;gap:10px;min-height:46px;padding:${depth?4:8}px 4px ${depth?4:8}px ${depth * 16}px">
+      ${n.children && n.children.length
+        ? `<span style="color:var(--on-surface-variant);transform:rotate(${n.open ? 90 : 0}deg);display:flex">${icon("chevron_right", { size: 20 })}</span>`
+        : `<span style="width:20px"></span>`}
+      <span style="display:flex;color:var(--on-surface-variant)">${icon(depth === 0 ? "globe" : "place", { size: 18 })}</span>
+      <span style="font-size:${depth === 0 ? 15 : 14}px;${depth === 0 ? "font-weight:500;" : ""}flex:1">${n.name}</span>
+      <span style="font-size:13px;color:var(--on-surface-variant)">${n.n}</span>
+    </div>
+    ${n.open ? n.children.map(c => node(c, depth + 1)).join("") : ""}`;
+
+  const chart = `<div class="card" style="padding:14px">
+    <div style="font-size:13px;font-weight:500;color:var(--on-surface-variant);margin-bottom:12px">年度记录天数</div>
+    <div class="chart">
+      <div class="grid">${[6,5,4,3,2,1,0].map(()=>`<i></i>`).join("")}</div>
+      <div class="ylab">${[6,4,2,0].map(v=>`<span>${v}</span>`).join("")}</div>
+      <div class="bars">${bars.map(b => `<div class="bar" style="height:${(b.v / maxV) * 100}%"><span>${b.y}</span></div>`).join("")}</div>
+    </div>
+  </div>`;
+
+  const list = `<div class="card" style="padding:14px 12px 6px">
+    <div style="font-size:13px;font-weight:500;color:var(--on-surface-variant);margin:0 0 6px 8px">地点清单</div>
+    ${tree.map(n => node(n, 0)).join("")}
+  </div>`;
+
+  const empty = `<div class="card" style="padding:48px 16px;text-align:center">
+    <div style="color:var(--on-surface-variant);opacity:.55;display:flex;justify-content:center">${icon("place", { size: 40 })}</div>
+    <div style="font-size:15px;color:var(--on-surface-variant);margin-top:14px">还没有地点记录</div>
+  </div>`;
+
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0">
+    ${pageHeader("足迹", `<span style="font-size:13px;color:var(--on-surface-variant)">已标注 14 处 · 未记录 3 篇</span>`)}
+    <div style="display:flex;gap:8px;padding:12px 16px 0;overflow:hidden">
+      ${years.map((y, i) => `<span class="chip ${i === 1 ? "on" : ""}">${i === 1 ? icon("check",{size:18}) : ""}${y}</span>`).join("")}
+    </div>
+    <div style="flex:1;overflow:hidden;padding:12px 16px 0">
+      ${opt.empty ? empty : `
+        <div class="card" style="padding:14px 0;margin-bottom:12px">
+          <div class="stats">${stats.map(s => `<div class="st"><div class="v">${s[0]}</div><div class="k">${s[1]}</div></div>`).join("")}</div>
+        </div>
+        ${chart}
+        <div style="height:12px"></div>
+        ${list}`}
+    </div>
+    ${navbar("footprint")}
+  </div>`;
+  return phone(html, { dark: opt.dark, time: opt.time || "13:51" });
+}
+
+/* 平板横屏：统计在上，趋势 | 清单并排 */
+function footprintTablet() {
+  const list = `<div class="card" style="padding:14px 12px 6px">
+    <div style="font-size:13px;font-weight:500;color:var(--on-surface-variant);margin:0 0 6px 8px">地点清单</div>
+    ${[["中国",9],["美国",2],["日本",2],["法国",1]].map((r,i) => `
+      <div style="display:flex;align-items:center;gap:10px;min-height:44px;padding:0 8px;${i?"border-top:1px solid var(--outline-variant)":""}">
+        <span style="display:flex;color:var(--on-surface-variant)">${icon("globe",{size:18})}</span>
+        <span style="font-size:15px;font-weight:500;flex:1">${r[0]}</span>
+        <span style="font-size:13px;color:var(--on-surface-variant)">${r[1]}</span>
+        <span style="display:flex;color:var(--on-surface-variant)">${icon("chevron_right",{size:20})}</span>
+      </div>`).join("")}
+  </div>`;
+  const chart = `<div class="card" style="padding:14px">
+    <div style="font-size:13px;font-weight:500;color:var(--on-surface-variant);margin-bottom:12px">年度记录天数</div>
+    <div class="chart" style="height:190px">
+      <div class="grid">${[6,5,4,3,2,1,0].map(()=>`<i></i>`).join("")}</div>
+      <div class="ylab">${[6,4,2,0].map(v=>`<span>${v}</span>`).join("")}</div>
+      <div class="bars">${[{y:2024,v:4},{y:2025,v:6},{y:2026,v:3}].map(b => `<div class="bar" style="height:${(b.v/6)*100}%"><span>${b.y}</span></div>`).join("")}</div>
+    </div>
+  </div>`;
+  const html = `<div style="flex:1;display:flex;min-height:0">
+    ${rail("footprint", { fab: false })}
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:16px 16px 0">
+      ${pageHeader("足迹", `<span style="font-size:13px;color:var(--on-surface-variant)">已标注 14 处 · 未记录 3 篇</span>`, { padTop: 0 })}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        ${["全部","2026","2025","2024","自定义"].map((y,i)=>`<span class="chip ${i===1?"on":""}">${i===1?icon("check",{size:18}):""}${y}</span>`).join("")}
+      </div>
+      <div style="margin-top:12px">
+        <div class="card" style="padding:14px 0"><div class="stats">
+          ${[["7","省市"],["9","城市"],["4","国家"],["14","片段"],["13","天数"]].map(s=>`<div class="st"><div class="v">${s[0]}</div><div class="k">${s[1]}</div></div>`).join("")}
+        </div></div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:12px;flex:1;min-height:0">
+        <div style="flex:1;min-width:0">${chart}</div>
+        <div style="width:300px;flex:none;overflow:hidden">${list}</div>
+      </div>
+    </div>
+  </div>`;
+  return `<div class="device tablet land"><div class="screen">${statusbar("13:51")}${html}${gesturebar()}</div></div>`;
+}
+
+const B = [];
+
+B.push(section("1 · 搜索页",
+  `搜索框是<b>常驻</b>的 M3 SearchBar（不做 iOS 那种「折叠胶囊 → 展开」的二段式）；`+
+  `条件面板是同一张卡里的两组 FilterChip；条件生效后多出一行<b>可逐条删除</b>的 InputChip 摘要 + 「清除全部」。`+
+  `加载态用 <code>LinearProgressIndicator</code> + 骨架行 —— 这是对 iOS 一处缺陷的修正：`+
+  `iOS 的加载分支是死代码，搜索进行中列表是空白的。`,
+  `<div class="row">
+    ${shot("空态 · 竖屏", "未输入关键词、也无筛选：整屏只有搜索框 + 条件面板 + 引导空态。计数徽标只在有结果时出现。",
+      searchScreen({ w: 412, h: 915, state: "empty" }), [{ t: "P0" }], 432)}
+    ${shot("结果态 · 竖屏", "结果项：日期胶囊（primaryContainer）+ 时间 + 地点；标题与摘要里的命中词用 <code>primaryContainer</code> 底色高亮；整行可点进日记。",
+      searchScreen({ w: 412, h: 915, state: "list", count: 3, query: "",
+        summary: ["上海", "本月", "中国 · 上海市"], timeOn: 2, locPicked: "中国 · 上海市" }), [{ t: "P0" }], 432)}
+    ${shot("加载态 · 竖屏", "骨架屏 + 顶部 indeterminate 进度条。取代 iOS「搜索中列表空白、没有菊花」的缺陷。",
+      searchScreen({ w: 412, h: 915, state: "loading", focused: true, query: "上海", showPanel: false,
+        summary: ["上海"] }), [{ t: "修正 iOS 缺陷", k: "warn" }], 432)}
+    ${shot("无结果 · 竖屏", "空态给一条出路：直接提供「清除全部条件」，而不是只报「没找到」。",
+      searchScreen({ w: 412, h: 915, state: "noresult", query: "不存在的词", showPanel: false,
+        summary: ["不存在的词", "本周"] }), [{ t: "P1" }], 432)}
+  </div>`));
+
+B.push(section("2 · 搜索的两个 ModalBottomSheet 与横屏",
+  `iOS 的 <code>.sheet(.medium)</code> / <code>.sheet(.large)</code> 换成 M3 <b>ModalBottomSheet</b>：`+
+  `自定义时间范围（快捷区间 + 起止日期）与地点选择（搜索框 + 地点清单 + 未记录地点）。`+
+  `平板横屏改成<b>筛选左栏 + 结果右栏</b>，筛选常驻可见，不必再开面板。`,
+  `<div class="row">
+    ${shot("自定义时间范围", "三个快捷胶囊改的是一个「区间」筛选，点它立刻生效并关面板；底部「清除 / 确定」。",
+      searchSheet("time"), [{ t: "P1" }], 432)}
+    ${shot("选择地点", "地点清单按记录条数降序；「未记录地点」是一个独立选项，不是地点。",
+      searchSheet("loc"), [{ t: "P1" }], 432)}
+    ${shot("搜索 · 平板横屏 1280 × 800", "左侧 340dp 固定筛选栏 + 1dp 分隔线 + 右侧结果列表；结果项与竖屏逐像素同构。",
+      searchTablet(), [{ t: "横屏", k: "p" }], 1304)}
+  </div>`));
+
+B.push(section("3 · 足迹页",
+  `自上而下：页头（右侧一行摘要「已标注 N 处 · 未记录 M 篇」）→ 年份 chip 条（倒序，末位是「自定义」）→ `+
+  `5 格统计卡 → 年度趋势柱状图 → 国家→省→城市三级树。`+
+  `<b>趋势卡只在有 ≥2 个年份时出现</b>（iOS 同），所以它没有自己的空态。`,
+  `<div class="row">
+    ${shot("足迹 · 竖屏", "统计 5 格等宽：省市 / 城市 / 国家 / 片段 / 天数。柱状图 x = 年份（升序分类轴）、y = 该年去重记录天数，柱顶圆角 4dp。",
+      footprintScreen({ w: 412, h: 915 }), [{ t: "P0" }], 432)}
+    ${shot("足迹 · 空态", "没有任何地点记录：清单卡换成空态（<code>place</code> 图标 + 「还没有地点记录」）；统计卡与趋势卡照常显示 0 / 不显示。",
+      footprintScreen({ w: 412, h: 915, empty: true, time: "13:53" }), [{ t: "空态" }], 432)}
+    ${shot("足迹 · 深色", "柱状图柱体 = <code>primary</code>；网格线 = <code>outlineVariant</code>；轴标签 = <code>onSurfaceVariant</code>。",
+      footprintScreen({ w: 412, h: 915, dark: true, time: "21:20" }), [{ t: "深色", k: "dark" }], 432)}
+    ${shot("足迹 · 平板横屏", "统计整行在上，下面并排：趋势图（flex 撑满）+ 地点清单（固定 300dp、内部滚动）。清单在窄栏里只展开到国家一级。",
+      footprintTablet(), [{ t: "横屏", k: "p" }], 1304)}
+  </div>`));
+
+renderBoard({
+  title: "搜索 · 足迹",
+  sub: `两屏共用一套「筛选 → 列表」的骨架。Android 侧的两条硬要求：<b>筛选条件必须随时可见且可逐条撤销</b>` +
+       `（iOS 的条件胶囊行是唯一展示位），以及<b>空态必须给出路</b>（清除条件），不能只报「没找到」。`,
+  meta: "参照：iOS JustADiary/Views/{Search/SearchView,Footprint/FootprintView}.swift · Android 现有实现 ui/search/、ui/footprint/",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>06 · 设计系统与自适应</title>
+<link rel="stylesheet" href="assets/mockup.css">
+<script src="assets/ui.js"></script>
+</head>
+<body>
+<script>
+/* ==========================================================================
+   01 设计令牌（Material 3 / Material You）+ 08 自适应与导航
+   ========================================================================== */
+
+const LIGHT = [
+  ["primary", "#2563EB", "品牌蓝 seed（动态取色关闭时）"],
+  ["onPrimary", "#FFFFFF", "主色上的文字/图标"],
+  ["primaryContainer", "#DBEAFE", "时间胶囊、计数徽标、命中高亮"],
+  ["onPrimaryContainer", "#001A41", "主色容器上的文字"],
+  ["secondaryContainer", "#DAE2F9", "导航选中指示器、图标徽标"],
+  ["onSecondaryContainer", "#131C2B", "★ 上的文字"],
+  ["tertiaryContainer", "#FAD8FD", "待办勾选、次要强调"],
+  ["error", "#BA1A1A", "破坏性动作、删除"],
+  ["surface", "#F9F9FF", "窗口底色"],
+  ["onSurface", "#1A1B20", "正文、标题"],
+  ["surfaceContainerLowest", "#FFFFFF", "对话框、输入框底"],
+  ["surfaceContainerLow", "#F3F3FA", "内容卡片（阅读卡、设置卡）"],
+  ["surfaceContainer", "#EDEDF4", "底部导航栏"],
+  ["surfaceContainerHigh", "#E7E8EE", "引用块底、格式栏、搜索框"],
+  ["surfaceContainerHighest", "#E2E2E9", "Switch 轨道（关）"],
+  ["onSurfaceVariant", "#44474F", "次要文字、图标"],
+  ["outline", "#74777F", "输入框描边、Switch 描边"],
+  ["outlineVariant", "#C4C6D0", "分隔线、卡片描边"],
+  ["inverseSurface", "#2F3036", "Snackbar 底"],
+  ["inversePrimary", "#AEC6FF", "Snackbar 上的动作"],
+];
+
+const DARK = [
+  ["primary", "#AEC6FF"], ["onPrimary", "#002E69"], ["primaryContainer", "#00458F"],
+  ["onPrimaryContainer", "#D6E3FF"], ["secondaryContainer", "#3E4759"], ["onSecondaryContainer", "#DAE2F9"],
+  ["tertiaryContainer", "#573E5C"], ["error", "#FFB4AB"], ["surface", "#111318"], ["onSurface", "#E2E2E9"],
+  ["surfaceContainerLowest", "#0C0E13"], ["surfaceContainerLow", "#191C20"], ["surfaceContainer", "#1D2024"],
+  ["surfaceContainerHigh", "#282A2F"], ["surfaceContainerHighest", "#33353A"], ["onSurfaceVariant", "#C4C6D0"],
+  ["outline", "#8E9099"], ["outlineVariant", "#44474F"], ["inverseSurface", "#E2E2E9"], ["inversePrimary", "#2563EB"],
+];
+
+function swatch(name, hex, note) {
+  return `<div class="sw"><div class="c" style="background:${hex}"></div>
+    <div class="n">${name}</div><div class="h">${hex}${note ? " · " + note : ""}</div></div>`;
+}
+
+/* 动态取色：同一屏换四种壁纸种子 */
+function dynScreen(primary, container, onContainer) {
+  const html = `<div style="flex:1;display:flex;flex-direction:column;min-height:0"
+      style2="">
+    <div class="topbar" style="padding:0 8px">
+      <div class="iconbtn">${icon("back")}</div><div class="sp"></div>
+      <div class="iconbtn">${icon("edit")}</div><div class="iconbtn">${icon("share")}</div>
+    </div>
+    <div style="flex:1;padding:10px 16px 0">
+      <div class="card" style="background:${container}">
+        <div style="font-size:20px;font-weight:500;color:${onContainer}">9月8日 周二</div>
+        <div style="font-size:13px;color:${onContainer};opacity:.78;margin-top:2px">21:40 · 1 个片段</div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <div style="font-size:12.5px;color:${primary};font-weight:600">21:40</div>
+        <div style="font-size:22px;margin-top:6px">字体样式自检</div>
+        <div style="font-size:16px;line-height:24px;margin-top:6px">这一段是正文，用来和下面的标题对比字号。</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <span class="chip on" style="background:${container};color:${onContainer}">上海</span>
+        <span class="chip">本月</span>
+      </div>
+      <div style="margin-top:16px"><div class="btn filled" style="background:${primary}">写日记</div></div>
+    </div>
+  </div>`;
+  return phone(html, {});
+}
+
+const B = [];
+
+B.push(section("1 · 颜色：语义角色（亮 / 深）",
+  `颜色一律走 <code>MaterialTheme.colorScheme</code> 的语义角色，代码里<b>不出现十六进制</b>。` +
+  `左表的亮色值就是「动态取色被关闭或系统不支持」时的品牌回落色板（seed = <code>#2563EB</code>，与 iOS 品牌色同值）；` +
+  `Android 12+ 默认开启动态取色，角色值改由壁纸推导。`,
+  `<div class="row tight">
+    <div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px">亮色 scheme · 20 个关键角色</div>
+      <div class="swatches">${LIGHT.map(c => swatch(c[0], c[1], c[2])).join("")}</div>
+    </div>
+  </div>
+  <div style="height:26px"></div>
+  <div class="row tight">
+    <div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px">深色 scheme · 同 20 个角色</div>
+      <div class="swatches">${DARK.map(c => swatch(c[0], c[1], "")).join("")}</div>
+    </div>
+  </div>`));
+
+B.push(section("2 · Material You 动态取色",
+  `同一屏在四种壁纸种子下的样子。<b>只有 primary / secondary / tertiary 及其容器跟着壁纸走</b>，` +
+  `surface 系列与语义色（error）不参与，因此层级与对比度在任何壁纸上都稳定。` +
+  `若用户在设置里关闭动态取色、或系统低于 Android 12，回落到上表的品牌蓝。`,
+  `<div class="row tight">
+    ${shot("壁纸 A · 蓝（默认回落）", "seed #2563EB", dynScreen("#2563EB", "#DBEAFE", "#001A41"), [], 432)}
+    ${shot("壁纸 B · 紫（M3 基线）", "seed #6750A4", dynScreen("#6750A4", "#EADDFF", "#21005D"), [], 432)}
+    ${shot("壁纸 C · 绿", "seed #386A20", dynScreen("#386A20", "#B8F397", "#042100"), [], 432)}
+    ${shot("壁纸 D · 橙", "seed #8B5000", dynScreen("#8B5000", "#FFDCBE", "#2C1600"), [], 432)}
+  </div>`));
+
+B.push(section("3 · 排版：两套梯级，职责分开",
+  `<b>M3 组件的 15 个角色保持 Google 官方字号</b>（顶栏、对话框、输入框、按钮、导航标签全部吃这一套）；` +
+  `本项目的设计字号梯级只服务<b>内容层</b>（编辑器段落、日历、自绘文本）。` +
+  `两端阅读排版有意不同：iOS 按 Apple HIG（正文 17），Android 按 M3（正文 16）—— ` +
+  `<code>content_json</code> 存的是<b>语义样式</b>，字号从不落库，所以 <code>.jdiary</code> 仍双向互通。`,
+  `<table class="spec" style="max-width:1180px">
+    <tr><th>用途</th><th>Android（Material 3）</th><th>字号 / 行高</th><th>iOS 对照（Apple HIG）</th><th>备注</th></tr>
+    <tr><td>页面大标题</td><td><code>headlineMedium</code></td><td>28 / 36</td><td>Title 1 = 28</td><td>首页「九月」「2026年」</td></tr>
+    <tr><td>页头标题</td><td><code>headlineSmall</code></td><td>24 / 32</td><td>Title 2 = 22</td><td>搜索 / 足迹 / 设置</td></tr>
+    <tr><td>顶栏标题</td><td><code>titleLarge</code></td><td>22 / 28</td><td>Title 2 = 22</td><td>M3 small top app bar</td></tr>
+    <tr><td>编辑器 · 大标题</td><td><code>headlineMedium</code></td><td>28 / 36</td><td>Title 1 = 28</td><td rowspan="4">段落样式 ↔ 角色的<b>唯一映射点</b>：<code>EditorTypography.textStyleFor</code></td></tr>
+    <tr><td>编辑器 · 小标题</td><td><code>titleLarge</code></td><td>22 / 28</td><td>Title 2 = 22</td></tr>
+    <tr><td>编辑器 · 正文</td><td><code>bodyLarge</code></td><td><b>16</b> / 24</td><td>Body = <b>17</b></td></tr>
+    <tr><td>编辑器 · 引用</td><td><code>bodyMedium</code></td><td><b>14</b> / 20</td><td>Subheadline = <b>15</b></td></tr>
+    <tr><td>卡片标题 / 列表行</td><td><code>titleMedium</code> / <code>bodyLarge</code></td><td>16 / 24</td><td>Body = 17</td><td>设置行、结果项标题</td></tr>
+    <tr><td>次要说明</td><td><code>bodyMedium</code></td><td>14 / 20</td><td>Subheadline = 15</td><td>设置行副标题、摘要</td></tr>
+    <tr><td>标签 / 芯片</td><td><code>labelLarge</code></td><td>14 / 20</td><td>Footnote = 13</td><td>按钮、chip、导航标签</td></tr>
+    <tr><td>最次要</td><td><code>labelMedium</code></td><td>12 / 16</td><td>Caption 1 = 12</td><td>元信息、农历</td></tr>
+  </table>
+  <div style="height:16px"></div>
+  <div class="note blue" style="max-width:1180px">
+    <b>动态字体的逐档封顶必须保留。</b> Android 的 <code>fontScale</code> 是全局线性缩放，
+    直接乘会复现 iOS 早已修掉的「15pt 正文 &gt; 22pt 标题」层级倒挂。
+    沿用 <code>DynamicTypeMetrics.effectiveSp()</code>：<code>min(该档上限, max(1, fontScale))</code>，
+    上限按 Apple 文本样式分档 1.35–1.75，<code>fontScale = 1</code> 时与设计值逐字一致。
+    日历文字另按<b>半速</b>缩放（<code>calendarSp()</code>），否则日号会挤出格子。
+  </div>`));
+
+B.push(section("4 · 形状、海拔与组件",
+  `形状梯级全部落在 M3 Expressive 的 <code>4 / 8 / 12 / 16 / 28 / full</code> 上（不再有 20/26/14 这些非梯级值）。` +
+  `海拔用 M3 的 <b>tonal elevation</b>（surface container 阶梯）而不是投影：卡片与背景靠 <code>surfaceContainerLow</code> 区分，` +
+  `只有真正浮起的元素（FAB、Snackbar、格式栏、BottomSheet）才带阴影。`,
+  `<div class="row tight">
+    <div class="card" style="width:360px">
+      <div style="font-size:13px;font-weight:600;color:var(--primary);margin-bottom:12px">组件速查</div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span class="btn filled" style="height:40px">保存</span>
+          <span class="btn tonal" style="height:40px">取消</span>
+          <span class="btn outlined" style="height:40px">重试</span>
+          <span class="btn text">了解更多</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span class="chip">本周</span><span class="chip on">${icon("check",{size:18})}本月</span>
+          <span class="chip elev">${icon("calendar_today",{size:18})}今天</span>
+          <span class="chip lead">${icon("chevron_left",{size:18})}2026年</span>
+        </div>
+        <div style="display:flex;gap:16px;align-items:center">
+          <span class="switch on"></span><span class="switch"></span>
+          <span class="radio on"></span><span class="radio"></span>
+          <span class="cbox on"></span><span class="cbox"></span>
+          <span class="badge">12</span>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center">
+          <span class="fab sm">${icon("add",{size:22})}</span>
+          <span class="fab">${icon("add",{size:24})}</span>
+          <span class="fab extended">${icon("edit",{size:22})}写日记</span>
+        </div>
+        <div class="searchbar" style="height:56px">${icon("search",{size:22})}
+          <span style="font-size:16px;color:var(--on-surface-variant)">搜索日记内容…</span></div>
+      </div>
+    </div>
+    <table class="spec" style="max-width:760px">
+      <tr><th>形状令牌</th><th>值</th><th>用在哪</th></tr>
+      <tr><td><code>extraSmall</code></td><td>4dp</td><td>Snackbar、引用块底、柱状图柱顶</td></tr>
+      <tr><td><code>small</code></td><td>8dp</td><td>FilterChip、日历待办勾选框</td></tr>
+      <tr><td><code>medium</code></td><td>12dp</td><td>输入框、卡片内联图片、次级面</td></tr>
+      <tr><td><code>large</code></td><td>16dp</td><td><b>内容卡片</b>（日记卡、设置卡、Hero 卡）</td></tr>
+      <tr><td><code>extraLarge</code></td><td>28dp</td><td>BottomSheet、Dialog、悬浮格式栏、FAB</td></tr>
+      <tr><td><code>full</code></td><td>999dp</td><td>日期胶囊、chip、开关、导航指示器</td></tr>
+    </table>
+  </div>
+  <div style="height:16px"></div>
+  <div class="note" style="max-width:1180px">
+    <b>M3 没有对应物的三条 iOS 规则，Android 一律不改：</b>
+    ① <code>Radius.concentric(outer:inset:)</code> 的嵌套圆角公式（卡片里的小面）；
+    ② 日历的 <code>cellH = (区高 − 102) / 6</code>（恒除 6，5 行月份下方留白 → 翻月不跳）；
+    ③ 正文列宽 <code>min(660, 宽 − 32)</code> 且<b>阅读列宽 = 编辑列宽</b>。
+  </div>`));
+
+B.push(section("5 · 自适应：一个判据，三个形态",
+  `版面判定只有一个来源 —— <code>LocalAdaptiveLayout</code>（由 <code>RootScreen</code> 读一次几何后下发），` +
+  `页面内部不许再读屏幕尺寸。判据全部是<b>纯函数</b>，临界值可以在 JVM 上逐条断言。` +
+  `<b>手机锁竖屏</b>（<code>screenOrientation="portrait"</code>）；平板（<code>sw ≥ 600dp</code>）允许双向。`,
+  `<table class="spec" style="max-width:1180px">
+    <tr><th>窗口尺寸类</th><th>宽度</th><th>导航</th><th>首页</th><th>日记</th><th>设置 / 搜索 / 足迹</th></tr>
+    <tr><td><b>Compact</b>（手机）</td><td>&lt; 600dp</td><td>NavigationBar 80dp（底部）</td><td>三态 morph，日历铺满</td><td>单列，列宽 = 宽 − 32</td><td>单列；搜索筛选在上</td></tr>
+    <tr><td><b>Medium</b>（平板竖屏 / 折叠）</td><td>600–839dp</td><td>NavigationRail 96dp（左侧）</td><td>三态 morph，日历<b>限宽 640dp 居中</b></td><td>单列，列宽被 660 卡住居中</td><td>设置 2 列；搜索筛选在上</td></tr>
+    <tr><td><b>Expanded</b>（平板横屏）</td><td>≥ 840dp</td><td>NavigationRail 96dp</td><td><b>左右分栏</b>：月历 + 选中日</td><td>单列，列宽 660 居中</td><td>设置 3 列；搜索<b>筛选左栏 + 结果右栏</b>；足迹趋势 + 清单并排</td></tr>
+  </table>
+  <div style="height:16px"></div>
+  <div class="row tight">
+    ${shot("Compact · 手机竖屏", "底部 NavigationBar 80dp（在布局流里，不是浮层）—— 因此不会出现 iOS 那样「日历最后一行被浮条盖住」的问题。",
+      phone(`<div style="flex:1;display:flex;flex-direction:column">
+        <div style="flex:1;padding:16px"><div class="card"><div style="font-size:16px">手机 · 竖屏</div>
+        <div style="font-size:13px;color:var(--on-surface-variant);margin-top:4px">锁定方向；单栏；底部导航参与布局</div></div></div>
+        ${navbar("home")}</div>`), [{ t: "手机" }], 432)}
+    ${shot("Medium · 平板竖屏 800 × 1280", "侧栏 96dp + 内容限宽居中；首页仍是三态 morph（与 iOS 的「宽&gt;高才分栏」一致）。",
+      tablet(`<div style="flex:1;display:flex">
+        ${rail("home", { fab: false })}
+        <div style="flex:1;display:flex;flex-direction:column;padding:0 24px">
+          <div style="height:16px"></div>
+          <div class="card"><div style="font-size:16px">平板 · 竖屏</div>
+            <div style="font-size:13px;color:var(--on-surface-variant);margin-top:4px">NavigationRail；内容限宽 640dp 居中</div></div>
+        </div></div>`), [{ t: "平板竖屏" }], 824)}
+    ${shot("Expanded · 平板横屏 1280 × 800", "侧栏 + 左右分栏。分栏判据 <code>宽 &gt; 高 且 内容宽 ≥ 548.5dp</code>（iOS 原值），主栏 <code>clamp(内容宽 × 0.46, 260, 440)</code>。",
+      tablet(`<div style="flex:1;display:flex">
+        ${rail("home", { fab: false })}
+        <div style="flex:1;display:flex;gap:24px;padding:24px">
+          <div style="width:440px;flex:none" class="card"><div style="font-size:16px">主栏 · 月历</div>
+            <div style="font-size:13px;color:var(--on-surface-variant);margin-top:4px">紧凑标题 34 + 星期栏 26；上下滑翻月</div></div>
+          <div style="flex:1" class="card"><div style="font-size:16px">详情栏 · 选中日</div>
+            <div style="font-size:13px;color:var(--on-surface-variant);margin-top:4px">标题行 44dp，右侧「今天」；正文限宽 560dp</div></div>
+        </div></div>`, { landscape: true }), [{ t: "平板横屏" }], 1304)}
+  </div>`));
+
+B.push(section("6 · 动效与触感",
+  `动效时长与缓动一律用 M3 官方令牌，不再沿用 iOS 的数值。三态 morph 是唯一的长动画（400ms），` +
+  `其余全部落在 200–300ms。触感只在「有状态改变」的交互上给一次，不叠加。`,
+  `<table class="spec" style="max-width:1180px">
+    <tr><th>场景</th><th>Android（Material 3）</th><th>iOS 原值</th><th>说明</th></tr>
+    <tr><td>月↔周 morph（滑动）</td><td>400ms · <code>easing.emphasized</code> (0.2, 0, 0, 1)</td><td>600ms · timingCurve(0.2,0.75,0.3,1.0)</td><td>M3 <code>medium4</code>；two 端曲线形状相近，只是更快</td></tr>
+    <tr><td>月↔年 morph（缩放）</td><td>400ms · 同上</td><td>600ms · 同上</td><td>iOS 两条 morph <b>共用</b>同一条曲线，Android 也共用</td></tr>
+    <tr><td>翻月 / 翻年 / 翻周</td><td>300ms · <code>easing.emphasizedDecelerate</code></td><td>DragPagePager 跟手 + 回弹</td><td>M3 <code>medium2</code>；跟手部分照旧</td></tr>
+    <tr><td>展开 / 收起列表</td><td>250ms · <code>easing.standard</code></td><td>0.22s easeOut</td><td>M3 <code>medium1</code></td></tr>
+    <tr><td>减弱动态效果</td><td>180ms · <code>easing.linear</code>（交叉淡入，不做位移）</td><td>.linear(0.18)</td><td>两端一致</td></tr>
+    <tr><td>选中日 / 点日期</td><td><code>HapticFeedbackType.TextHandleMove</code></td><td><code>UIImpactFeedbackGenerator(.light)</code></td><td>一次，不叠加</td></tr>
+    <tr><td>破坏性动作确认</td><td><code>LongPress</code> 或 <code>Confirm</code>；或 <code>HapticFeedbackType.Reject</code></td><td><code>.sensoryFeedback(.warning)</code></td><td>只在真正失败/被拒时</td></tr>
+  </table>
+  <div style="height:14px"></div>
+  <div class="note red" style="max-width:1180px">
+    <b>不做捏合缩放。</b> iOS 版<b>没有</b> <code>MagnificationGesture</code>：月↔年只由顶栏胶囊触发。
+    Android 侧同样不加 —— 否则会和「上下滑翻月」抢手势，也会绕过 morph 的锚点几何。
+    （若后续要加，唯一安全的映射是：<code>zoom</code> 进度 = 手势 scale 的对数映射，锚点 = 源月卡片中心，收尾仍走同一段 400ms morph。）
+  </div>`));
+
+renderBoard({
+  title: "设计系统 · 自适应与导航",
+  sub: `这一板是<b>改代码前必须先读</b>的部分：颜色角色、两套字号梯级的职责分界、形状与海拔、` +
+       `三个窗口尺寸类的行为表、以及动效令牌的逐条映射。所有数值都有出处，不是"看起来差不多"。`,
+  meta: "参照：iOS JustADiary/Views/Components/{DesignSystem,DynamicType,AdaptiveLayout,Components}.swift · Material 3 (m3.material.io) · Android 现有实现 ui/theme/、ui/adaptive/",
+  body: B.join("")
+});
+</script>
+</body>
+</html>

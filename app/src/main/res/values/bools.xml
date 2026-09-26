@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    手机：锁定竖屏。
+    判据是 **最小宽度**（`sw600dp`）而不是当前宽度 —— 后者会随旋转变化，
+    折叠屏展开后也会跳变。见 docs/android-design/02-adaptive-and-navigation.md §1。
+-->
+<resources>
+    <bool name="is_tablet">false</bool>
+</resources>

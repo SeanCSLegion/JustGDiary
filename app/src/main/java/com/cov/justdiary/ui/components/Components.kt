@@ -1,27 +1,41 @@
 package com.cov.justdiary.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.ui.theme.LocalIncreasedContrast
@@ -35,10 +49,10 @@ import com.cov.justdiary.ui.theme.TypeSize
  * ## 设计语言
  *
  * 这些组件**按 Material 3 实现**（已确认：不模仿 iOS 的 Liquid Glass，见方案 §7）：
- * 内容面用 M3 的 surface 层级 + 描边 + elevation，而不是半透明玻璃。
- * 只有**自绘组件**（日历、图表、分享长图）才沿用原项目的度量令牌。
+ * 内容面用 M3 的 surface 层级 + 描边，**不用阴影**（阴影只留给真正浮起的元素：
+ * 格式栏、Snackbar、BottomSheet、FAB）。
  *
- * 行为上仍与 iOS 对齐的部分：卡片在"增强对比度"下描边加粗（0.5dp/45% → 1.5dp/90% + 外描边）。
+ * 行为上仍与 iOS 对齐的部分：卡片在"增强对比度"下描边加粗（→ 1.5dp / 90%）。
  */
 @Composable
 fun DiaryCard(
@@ -50,11 +64,11 @@ fun DiaryCard(
     val increased = LocalIncreasedContrast.current
     val shape = RoundedCornerShape(Radius.card)
 
-    // 增强对比度：内描边加深加粗，并加一圈外描边（与 iOS 的规则一致）
+    // 增强对比度：描边加深加粗（与 iOS 的规则一致）
     val border = if (increased) {
-        BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f))
+        BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     }
 
     if (onClick != null) {
@@ -65,8 +79,6 @@ fun DiaryCard(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = MaterialTheme.colorScheme.onSurface,
             border = border,
-            tonalElevation = 2.dp,
-            shadowElevation = 3.dp,
         ) {
             Box(modifier = Modifier.padding(contentPadding)) { content() }
         }
@@ -77,10 +89,194 @@ fun DiaryCard(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = MaterialTheme.colorScheme.onSurface,
             border = border,
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
         ) {
             Box(modifier = Modifier.padding(contentPadding)) { content() }
+        }
+    }
+}
+
+/** 顶栏胶囊的两种变体（见设计规范 `03-home.md` §3）。 */
+enum class PillVariant {
+    /** 导航用：1dp `outlineVariant` 描边，中性。 */
+    Outlined,
+
+    /** 动作用：`surfaceContainerLow` 底 + 阴影，微微浮起。 */
+    Elevated,
+}
+
+/**
+ * 顶栏胶囊（M3 **assist chip**）。
+ *
+ * 首页顶部两枚：左侧是导航（月态读 `2026年` → 去年历；周态读 `九月` → 回月态），
+ * 右侧是动作（`今天` → 回到今天）。视觉 40dp 高，触控目标由
+ * `minimumInteractiveComponentSize` 撑到 48dp。
+ */
+@Composable
+fun AssistPill(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leading: ImageVector? = null,
+    variant: PillVariant = PillVariant.Outlined,
+) {
+    val shape = CircleShape
+    val colors = if (variant == PillVariant.Elevated) {
+        AssistChipDefaults.assistChipColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            labelColor = MaterialTheme.colorScheme.onSurface,
+            leadingIconContentColor = MaterialTheme.colorScheme.onSurface,
+        )
+    } else {
+        AssistChipDefaults.assistChipColors(
+            containerColor = Color.Transparent,
+            labelColor = MaterialTheme.colorScheme.onSurface,
+            leadingIconContentColor = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+    AssistChip(
+        onClick = onClick,
+        label = { Text(text, style = MaterialTheme.typography.labelLarge) },
+        modifier = modifier.heightIn(min = 40.dp),
+        leadingIcon = leading?.let { { Icon(it, contentDescription = null, modifier = Modifier.size(18.dp)) } },
+        shape = shape,
+        colors = colors,
+        border = if (variant == PillVariant.Elevated) null else AssistChipDefaults.assistChipBorder(
+            enabled = true,
+            borderColor = MaterialTheme.colorScheme.outlineVariant,
+            borderWidth = 1.dp,
+        ),
+        elevation = if (variant == PillVariant.Elevated) {
+            AssistChipDefaults.assistChipElevation(elevation = 1.dp)
+        } else {
+            null
+        },
+    )
+}
+
+/**
+ * 可删除的条件胶囊（`InputChip`）。
+ *
+ * 用在搜索页与足迹页的"条件摘要行"：**每一条筛选都必须能单独撤销** ——
+ * 这是 iOS 的条件栏唯一展示位职责，重建时不要退化成静态小块。
+ */
+@Composable
+fun InputPill(
+    text: String,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    InputChip(
+        selected = true,
+        onClick = onRemove,
+        label = { Text(text, style = MaterialTheme.typography.labelLarge) },
+        modifier = modifier,
+        trailingIcon = {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+            )
+        },
+        colors = InputChipDefaults.inputChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            selectedTrailingIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        border = null,
+    )
+}
+
+/** 计数徽标（「找到 3 条日记」「1/3」）。 */
+@Composable
+fun CountBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    leading: ImageVector? = null,
+) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            if (leading != null) {
+                Icon(leading, contentDescription = null, modifier = Modifier.size(12.dp))
+            }
+            Text(text, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/**
+ * 骨架行。用于**首屏加载**（搜索正在执行、足迹首次载入）。
+ *
+ * 设计规范 `05-search-footprint-settings.md` §4：首屏用骨架行，
+ * 翻页用底部小进度圈，**不要用整屏菊花**。
+ */
+@Composable
+fun SkeletonRows(
+    modifier: Modifier = Modifier,
+    count: Int = 3,
+    widthFractions: List<Float> = listOf(0.38f, 0.88f, 0.64f),
+) {
+    Column(
+        modifier = modifier.fillMaxWidth().padding(Spacing.page),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        repeat(count) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                widthFractions.forEach { f ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(f)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 忙碌遮罩（导出 / 导入备份）。
+ *
+ * **不可取消**：导入中途取消会留下半写状态。因此这里没有关闭入口，
+ * 只有 scrim + 居中的圆角卡片 + 不确定进度圈。
+ */
+@Composable
+fun BusyOverlay(text: String, visible: Boolean, modifier: Modifier = Modifier) {
+    if (!visible) return
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .semantics { paneTitle = text },
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(Radius.panel),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 36.dp, vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(44.dp))
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
     }
 }
