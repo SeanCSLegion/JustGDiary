@@ -199,7 +199,14 @@ fun HomeScreen(
     val yearProgress = remember { Animatable(if (mode == HomeViewMode.YEAR) 1f else 0f) }
     val weekProgress = remember { Animatable(if (mode == HomeViewMode.WEEK) 1f else 0f) }
     val scope = rememberCoroutineScope()
-    val morphing = yearProgress.value > 0.01f || weekProgress.value > 0.01f
+    // 「正在 morph」= 进度**停在两个端点之间**。
+    //
+    // ⚠️ 不能写成 `yearProgress.value > 0.01f`：年态的静止值就是 1.0，
+    // 那个写法会让年态**永远**被当成"morph 中"，于是
+    // ① 翻页手势被整条撤下（年态上下滑毫无反应 —— 实测确认，这是个存在已久的 bug），
+    // ② 与「morph 期间撤下手势」的本意（规范 §1 规则 2）也不符。
+    val morphing = (yearProgress.value > 0.01f && yearProgress.value < 0.99f) ||
+        (weekProgress.value > 0.01f && weekProgress.value < 0.99f)
     // 「减弱动态效果」：系统关掉动画时两条 morph 退化为 180ms 纯交叉淡入（规范 §6.1）。
     // 判据同时认 `LocalReduceMotion`（设置里的"移除动画"）与
     // `ValueAnimator.areAnimatorsEnabled()`（开发者选项 / 无障碍），任一为真即降级。
@@ -502,11 +509,13 @@ fun HomeScreen(
         //
         // **morph 进行中整条手势撤下**（规范 §1 规则 2）。放在 `then` 里而不是在
         // 回调里 guard：撤下之后系统会把进行中的拖动当作取消，不会留下半截位移。
-        val swipeModifier = Modifier
-            .fillMaxWidth()
-            .height(bandH.dp)
-            .clipToBounds()
-            .pointerInput(mode, rows, cellH, split) {
+        // ⚠️ 手势要挂在**日历区的容器**上，不能挂在月层上：年态下月层是不组合的
+        // （morph 收尾后整层撤下），挂在月层上会让年态**完全没有翻页手势** —— 实测回归。
+        // 周态没有这条手势（规范 §6），morph 中撤下（规范 §1 规则 2）。
+        val pagerGesture = if (morphing || mode == HomeViewMode.WEEK) {
+            Modifier
+        } else {
+            Modifier.pointerInput(mode, rows, cellH, split) {
                 var accumulated = 0f
                 val tracker = VelocityTracker()
                 detectVerticalDragGestures(
@@ -584,17 +593,13 @@ fun HomeScreen(
                     },
                 )
             }
-        // 周态**没有**「上下滑翻月」这条手势（规范 §6）：那条手势只改 `monthKey` 不改
-        // `selectedKey`，而周条是从选中日推出来的 —— 结果竖直拖一下，周条会悄悄变成
-        // "另一个月的第一周"，而下方日期标题与当日面板还是旧日期。
-        val pagerModifier = if (morphing || mode == HomeViewMode.WEEK) {
-            Modifier
-                .fillMaxWidth()
-                .height(bandH.dp)
-                .clipToBounds()
-        } else {
-            swipeModifier
         }
+        // 分栏 / 周态用的"固定尺寸 + 可选手势"修饰符
+        val pagerModifier = Modifier
+            .fillMaxWidth()
+            .height(bandH.dp)
+            .clipToBounds()
+            .then(pagerGesture)
 
         Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -771,7 +776,12 @@ fun HomeScreen(
                         // 常驻三张会让每帧多画两遍。
                         val dragNext = pageOffsetPx < -1f
                         val dragPrev = pageOffsetPx > 1f
-                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .then(pagerGesture),
+                        ) {
                             // 月层：morph 结束后（年态且 p=1）完全不画，省一次整屏组合
                             if (!(mode == HomeViewMode.YEAR && yp >= 1f)) {
                                 val src = CalendarLayout.yearCardRect(
@@ -780,7 +790,10 @@ fun HomeScreen(
                                     yearHeight,
                                 )
                                 Box(
-                                    modifier = pagerModifier
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(bandH.dp)
+                                        .clipToBounds()
                                         .graphicsLayer {
                                             // 跟手位移（翻页时整层上下走）
                                             translationY = pageOffsetPx
@@ -798,48 +811,46 @@ fun HomeScreen(
                                         },
                                     contentAlignment = Alignment.TopCenter,
                                 ) {
-                                    // 拖动中把邻页也画上：邻页与本页之间正好隔一个 bandH，
-                                    // 于是"本页滑出屏幕"的同时"邻页滑进来"，中间不会露白。
-                                    if (dragNext) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(bandH.dp)
-                                                .graphicsLayer { translationY = bandH * densityScale },
-                                        ) { CalendarSection(args = neighborMonthArgs(1)) }
-                                    }
-                                    if (dragPrev) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(bandH.dp)
-                                                .graphicsLayer { translationY = -bandH * densityScale },
-                                        ) { CalendarSection(args = neighborMonthArgs(-1)) }
-                                    }
-                                    CalendarSection(args = calendarArgs)
+                                    PagerViewport(
+                                        bandH = bandH,
+                                        offsetPx = pageOffsetPx,
+                                        showNext = dragNext,
+                                        showPrev = dragPrev,
+                                        page = { offsetMonths ->
+                                            if (offsetMonths == 0) {
+                                                CalendarSection(args = calendarArgs)
+                                            } else {
+                                                CalendarSection(args = neighborMonthArgs(offsetMonths.toLong()))
+                                            }
+                                        },
+                                    )
                                 }
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(bandH.dp)
-                                    .clipToBounds(),
-                                contentAlignment = Alignment.TopCenter,
-                            ) {
-                                YearLayer(
-                                    args = calendarArgs,
-                                    year = year,
-                                    monthFirst = monthFirst,
-                                    monthTitleLabel = monthTitle,
-                                    yearHeight = yearHeight,
-                                    yearWidth = calendarW,
-                                    monthGridH = gridH,
-                                    yearProgress = yp,
-                                    dateFormats = dateFormats,
-                                    onMonthClick = { month -> openMonthFromYear(month) },
-                                    dragOffsetPx = pageOffsetPx,
-                                )
-                            }
+                            // 年层：与月层同一套"跟手 + 邻页"结构。
+                            // ⚠️ 上一轮只给月层加了邻页，年层只加了位移 —— 于是在年态上下拖
+                            // 会把整屏年历推上去、**下方露出空白**（实测回归）。这里补齐。
+                            PagerViewport(
+                                bandH = bandH,
+                                offsetPx = pageOffsetPx,
+                                showNext = dragNext,
+                                showPrev = dragPrev,
+                                page = { offsetYears ->
+                                    val neighbor = offsetYears != 0
+                                    YearLayer(
+                                        args = calendarArgs,
+                                        year = year + offsetYears,
+                                        monthFirst = monthFirst.plusYears(offsetYears.toLong()),
+                                        monthTitleLabel = monthTitle,
+                                        yearHeight = yearHeight,
+                                        yearWidth = calendarW,
+                                        monthGridH = gridH,
+                                        // 当前年跟着 morph；邻年恒为"年态已就位"
+                                        yearProgress = if (neighbor) 1f else yp,
+                                        dateFormats = dateFormats,
+                                        onMonthClick = { month -> openMonthFromYear(month) },
+                                    )
+                                },
+                            )
                         }
                     }
                 }
@@ -965,6 +976,58 @@ private data class CalendarSectionArgs(
     /** 大标题文案（`九月`）。 */
     val monthTitleLabel: String,
 )
+
+/**
+ * 翻页视口：把「跟手位移 + 邻页补齐」这套结构收在一处，月层与年层共用。
+ *
+ * [page] 的入参是相对偏移：`0` 当前页、`+1` 下一页（下方）、`-1` 上一页（上方）。
+ * 邻页只在真正拖动时组合（`showNext` / `showPrev`）—— 日历与年历都是自绘的，
+ * 常驻三页会让每帧多画两遍。
+ *
+ * 邻页与本页之间正好隔一个 [bandH]，于是"本页滑出屏幕"的同时"邻页滑进来"，中间不露白。
+ */
+@Composable
+private fun PagerViewport(
+    bandH: Float,
+    offsetPx: Float,
+    showNext: Boolean,
+    showPrev: Boolean,
+    page: @Composable (Int) -> Unit,
+) {
+    val densityScale = LocalDensity.current.density
+    val pagePx = bandH * densityScale
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(bandH.dp)
+            .clipToBounds(),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(bandH.dp)
+                .graphicsLayer { translationY = offsetPx },
+        ) {
+            if (showNext) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(bandH.dp)
+                        .graphicsLayer { translationY = pagePx },
+                ) { page(1) }
+            }
+            if (showPrev) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(bandH.dp)
+                        .graphicsLayer { translationY = -pagePx },
+                ) { page(-1) }
+            }
+            page(0)
+        }
+    }
+}
 
 /**
  * 日历区：星期栏 + （月格网格 或 周条）。
