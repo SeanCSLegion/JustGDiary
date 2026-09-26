@@ -446,13 +446,20 @@ fun HomeScreen(
         // 原来 `resolveDensity` 算出了 `WeekStrip` 却只读 `.showLunar`，等于没降级（规范 §5.3）。
         val weekStripOnly = split && density.kind == CalendarLayout.DensityKind.WeekStrip
         val shownRows = if (weekStripOnly) 1 else rows
-        val cellH = if (split) {
-            // 分栏要**铺满**（不封顶也不留白）：均分是唯一不出错的做法
-            CalendarLayout.fitCellHeight(monthAreaH - splitHeaderH, shownRows)
-                .let { if (weekStripOnly) it.coerceAtMost(CalendarLayout.WEEK_STRIP_H) else it }
-        } else {
-            CalendarLayout.cellHeightFor(monthAreaH)
+        // 行高 = **把整页均分给当月实际行数**（5 行月就 5 等分，6 行月就 6 等分）。
+        //
+        // ⚠️ 原来竖屏走 `cellHeightFor`（固定除以 6），于是 5 行的月份在页内留一整行空白，
+        // 而"页高"又跟着内容变（`monthPageH = 标题 + 星期栏 + 行数 × cellH`）——
+        // **相邻月的行数不同 ⇒ 两页高度不同 ⇒ 行数多的那一页会被行数少的那一页的
+        // 高度裁掉**，表现为"邻页只露出一两行"（用户实测）。
+        //
+        // 按用户建议统一成"**每页都是同一个整页高度**、行数少就把行拉高"：
+        // 页高恒定 = 不会互相裁切，也不会留空白行。
+        val headerH = if (split) splitHeaderH else {
+            CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H
         }
+        val cellH = CalendarLayout.fitCellHeight(monthAreaH - headerH, shownRows)
+            .let { if (weekStripOnly) it.coerceAtMost(CalendarLayout.WEEK_STRIP_H) else it }
         val gridH = CalendarLayout.monthGridHeight(shownRows, cellH)
         val metrics = remember(calendarW, cellH, showLunarHere) {
             CalendarLayout.monthPaneMetrics(
@@ -541,7 +548,9 @@ fun HomeScreen(
         // 而下一页从"带高"之后才开始 —— 拖动时两页之间出现一大块**空洞**，
         // 看起来像"内容明显不全"（用户反馈）。改成按内容高度分页之后两页是**紧挨着**的；
         // 静置时多出来的那点高度落在页外（在当日面板之上），观感与原来完全一样。
-        val monthPageH = CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H + gridH
+        // 每一页都是**同一个整页高度**（= 日历带）：行数少时行被拉高填满，
+        // 于是任意两个相邻月的高度都相同，拖动时不会互相裁切。
+        val monthPageH = monthAreaH
 
         //
         // **morph 进行中整条手势撤下**（规范 §1 规则 2）。放在 `then` 里而不是在
