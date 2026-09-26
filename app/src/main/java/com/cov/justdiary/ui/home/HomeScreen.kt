@@ -309,7 +309,11 @@ fun HomeScreen(
                 // 停稳后**吸附到整月**：慢拖（松手时几乎没有速度）不会触发 fling，
                 // 于是可能停在"上个月的尾巴还露一点"的位置。这里补一次动画，
                 // 让静止态永远是"一整个月"（规范 §5.1：一屏一个月）。
-                // 不再"停稳后吸附到整月"：月视图是无级滚动（用户明确要求）。
+                // 兜底吸附：慢拖没有 fling，框架不会自动吸 —— 这里补一次动画，
+                // 保证静止态**永远**是"某一项的起点"（= 默认位置）。
+                if (monthListState.firstVisibleItemScrollOffset != 0) {
+                    monthListState.animateScrollToItem(index)
+                }
                 val key = CalendarGrid.MONTH_KEYS.getOrNull(index) ?: return@collect
                 if (key != monthKey) monthKey = key
             }
@@ -961,10 +965,20 @@ fun HomeScreen(
                                     // 一个月一项、项间空一行、滚动是无级的，松手由官方
                                     // `rememberSnapFlingBehavior` 吸附到最近的月份。
                                     // 手写的分页器（PagerViewport / 位移 / 橡皮筋 / 收尾动画）就此删除。
-                                    // 用户 2026-09-26："月视图不要有吸附。" —— 于是不传
-                                    // `flingBehavior`，用框架默认的自由滚动（无级、有惯性、不吸附）。
+                                    // **吸附**（用户 2026-09-26 决定加回来）。
+                                    //
+                                    // 起因：无级滑动可以停在"上个月还露一条边"的位置，
+                                    // 而 `monthKey` 只在停稳后更新 —— 于是"滚到别的月的日期上直接点"
+                                    // 时 morph 会拿上个月的行号去驱动这个月的块，上移错误的一行
+                                    // （见 03-home.md §8.9.2）。用户取舍："退而求其次，把吸附加上去，
+                                    // 这样每次都会是默认位置了。"
+                                    //
+                                    // ⚠️ 只靠 `flingBehavior` 不够：**慢拖（松手几乎没有速度）
+                                    // 不会触发 fling**，仍会停在月中。所以下面还有一道
+                                    // "停稳后若不在项起点就拨回去"的兜底。
                                     LazyColumn(
                                         state = monthListState,
+                                        flingBehavior = rememberSnapFlingBehavior(monthListState),
                                         userScrollEnabled = !morphing,
                                         // 顶部内边距 = **钉住栏高度 − 紧凑标签行高度**。
                                         //
