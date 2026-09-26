@@ -1331,9 +1331,11 @@ private fun CalendarSection(args: CalendarSectionArgs) {
         // 紧凑月（非当前月）的标签**占一整行的高度**（= 行高）：
         // 用户要求"月份与日期之间的间隔要和日期间的间隔一样"，而月份之间的那条线
         // 也要和行分隔线一样 —— 于是标签行就当成"一行"来排。
-        // 用户："月份的高度是紧贴字体显示的，不是和日期一样高的。"
-        // 所以标签行**只按字号撑开**（用设计稿里的紧凑标题高度 34dp），
-        // 不占一整行；字号 18sp、行内居中。
+        // 用户："月份的高度是紧贴字体显示的，不是和日期一样高的。" —— 标签行只按字号撑开。
+        //
+        // ⚠️ 试过再把高度压到 0、用 `offset` 把标签画进首行留白（想让它更贴近 1 号），
+        // 结果**整块标签消失**（0 高度父级下文字量成 0 高，加 `wrapContentHeight(unbounded)`
+        // 也没救回来），已回退。标签与 1 号之间那点空隙留着下一轮用别的办法处理。
         args.compactMonth -> CalendarLayout.COMPACT_MONTH_TITLE_H
         args.showBigTitle -> CalendarLayout.BIG_TITLE_H
         else -> CalendarLayout.COMPACT_MONTH_TITLE_H
@@ -1370,16 +1372,9 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                 },
                 contentAlignment = Alignment.CenterStart,
             ) {
-                // 分割线按**日期**走：一个月的**开始之前**有一条
-                // （用户："一个月的开始前和结束后都是有分割线的"）。
-                // 相邻两月共用这一条 —— 它既是上一月的"结束后"，也是下一月的"开始前"。
-                if (args.compactMonth) {
-                    HorizontalDivider(
-                        modifier = Modifier.align(Alignment.TopStart),
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                    )
-                }
+                // 月份开始前的那条分割线**不在这一层画** —— 交给 `CalendarDayGrid`
+                // 的 `dividerAboveFirst`：它知道首行哪些列真正有日期，
+                // 于是线只跨那段（用户："分割线范围到日期为限，而不是一整行"）。
                 // 32sp 大标题（规范 §5.2）：iOS 的视觉重心就在这一行，
                 // 首轮把它并进顶栏，于是整块版面又扁又空（实测缺陷 D5）。
                 // 标签宽度要**量出来**才能做溢出保护：11 月 1 号落在最后一列时，
@@ -1470,6 +1465,8 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     showAdjacent = false,
                     showLunar = args.showLunar,
                     showDividers = true,
+                    // 每个月（除列表首月）在首行上方也画一条 —— 即"月份开始之前"的那条
+                    dividerAboveFirst = args.compactMonth,
                     rowOffsets = (args.rowOffsetsOverride ?: args.rowOffsets).takeIf { p > 0.01f },
                     rowAlphas = if (p > 0.01f) {
                         val base = args.rowAlphasOverride ?: args.rowAlphas

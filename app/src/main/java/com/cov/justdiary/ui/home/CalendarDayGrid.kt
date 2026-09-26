@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -99,6 +101,11 @@ fun CalendarDayGrid(
     rowMetrics: Array<CalendarLayout.DayMetrics>? = null,
     /** 行之间是否画分隔线（周条不画）。 */
     showDividers: Boolean = true,
+    /**
+     * 第一行**上方**也画分割线（月份开始前的那一条）。
+     * 月列表里除第一个月之外的每个月都传 true（用户："一个月的开始前和结束后都是有分割线的"）。
+     */
+    dividerAboveFirst: Boolean = false,
 ) {
     val fontScale = LocalDensity.current.fontScale
     val dayFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
@@ -113,14 +120,31 @@ fun CalendarDayGrid(
             // 分隔线：只画在"这一行至少有一个当月日期"的位置。
             // 不能用 `!showAdjacent || ...` 短路 —— showAdjacent=false 时那会变成恒真，
             // 于是整行都是相邻月的空行也会画一条线（实测缺陷 D12）。
-            val rowHasMonthDay = week.any {
-                it.year == anchorMonth.year && it.monthValue == anchorMonth.monthValue
+            //
+            // 这一行里**真正属于当月**的列区间 —— 分割线只跨这段，不是整行。
+            // （用户："分割线范围到日期为限，而不是一整行"。
+            //   例：11 月 1 号落在周日，首行只有最右一格有日期，线就只画在那一格上。）
+            val monthCols = week.indices.filter {
+                val d = week[it]
+                d.year == anchorMonth.year && d.monthValue == anchorMonth.monthValue
             }
-            if (row > 0 && showDividers && m.dividerAlpha > 0.01f && rowHasMonthDay) {
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = outlineVariant.copy(alpha = 0.35f * m.dividerAlpha),
-                )
+            val drawDivider = showDividers && m.dividerAlpha > 0.01f && monthCols.isNotEmpty() &&
+                (row > 0 || dividerAboveFirst)
+            if (drawDivider) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        // 列宽直接用本行的度量（`DayMetrics.cellW`），不必再去量布局
+                        .padding(start = (monthCols.first() * m.cellW).dp)
+                        .padding(end = ((7 - monthCols.last() - 1) * m.cellW).dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(outlineVariant.copy(alpha = 0.35f * m.dividerAlpha)),
+                    )
+                }
                 flowY += 1f
             }
             // 目标 y（绝对）− 流动 y = 需要施加的位移

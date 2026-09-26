@@ -310,6 +310,11 @@ object CalendarLayout {
     const val DAY_FONT_MAX = 20f
     const val LUNAR_FONT_MAX = 11f
 
+    /**
+     * 内联月份标签往首行留白里下探多少 dp（标签行高度为 0，靠这个偏移落在 1 号上方）。
+     */
+    const val COMPACT_LABEL_DROP = 6f
+
     /** 日号与农历之间的空档要收掉多少 dp（圆底比数字本身高出一截）。 */
     const val LUNAR_TIGHTEN = 6f
 
