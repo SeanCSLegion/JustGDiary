@@ -550,12 +550,13 @@ fun HomeScreen(
                         // 动画结束后才真正换月 —— 于是换月那一帧的画面与动画终点完全一致，
                         // 不会出现"啪"地跳一下。
                         val pagePx = bandH * densityScale
-                        val commitPx = when (target) {
-                            CalendarLayout.PageTarget.Next -> -pagePx
-                            CalendarLayout.PageTarget.Previous -> pagePx
-                            CalendarLayout.PageTarget.Stay -> 0f
-                        }
-                        settled = target != CalendarLayout.PageTarget.Stay
+                        // ⚠️ **方向必须留下来**。这里曾经只留了"要不要翻"（`settled: Boolean`），
+                        // 把 `Next / Previous` 收敛成了一个布尔值，于是无论往哪边拖都走
+                        // `pageMonth(+1)` / `jumpYear(+1)` —— **两个方向都往前翻**
+                        // （实测：从一月往下拖得到二月，往上拖得到三月）。
+                        val step = CalendarLayout.stepOf(target)
+                        val commitPx = -step * pagePx
+                        settled = step != 0
                         scope.launch {
                             settleAnim.animateTo(
                                 targetValue = commitPx - dragOffsetPx,
@@ -566,7 +567,7 @@ fun HomeScreen(
                             )
                             if (settled) {
                                 // 分栏翻月带走选中日（右栏跟着走），竖屏不带走
-                                if (mode == HomeViewMode.YEAR) jumpYear(1) else pageMonth(1, split)
+                                if (mode == HomeViewMode.YEAR) jumpYear(step) else pageMonth(step, split)
                             }
                             // 换月后当前页就是刚才的邻页，把位移归零（同一帧内完成，看不出跳）
                             dragOffsetPx = 0f

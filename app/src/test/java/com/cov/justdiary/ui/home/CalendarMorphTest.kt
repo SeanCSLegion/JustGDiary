@@ -81,6 +81,33 @@ class CalendarMorphTest {
     }
 
     /**
+     * 翻页方向：**向下拖回上一个月、向上拖到下一个月**。
+     *
+     * 这里钉的是一类真实发生过的回归 —— 收尾动画那边一度只用 `settled: Boolean`，
+     * 把 `Next / Previous` 收敛成布尔值，结果**两个方向都往前翻**
+     * （实测：从一月往下拖得到二月，往上拖得到三月）。
+     * 方向必须一路带到 `pageMonth` / `jumpYear`，所以断言"决定"与"步长"两步都带符号。
+     */
+    @Test
+    fun `swiping down goes to the previous page and up goes to the next`() {
+        val down = CalendarLayout.DragPagerMath.decide(120f, 200f, hasNext = true, hasPrev = true)
+        assertEquals(CalendarLayout.PageTarget.Previous, down)
+        assertEquals(-1, CalendarLayout.stepOf(down))
+
+        val up = CalendarLayout.DragPagerMath.decide(-120f, -200f, hasNext = true, hasPrev = true)
+        assertEquals(CalendarLayout.PageTarget.Next, up)
+        assertEquals(1, CalendarLayout.stepOf(up))
+
+        assertEquals(
+            "没到阈值就不翻",
+            0,
+            CalendarLayout.stepOf(
+                CalendarLayout.DragPagerMath.decide(5f, 5f, hasNext = true, hasPrev = true),
+            ),
+        )
+    }
+
+    /**
      * 翻页的收尾时长：提交比放弃略慢（回弹要"轻"），两者都在 `medium` 量级。
      * 这两个值决定"松手后补完动画"的观感，被改小会让翻页显得很硬。
      */

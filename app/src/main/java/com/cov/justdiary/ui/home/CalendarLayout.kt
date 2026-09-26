@@ -708,6 +708,20 @@ object CalendarLayout {
 
     enum class PageTarget { Previous, Stay, Next }
 
+    /**
+     * 翻页目标 → **带符号的步长**（`Next = +1` / `Previous = -1` / `Stay = 0`）。
+     *
+     * 这个函数存在的唯一理由是防止一类真实发生过的回归：收尾动画那边一度只用
+     * `settled: Boolean` 表示"要不要翻"，把 `Next / Previous` 收敛成了一个布尔值 ——
+     * 于是**无论往哪边拖都往前翻**（实测：从一月往下拖得到二月，往上拖得到三月）。
+     * 方向必须一路带着走到 `pageMonth` / `jumpYear`，所以把它固化成纯函数并加断言。
+     */
+    fun stepOf(target: PageTarget): Int = when (target) {
+        PageTarget.Next -> 1
+        PageTarget.Previous -> -1
+        PageTarget.Stay -> 0
+    }
+
     // ------------------------------------------------------------------ 日期 → 行号
 
     /** 某一天在月格中的行号（`CalendarLayout.swift:364-368`）。 */
