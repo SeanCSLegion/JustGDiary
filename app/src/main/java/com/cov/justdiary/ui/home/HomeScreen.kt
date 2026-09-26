@@ -840,8 +840,20 @@ fun HomeScreen(
                                 }
                             }
                             // 年层：与月层同一套"跟手 + 邻页"结构。
-                            // ⚠️ 上一轮只给月层加了邻页，年层只加了位移 —— 于是在年态上下拖
-                            // 会把整屏年历推上去、**下方露出空白**（实测回归）。这里补齐。
+                            //
+                            // ⚠️⚠️ 这一层**必须按需组合**，不能常驻。两个实测缺陷都出在这里：
+                            //
+                            // 1. `graphicsLayer { alpha = 0f }` **不阻止命中测试** ——
+                            //    常驻的年历画布盖在月历之上（同层 Box 里声明在后），
+                            //    于是月态下每一次点击都被年历吃掉，并按**年历卡片的矩形**去分发：
+                            //    用户看到的现象是"点日期没反应 / 点到了年视图的日期位置"，
+                            //    也就永远进不了周态。
+                            // 2. 拖动时 `PagerViewport` 会组合邻页，而邻年页传的是
+                            //    `yearProgress = 1f`（不透明）—— 于是**月态下一拖就把一整屏年历
+                            //    滑进来了**（用户报的"跳出年视图，然后又切回月态"）。
+                            //
+                            // 判据与月层对称：年态，或者 morph 已经启动（p > 0）。
+                            if (mode == HomeViewMode.YEAR || yp > 0.01f) {
                             PagerViewport(
                                 bandH = bandH,
                                 offsetPx = pageOffsetPx,
@@ -864,6 +876,7 @@ fun HomeScreen(
                                     )
                                 },
                             )
+                            }
                         }
                     }
                 }
@@ -940,6 +953,18 @@ private fun YearLayer(
                 alpha = morph.yearOpacity
                 scaleX = morph.yearScale
                 scaleY = morph.yearScale
+                // 缩放锚点 = **源月卡片（选中月那一张）的中心**，不是整层的中心。
+                // 用层中心时年历是从屏幕正中"炸开"的，与用户点的那个月没关系；
+                // 锚在源卡片上才是"从这张卡长出来"（规范 §7.2 的 morph 起点）。
+                val card = CalendarLayout.yearCardRect(
+                    monthFirst.monthValue,
+                    yearWidth,
+                    yearHeight,
+                )
+                transformOrigin = TransformOrigin(
+                    pivotFractionX = ((card.x + card.w / 2f) / yearWidth).coerceIn(0f, 1f),
+                    pivotFractionY = ((card.y + card.h / 2f) / yearHeight).coerceIn(0f, 1f),
+                )
             },
         monthLabel = { date ->
             dateFormats?.monthName(date)
