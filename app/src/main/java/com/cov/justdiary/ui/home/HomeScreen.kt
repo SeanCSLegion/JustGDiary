@@ -309,10 +309,19 @@ fun HomeScreen(
                 // 停稳后**吸附到整月**：慢拖（松手时几乎没有速度）不会触发 fling，
                 // 于是可能停在"上个月的尾巴还露一点"的位置。这里补一次动画，
                 // 让静止态永远是"一整个月"（规范 §5.1：一屏一个月）。
-                // 兜底吸附：慢拖没有 fling，框架不会自动吸 —— 这里补一次动画，
-                // 保证静止态**永远**是"某一项的起点"（= 默认位置）。
+                // 兜底吸附：慢拖没有 fling，框架不会自动吸 —— 这里补一次动画。
+                //
+                // ⚠️ 判据是"**占据视口中心的那一项**"，不是"第一个可见项"。
+                // 原来总吸回第一个可见项的起点，于是拖了几乎一整月也会被拉回来 ——
+                // 用户："吸附的力度有些不对劲，似乎是太会吸了。"
+                // 改成按中心判定后，拖过一半就顺势进到下一月，力度自然。
                 if (monthListState.firstVisibleItemScrollOffset != 0) {
-                    monthListState.animateScrollToItem(index)
+                    val info = monthListState.layoutInfo
+                    val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
+                    val target = info.visibleItemsInfo.firstOrNull {
+                        center >= it.offset && center < it.offset + it.size
+                    } ?: info.visibleItemsInfo.firstOrNull()
+                    if (target != null) monthListState.animateScrollToItem(target.index)
                 }
                 val key = CalendarGrid.MONTH_KEYS.getOrNull(index) ?: return@collect
                 if (key != monthKey) monthKey = key

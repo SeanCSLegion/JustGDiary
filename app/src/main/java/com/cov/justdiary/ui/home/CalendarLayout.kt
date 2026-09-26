@@ -425,10 +425,20 @@ object CalendarLayout {
         dividerAlpha = 0f,
     )
 
-    /** 年历卡片尺寸：`((w - 16*2 - 6*2)/3, (h - 62 - 8 - 6*3)/4)`。 */
+    /**
+     * 年历底部安全边距。
+     *
+     * 卡片高度本来就是按可用高**推导**的（12 张正好铺满），所以屏幕比例一变，
+     * 最后一行就会**紧贴内容区底边**、看起来压住底部导航栏
+     * （用户："最底下的三个月的背景会和底栏有重叠。这个是不同手机屏幕高度、比例不同导致的"）。
+     * 这里留出一段固定余量，让任何比例下末行都不贴边。
+     */
+    const val YEAR_BOTTOM_PAD = 14f
+
+    /** 年历卡片尺寸：`((w - 16*2 - 6*2)/3, (h - 62 - 8 - 6*3 - 底部余量)/4)`。 */
     fun yearCardSize(width: Float, height: Float): Pair<Float, Float> = Pair(
         (width - YEAR_PAD * 2 - YEAR_SPACING * 2) / 3f,
-        (height - YEAR_TITLE_H - YEAR_TOP_PAD - YEAR_SPACING * 3) / 4f,
+        (height - YEAR_TITLE_H - YEAR_TOP_PAD - YEAR_SPACING * 3 - YEAR_BOTTOM_PAD) / 4f,
     )
 
     /** 第 `month`（1..12）张迷你月卡片的位置。 */

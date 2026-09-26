@@ -274,7 +274,12 @@ class CalendarLayoutTest {
         val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)
         val (cardW, cardH) = CalendarLayout.yearCardSize(portraitW, areaH)
         assertEquals(358f / 3f, cardW, 1e-3f)
-        assertEquals((areaH - 62f - 8f - 18f) / 4f, cardH, 1e-3f)
+        // 卡片高度还要再扣掉**底部安全边距**（屏幕比例不同时末行不贴底栏）
+        assertEquals(
+            (areaH - 62f - 8f - 18f - CalendarLayout.YEAR_BOTTOM_PAD) / 4f,
+            cardH,
+            1e-3f,
+        )
 
         val january = CalendarLayout.yearCardRect(1, portraitW, areaH)
         val startY = CalendarLayout.YEAR_TITLE_H + CalendarLayout.YEAR_TOP_PAD
@@ -287,11 +292,24 @@ class CalendarLayoutTest {
         // 用**年历自己的**区高算一遍：第 4 行必须落在区内（否则会被下方当日面板压住）
         val yearH = CalendarLayout.yearAreaHeight(portraitH)
         val lastCard = CalendarLayout.yearCardRect(12, portraitW, yearH)
-        assertEquals(62f + 8f + 3 * ((yearH - 62f - 8f - 18f) / 4f + 6f), lastCard.y, 1e-3f)
-        assertTrue("年历最后一行必须留在区高之内", lastCard.maxY <= yearH)
+        assertEquals(
+            62f + 8f + 3 * (
+                (yearH - 62f - 8f - 18f - CalendarLayout.YEAR_BOTTOM_PAD) / 4f + 6f
+                ),
+            lastCard.y,
+            1e-3f,
+        )
+        // 末行不仅要在区内，还要**离底部有安全余量**（否则会看起来压住底部导航栏）
+        assertTrue(
+            "年历最后一行必须留出底部安全边距",
+            lastCard.maxY + CalendarLayout.YEAR_BOTTOM_PAD <= yearH + 1e-3f,
+        )
         // 卡片高度足够画清 6 行迷你网格（每行 ≥ 10dp）
         // 卡片里要画 6 行日号（每行至少 10dp 才读得清），这是恢复迷你月历的硬条件
-        assertTrue("年历卡片太矮就画不清迷你月", (yearH - 62f - 8f - 18f) / 4f >= 78f)
+        assertTrue(
+            "年历卡片太矮就画不清迷你月",
+            (yearH - 62f - 8f - 18f - CalendarLayout.YEAR_BOTTOM_PAD) / 4f >= 78f,
+        )
 
         val title = CalendarLayout.miniTitleRect(january)
         val grid = CalendarLayout.miniGridRect(january)
