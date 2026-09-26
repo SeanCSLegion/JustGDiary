@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 品牌种子色，对齐 iOS Theme.seed (#2563EB)。动态取色不可用时作为回落主色。 -->
-    <color name="brand_seed">#2563EB</color>
 
     <!-- 窗口背景：与 Compose 的 surface 大致一致，避免启动瞬间闪白 -->
     <color name="window_background">#FDFBFF</color>

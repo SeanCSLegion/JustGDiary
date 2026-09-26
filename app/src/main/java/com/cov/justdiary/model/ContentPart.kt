@@ -50,6 +50,7 @@ data class TextRun(
  *
  * 注意 `done` 是**列表元素**，`false` 必须原样保留（与标志位不同）。
  */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)  // @JsonNames
 @Serializable
 data class ContentPart(
     val align: String? = null,

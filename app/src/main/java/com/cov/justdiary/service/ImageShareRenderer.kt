@@ -228,13 +228,13 @@ class ImageShareRenderer(
                 )
                 canvas.drawRoundRect(box, QUOTE_RADIUS, QUOTE_RADIUS, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.quoteBg })
                 drawWrapped(
-                    canvas, text, left + ShareLayout.QUOTE_INSET.toFloat(), y + INK_PADDING.toFloat(),
+                    canvas, text, left + ShareLayout.QUOTE_INSET.toFloat(), y + INK_PADDING,
                     ShareLayout.CONTENT_WIDTH - ShareLayout.QUOTE_INSET, metrics.fontSize, metrics.lineHeight, palette.text,
                 )
             }
 
             ContentPartStyle.list -> part.items.orEmpty().forEachIndexed { index, item ->
-                val lineY = y + index * metrics.lineHeight.toFloat() + INK_PADDING.toFloat()
+                val lineY = y + index * metrics.lineHeight.toFloat() + INK_PADDING
                 canvas.drawCircle(left + 6f, lineY + metrics.fontSize.toFloat() / 3f, 5.5f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accentA })
                 drawWrapped(
                     canvas, item, left + 22f, lineY, ShareLayout.CONTENT_WIDTH - 22, metrics.fontSize, metrics.lineHeight, palette.text,
@@ -242,7 +242,7 @@ class ImageShareRenderer(
             }
 
             ContentPartStyle.todo -> part.items.orEmpty().forEachIndexed { index, item ->
-                val lineY = y + index * metrics.lineHeight.toFloat() + INK_PADDING.toFloat()
+                val lineY = y + index * metrics.lineHeight.toFloat() + INK_PADDING
                 val done = part.done.orEmpty().getOrNull(index) == true
                 drawTodoBox(canvas, left, lineY + 4f, done, palette)
                 drawWrapped(

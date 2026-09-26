@@ -629,7 +629,6 @@ fun HomeScreen(
         // 静置时多出来的那点高度落在页外（在当日面板之上），观感与原来完全一样。
         // 每一页都是**同一个整页高度**（= 日历带）：行数少时行被拉高填满，
         // 于是任意两个相邻月的高度都相同，拖动时不会互相裁切。
-        val monthPageH = monthAreaH
 
         //
         // **morph 进行中整条手势撤下**（规范 §1 规则 2）。放在 `then` 里而不是在
@@ -788,7 +787,6 @@ fun HomeScreen(
                 cellHeight = cellH,
                 calendarW = calendarW,
                 weekStart = weekStart,
-                showWeekdayHeader = mode != HomeViewMode.YEAR,
                 selectedKey = selectedKey,
                 todayKey = todayKey,
                 flags = flags,
@@ -1277,7 +1275,6 @@ private data class CalendarSectionArgs(
     val cellHeight: Float,
     val calendarW: Float,
     val weekStart: String,
-    val showWeekdayHeader: Boolean,
     val selectedKey: String,
     val todayKey: String,
     val flags: Set<String>,

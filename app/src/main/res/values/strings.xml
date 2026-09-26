@@ -73,7 +73,6 @@
     <string name="settings_remind_time_sub">Once a day</string>
     <string name="settings_notif_permission">Notification permission</string>
     <string name="settings_notif_permission_sub">Reminders won\'t arrive when off</string>
-    <string name="settings_notif_on">On</string>
     <string name="settings_notif_off">Off</string>
 
     <string name="settings_section_data">Data</string>
@@ -112,19 +111,12 @@
     <string name="index_future_empty">This day hasn\'t arrived yet.</string>
     <string name="index_write">Write</string>
     <string name="index_continue_write">Continue writing</string>
-    <string name="index_year_view">Year</string>
-    <string name="index_month_view">Month</string>
-    <string name="index_week_view">Week</string>
     <string name="index_future_toast">This day hasn\'t arrived yet — you can\'t write about it</string>
     <string name="action_got_it">Got it</string>
-    <string name="index_day_heading">Day content</string>
     <string name="index_has_diary">Has entry</string>
     <string name="index_no_diary">No entry</string>
     <string name="index_selected">Selected</string>
-    <string name="index_toggle_week">Week view</string>
-    <string name="index_toggle_month">Month view</string>
     <string name="a11y_week_grid">%1$s week</string>
-    <string name="a11y_month_grid">%1$s calendar</string>
     <string name="a11y_back_to_month">Back to month</string>
     <string name="a11y_back_to_year">Back to year</string>
     <string name="a11y_scroll_to_today">Back to today</string>
@@ -162,7 +154,6 @@
     <string name="search_time_to">To</string>
     <string name="search_time_apply">Apply</string>
     <string name="search_time_pick">Pick a date</string>
-    <string name="search_time_invalid">Enter a date as 2026-09-01</string>
     <string name="search_loc_label">Place</string>
     <string name="search_result_count">%1$d entries found</string>
     <string name="read_search_placeholder">Search this entry…</string>
@@ -215,7 +206,6 @@
     <string name="editor_save_exit">Save &amp; exit</string>
     <string name="a11y_expand">Expand</string>
     <string name="a11y_collapse">Collapse</string>
-    <string name="a11y_remove">Remove</string>
     <string name="ok">OK</string>
     <string name="share_chooser_title">Share entry</string>
     <string name="date_month_short">%1$d</string>
