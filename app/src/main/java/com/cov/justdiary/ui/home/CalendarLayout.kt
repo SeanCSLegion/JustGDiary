@@ -653,6 +653,8 @@ object CalendarLayout {
         /** 大标题的位移与透明度。 */
         val titleOffsetY: Float,
         val titleOpacity: Float,
+        /** 周条自身的透明度（比内容区更陡，避免返回时留残影）。 */
+        val stripAlpha: Float,
         /** 内容区的进度、位移与透明度。 */
         val contentT: Float,
         val contentOffsetY: Float,
@@ -671,6 +673,13 @@ object CalendarLayout {
      *   Android 的周条容器紧跟在（会淡出的）星期栏下方，落点是 **0** ——
      *   用 30 会让选中行在动画中段从星期栏文字上穿过去（实测"日号叠在周一上"）。
      */
+    /**
+     * 周条自身的透明度：比内容区**更陡**（p 到 0.55 左右就退干净）。
+     *
+     * 用户实测："周视图切换到月视图的时候，周视图的消失慢了点，能看到动画残影。"
+     */
+    fun weekStripAlpha(progress: Float): Float = clamp01(progress * 1.8f)
+
     fun monthWeekMorph(
         progress: Float,
         baseRowY: Float,
@@ -695,9 +704,14 @@ object CalendarLayout {
             downShift = (monthHeight - baseRowY) * p,
             titleOffsetY = -p * BIG_TITLE_H,
             titleOpacity = 1f - clamp01(p * 2f),
+            // 周条的淡入淡出比内容区**更陡**：返回时它必须在 p 还比较大时就退干净，
+            // 否则会留下"残影"（用户实测："周视图的消失慢了点，能看到动画残影"）。
+            stripAlpha = weekStripAlpha(p),
             contentT = contentT,
             contentOffsetY = stripBottom + (dayTitleH + 20f) * (1f - contentT),
-            contentAlpha = clamp01((p - 0.3f) / 0.5f),
+            // 当日面板：返回时也要**早退**（原来 p 降到 0.3 才开始淡出，尾巴拖得长，
+            // 与周条一起构成"残影"）。阈值抬到 0.5，返回时前 20% 就退干净。
+            contentAlpha = clamp01((p - 0.5f) / 0.3f),
         )
     }
 

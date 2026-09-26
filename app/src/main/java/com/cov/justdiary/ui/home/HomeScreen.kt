@@ -1077,7 +1077,15 @@ fun HomeScreen(
                                                     modifier = Modifier
                                                         .padding(horizontal = 20.dp)
                                                         // 与高度折叠同步淡出（连续）
-                                                        .graphicsLayer { alpha = 1f - 2f * p },
+                                                        .graphicsLayer {
+                                                            // 周 morph：按 p 淡出（与标题折叠同步）
+                                                            // 年 morph：**快速退场** —— 用户："月视图的顶栏消失太慢了，
+                                                            // 快点消失，甚至顶栏固定栏可以直接消失。"
+                                                            // 用 4x 斜率：yp 到 0.25 就基本看不见了。
+                                                            // 不做成"硬切"，因为硬切本身又是一次跳变。
+                                                            alpha = (1f - 2f * p) *
+                                                                (1f - CalendarLayout.clamp01(yp * 4f))
+                                                        },
                                                 )
                                             }
                                             Box(modifier = Modifier.width(calendarW.dp)) {
@@ -1493,7 +1501,8 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                 WeekStrip(
                     week = weekOf(args.displayed, args.selectedKey),
                     weekIndex = args.selectedWeekIndex,
-                    progress = p,
+                    // 用比内容区更陡的曲线：返回时早退，避免残影
+                    progress = CalendarLayout.weekStripAlpha(p),
                     stripWidth = minOf(args.calendarW, WEEK_STRIP_MAX_WIDTH_DP),
                     metrics = args.weekMetrics,
                     showLunar = args.showLunar,
