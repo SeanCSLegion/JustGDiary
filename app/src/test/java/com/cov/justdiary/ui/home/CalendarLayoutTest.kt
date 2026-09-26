@@ -39,7 +39,11 @@ class CalendarLayoutTest {
 
     @Test
     fun `constants match the ios table`() {
-        assertEquals(400, CalendarLayout.MORPH_DURATION_MS)  // M3 medium4
+        // M3 `long4`。iOS 的 `morphDuration` 也是 0.6s —— 全屏多元素 morph 属于
+        // "larger, more complex transitions"，M3 明确说这一类要用长时长。
+        // （曾经取 `medium4 = 400ms`，用户实测"太快了"。）
+        assertEquals(600, CalendarLayout.MORPH_DURATION_MS)
+        assertEquals(0.6, CalendarLayout.MORPH_DURATION_MS / 1000.0, 1e-9)  // = iOS morphDuration
         assertEquals(3000, CalendarLayout.SLOW_MORPH_DURATION_MS)
         assertEquals(180, CalendarLayout.REDUCED_MORPH_DURATION_MS)
         assertEquals(30f, CalendarLayout.WEEKDAY_HEADER_H, 1e-6f)

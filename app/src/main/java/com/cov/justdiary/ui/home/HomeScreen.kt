@@ -245,7 +245,16 @@ fun HomeScreen(
         }
     }
     // morph 的动画规格 —— **Material 3 的官方令牌**：
-    //   时长 `medium4 = 400ms`、缓动 `easing.emphasized = cubic-bezier(0.2, 0, 0, 1)`。
+    //   时长 `long4 = 600ms`、缓动 `easing.emphasized.decelerate = cubic-bezier(0.05, 0.7, 0.1, 1)`。
+    //
+    // ⚠️ **这里改回过一次**：首轮用的是 iOS 的 600ms + `timingCurve(0.2, 0.75, 0.3, 1.0)`，
+    // 后来我按"Material 规范"换成了 `medium4 = 400ms` + `emphasized`（慢起步）——
+    // 用户实测"400ms 太快了"，而且 `emphasized` 的慢起步会让开头一段几乎不动（iOS 的注释
+    // 也专门讲过这一点）。两处都改回来：
+    //   · **600ms 本身就是 M3 令牌**（`long4`），M3 也明确说"越大越复杂的过渡用越长的时长"，
+    //     全屏多元素 morph 正属此类；
+    //   · `emphasizedDecelerate` 是 M3 令牌里"起步带速度、尾部减速"的那条，
+    //     与 iOS 选 `(0.2, 0.75, 0.3, 1.0)` 的意图一致。
     // （`MaterialTheme.motionScheme` 在 material3 1.4.0 里还是 internal，取不到，
     //   所以按官方文档/令牌实现的数值显式构造，数值与 `MotionTokens` 一致。）
     // 首轮用的是 iOS 的 `timingCurve(0.2, 0.75, 0.3, 1.0)` + 600ms，不属于 Material。
@@ -264,10 +273,10 @@ fun HomeScreen(
             else -> tween<Float>(
                 durationMillis = CalendarLayout.MORPH_DURATION_MS,
                 easing = CubicBezierEasing(
-                    CalendarLayout.M3_EMPHASIZED[0],
-                    CalendarLayout.M3_EMPHASIZED[1],
-                    CalendarLayout.M3_EMPHASIZED[2],
-                    CalendarLayout.M3_EMPHASIZED[3],
+                    CalendarLayout.M3_EMPHASIZED_DECELERATE[0],
+                    CalendarLayout.M3_EMPHASIZED_DECELERATE[1],
+                    CalendarLayout.M3_EMPHASIZED_DECELERATE[2],
+                    CalendarLayout.M3_EMPHASIZED_DECELERATE[3],
                 ),
             )
         }

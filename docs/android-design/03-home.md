@@ -611,6 +611,32 @@ fun dayCellHeightFor(calendarW: Float, fontScale: Float, showLunar: Boolean): Fl
 比数字本身高一大截，农历因此离得远。农历上提 `LUNAR_TIGHTEN = 6dp`，
 Column 再用 `offset(y = +3dp)` 补偿半个量做**光学居中**（相对分隔线上下居中）。
 
+## 8.9.1 morph 的时长与曲线（2026-09-26 用户："400ms 太快了"）
+
+**对齐 iOS**（`CalendarLayout.swift:133-152`）：
+
+```swift
+static let morphDuration: Double = 0.6                 // 600ms
+static var morphSlideAnimation: Animation {
+    .timingCurve(0.2, 0.75, 0.3, 1.0, duration: morphDuration)
+}
+```
+
+| | 时长 | 曲线 |
+| --- | --- | --- |
+| iOS | **600ms** | `(0.2, 0.75, 0.3, 1.0)` |
+| Android 曾用 | ~~400ms~~ | ~~`emphasized` = `(0.2, 0, 0, 1)`（慢起步）~~ |
+| Android 现在 | **600ms** | `emphasizedDecelerate` = `(0.05, 0.7, 0.1, 1)` |
+
+**600ms 不违反 Material**：它就是 M3 的 `long4` 令牌，而 M3 自己写着
+"larger, more complex transitions 用更长的时长" —— 全屏、多元素、带内容位移的
+morph 正属此类。
+
+**曲线也要对**：`emphasized`（慢起步）会让开头 1/4 时间只走完约 13% 的进度，
+观感是"开头一段几乎不动、然后突然快起来"。iOS 的注释专门讲过这一点
+（"此前用 easeInOut……观感上就比月↔周切换慢半拍"）。
+`emphasizedDecelerate` 是 M3 令牌里"起步带速度、尾部减速"的那条，意图与 iOS 一致。
+
 ## 8.10 ⚠️ 三个 morph 回归（月视图重构引入，2026-09-26 用户实测）
 
 用户："周视图返回月视图的时候，动画没有正确返回，会有跳变。年视图在切换的时候，
@@ -703,7 +729,7 @@ adb -s <serial> pull /sdcard/m.mp4 /tmp/m.mp4
 | 分栏阈值 | 内容宽 ≥ 548.5dp 且 宽 > 高 | iOS `AdaptiveLayout` |
 | 主栏宽 | `clamp(内容宽 × 0.46, 260, 440)` | iOS `splitColumns` |
 | 右栏正文列宽 | 560（分栏）/ 660（竖屏） | iOS `DayPane.maxColumnWidth` / `contentColumn` |
-| morph | 400ms · `easing.emphasized`；减弱 180ms linear | M3 `medium4` |
+| morph | **600ms** · `easing.emphasized.decelerate`；减弱 180ms linear | M3 `long4`；**= iOS `morphDuration` 0.6s** |
 | 翻页 | **框架滚动 + `rememberSnapFlingBehavior`**（月/周/年一致） | §8.7；手写分页器已删除 |
 | 日用内边距 | 16（页面）/ 20（当日内容区）/ 12（卡片内） | iOS 同名 |
 

@@ -38,7 +38,7 @@ object CalendarLayout {
      * 现在按 Material 的令牌来：大面积"容器变换"用 `medium4` + `emphasized` 缓动，
      * 不需要靠拉长时长换顺滑。
      */
-    const val MORPH_DURATION_MS = 400
+    const val MORPH_DURATION_MS = 600
 
     /** `-slow-morph` / `SLOW_MORPH=1` 下的调试慢放时长。 */
     const val SLOW_MORPH_DURATION_MS = 3000
