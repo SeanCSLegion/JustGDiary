@@ -529,6 +529,13 @@ fun HomeScreen(
         //
         // 可拖范围 = 日历带的一半：足够表达"我在翻页"，又不会把整屏推出去。
         val dragRangeDp = bandH * 0.5f
+        // 月层的**页高 = 内容实际高度**（大标题槽 + 星期栏 + 网格），不是整个日历带。
+        //
+        // ⚠️ 用整带高度当页高，5 行的月份（如九月）就会在页内留一整行空白，
+        // 而下一页从"带高"之后才开始 —— 拖动时两页之间出现一大块**空洞**，
+        // 看起来像"内容明显不全"（用户反馈）。改成按内容高度分页之后两页是**紧挨着**的；
+        // 静置时多出来的那点高度落在页外（在当日面板之上），观感与原来完全一样。
+        val monthPageH = CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H + gridH
 
         //
         // **morph 进行中整条手势撤下**（规范 §1 规则 2）。放在 `then` 里而不是在
@@ -855,7 +862,7 @@ fun HomeScreen(
                                     contentAlignment = Alignment.TopCenter,
                                 ) {
                                     PagerViewport(
-                                        bandH = bandH,
+                                        bandH = monthPageH,
                                         offsetPx = { pageOffset() },
                                         showNext = dragNext,
                                         showPrev = dragPrev,
