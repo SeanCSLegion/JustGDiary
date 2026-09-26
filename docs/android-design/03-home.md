@@ -438,11 +438,28 @@ morph 的每一个端点**必须取自真实排版用的同一个矩形、同一
 是不是真的相邻月/相邻年，标题与日期都要对**。只看"offset 有没有生效"是不够的 ——
 这个 bug 就是 offset 正常、内容也对、只有标题没换。
 
-## 8.7 月态翻页：改用**连续无限滚动**（2026-09-26 用户提议，待实施）
+## 8.7 月态翻页：**连续无限滚动**（2026-09-26 用户提议，**已实施**）
 
-### 为什么改
+### 结果（已落地）
 
-现在的月态是一个**手写的分页器**：`PagerViewport` 同时组合"上一页 / 当前页 / 下一页"，
+三种视图（月 / 周 / 年）的翻页**语义完全一致**，都是"框架滚动 + 官方吸附"：
+
+| 视图 | 容器 | 吸附 |
+| --- | --- | --- |
+| 月 | `LazyColumn`（2412 个月） | `rememberSnapFlingBehavior` |
+| 周 | `LazyRow`（居中窗口 7 周） | 同上 |
+| 年 | `LazyColumn`（201 年） | 同上 |
+
+手写分页器（`PagerViewport`）、自绘翻页手势、位移与橡皮筋、收尾动画**全部删除**。
+
+**它解决了**（都是磨了很多轮、且每次修一处冒一处的问题）：
+邻页顶着当前月标题 / 两页之间空洞 / 邻页只露出一部分（盒子与内容错位） /
+拖动顿挫（UI 线程 27% 卡顿）。
+**并且天然适配不同高度的屏幕** —— 内容多高就多高，不必按屏幕反推"一页该多少 dp"。
+
+### 为什么当时该改
+
+当时的月态是一个**手写的分页器**：`PagerViewport` 同时组合"上一页 / 当前页 / 下一页"，
 用 `graphicsLayer { translationY }` 整体位移，自己算页高、自己算可拖范围、
 自己做橡皮筋与收尾动画。这条路已经连续踩了七个坑，且每次修一处就冒一处：
 
@@ -478,7 +495,7 @@ LaunchedEffect(listState) {
 }
 ```
 
-### 这一改**删掉**的东西（全部是手写的）
+### 这一改删掉的东西（全部是手写的）
 
 | 删除 | 原因 |
 | --- | --- |
@@ -503,7 +520,7 @@ LaunchedEffect(listState) {
 - **分栏**：左栏同样用这个列表（`userScrollEnabled` 保持可滚）
 - **吸附后 `monthKey` 才变**（与现在的"松手后提交"语义一致）
 
-## 8.8 月态的"钉住标题 + 内联月标签"（2026-09-26 用户给出 iOS 参考图，待实施）
+## 8.8 月态的"钉住标题 + 内联月标签"（iOS 参考图，**已实施**）
 
 ### 目标版面（照参考图）
 
@@ -532,7 +549,27 @@ LaunchedEffect(listState) {
 | 滚动时标题跟着走，下一个月的标题再冒出来 | 标题**固定不动、只换字**；其他月份只显示**内联的小标签** |
 | 月份之间只空一行 | 分隔**向下偏移一周**（标签行占据那一周的位置） |
 
-### 实施要点（已经想清楚，别再一次改一半）
+### 实施结果（已落地，含三处踩过的坑）
+
+| 要点 | 落地方式 |
+| --- | --- |
+| 钉住层 | 大标题 + 星期栏画在列表**之后**（在上面），带 `surface` 底色；`p < 0.01f` 时显示 |
+| 标题换字 | `derivedStateOf` 取"刚露出钉住层下沿的那一项"，滑动过程中就换 |
+| 紧凑月 | 非当前月不画大标题、不占星期栏高度，只留内联标签 |
+| 内联标签横向 | 对齐到**1 号所在那一列**（`titleIndentDp = col × cellW`） |
+| 内联标签纵向 | 占**一整行**（高度 = 行高），于是"月份与日期的间隔 = 日期间隔" |
+| morph 落点 | 不变：钉住层的星期栏就是月↔周 morph 的终点，大标题按 `alpha = 1 - p` 淡出 |
+
+**⚠️ 三处实测踩到的坑（写在这里避免重犯）**：
+1. **钉住层必须声明在列表之后**。我先插到了列表之前（注释却写着"之后"），
+   结果日期画在标题上面、两者重叠。
+2. **非线性布局的补偿要用 `offset`，不能用 `padding`**。农历上提 6dp 之后，
+   我一度用 `padding(top = 6dp)` 去补光学居中 —— 它把 Column 的**布局高度**撑大 6dp，
+   内容正好顶到格子下沿，**农历又被裁掉**。
+3. **`DiaryMark` 必须始终占位**。原来只在 `hasDiary` 时才组合，
+   有日记的格子整体比别的格子高 3dp，一排看过去是不齐的。
+
+### 当初定的实施要点
 
 1. **钉住层**放在 `Box` 里、声明在列表**之后**（画在上面），带 `surface` 背景色 ——
    否则滚动的日期会从标题底下透出来。
@@ -546,6 +583,34 @@ LaunchedEffect(listState) {
    结果是滚动中间态出现**没有任何列标题的日期行**（一眼就是坏的），已回退。
    钉住层与紧凑块**必须同时上**。
 
+## 8.9 竖屏行高：**由列宽推出**，不是把整页均分（2026-09-26 用户反馈）
+
+用户："目前的日期上下间隔太大了，参考左右间隔来设置上下间隔。"
+
+```kotlin
+fun dayCellHeightFor(calendarW: Float, fontScale: Float, showLunar: Boolean): Float {
+    val byWidth = calendarW / 7f * CELL_H_PER_COL_W        // 列距 × 1.2
+    val byContent = (if (showLunar) 72f else 48f) * max(1f, fontScale)
+    return max(byWidth, byContent).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
+}
+```
+
+两条规则，**取大者**：
+
+1. **列距 × 1.2** —— 上一次改成"把整页均分给行数"之后，5 行月的行距达到 114dp，
+   是列距（约 51dp）的两倍多，看着很散。iOS 参考图约 1.34，设计稿的
+   `PORTRAIT_CELL_H = 56` 对应约 1.1，取中间的 1.2。
+2. **内容下限 72dp** —— `CalendarDayCell` 的注释写明"日号 + 农历 ≈ 70dp"。
+   只按列宽（61dp）会**裁掉农历**（真机实测农历被切一半）。无农历时用 48dp（圆直径那档）。
+
+**行高与字号的关系**：字号是从 `cellH` 推出来的（`dayFont = cellH × 0.34` 上限 20、
+`lunarFont = cellH × 0.18` 上限 11），所以两者必须**同源** —— `metrics` 用的是同一个
+`cellH`，改行高时字号会跟着走，不会脱节。
+
+**日号与农历之间的空档**：日号底下的圆（直径 = `min(cellW−3, 内容高+14, cellH−3)`）
+比数字本身高一大截，农历因此离得远。农历上提 `LUNAR_TIGHTEN = 6dp`，
+Column 再用 `offset(y = +3dp)` 补偿半个量做**光学居中**（相对分隔线上下居中）。
+
 ## 9. 数值速查表
 
 | 常量 | 值 | 出处 |
@@ -554,12 +619,14 @@ LaunchedEffect(listState) {
 | `BIG_TITLE_H` | 72 | iOS `CalendarLayout.bigTitleH` |
 | `WEEKDAY_H` | 30 | iOS `weekdayHeaderH` |
 | `COMPACT_TITLE_H` / `COMPACT_WEEKDAY_H` | 34 / 26 | iOS `compactMonthTitleH` / `compactWeekdayHeaderH` |
-| `WEEK_STRIP_H` | 68 | iOS `weekStripH` |
+| `WEEK_STRIP_H` | **80**（有意偏离 iOS 68） | 真机 392.7dp 下 68 会让农历被裁 |
 | `DAY_TITLE_H` | 40 / 44（分栏） | iOS `dayTitleH` |
 | `YEAR_TITLE_H` / `YEAR_PAD` / `YEAR_SPACING` | 62 / 16 / 6 | iOS 同名常量 |
 | `MINI_PAD` / `MINI_TITLE_H` | 6 / 17 | iOS 同名常量 |
-| `cellH` | `(区高 − 102) / 6` | 恒除 6 |
-| `dayFont` / `lunarFont` | `min(20, max(13, cellH×0.34))` / `min(11, max(9, cellH×0.18))` | iOS `MonthPane` |
+| `cellH`（竖屏） | `max(列距 × 1.2, 内容下限 72dp)` | §8.9；**不是**把整页均分 |
+| `LUNAR_TIGHTEN` | 6dp（+ `offset` 补偿 3dp） | 收掉圆底造成的空档，保持相对分隔线居中 |
+| 内联月标签 | 横向 = `1 号所在列 × cellW`；纵向占一整行 | §8.8 |
+| `dayFont` / `lunarFont` | `min(20, max(13, cellH×0.34))` / `min(11, max(9, cellH×0.18))` | iOS `MonthPane`；**与 cellH 同源**，改行高字号自动跟随 |
 | `miniDayFont` | `min(14, max(9, min(cellW×0.95, cellH×0.5)))` | iOS `CalendarLayout.miniDayFont` |
 | 今天圆环 / 选中圆 | 1.5dp / 实心，`circleD = min(cellW−3, 内容高+14, cellH−3)` | iOS `CalendarGrids` |
 | 有日记短横线 | `min(20, cellW×0.5)` × 2dp，日号下方 2dp | iOS `CalendarGrids` |
@@ -569,7 +636,7 @@ LaunchedEffect(listState) {
 | 主栏宽 | `clamp(内容宽 × 0.46, 260, 440)` | iOS `splitColumns` |
 | 右栏正文列宽 | 560（分栏）/ 660（竖屏） | iOS `DayPane.maxColumnWidth` / `contentColumn` |
 | morph | 400ms · `easing.emphasized`；减弱 180ms linear | M3 `medium4` |
-| 翻页 | 300ms · `emphasizedDecelerate`；阈值 −90 / −60；回弹 c = pageSize × 0.25 | M3 `medium2` + iOS `DragPagePager` |
+| 翻页 | **框架滚动 + `rememberSnapFlingBehavior`**（月/周/年一致） | §8.7；手写分页器已删除 |
 | 日用内边距 | 16（页面）/ 20（当日内容区）/ 12（卡片内） | iOS 同名 |
 
 ---
