@@ -527,8 +527,14 @@ fun HomeScreen(
 
         // 上下滑翻月 / 翻年（规范 §6）：阈值与橡皮筋复用 `DragPagerMath`。
         //
-        // 可拖范围 = 日历带的一半：足够表达"我在翻页"，又不会把整屏推出去。
-        val dragRangeDp = bandH * 0.5f
+        // 可拖范围 = **一整页**。
+        //
+        // 取一半时（上一版）手指滑过约 4cm 内容就开始减速、随后停住 ——
+        // 用户的感觉就是"顿挫、不完全跟手"。月份/年份是**无边界**的列表，
+        // 没有任何理由限制拖动距离：iOS 也是让页面 1:1 跟着手指走，
+        // 只在"松手"时才按阈值决定去留。
+        // 这里给到整页；超出整页才交给 `rubberBand` 收尾。
+        val dragRangeDp = bandH
         // 月层的**页高 = 内容实际高度**（大标题槽 + 星期栏 + 网格），不是整个日历带。
         //
         // ⚠️ 用整带高度当页高，5 行的月份（如九月）就会在页内留一整行空白，
@@ -1447,7 +1453,11 @@ private fun HomeTopBar(
         AssistPill(
             text = todayLabel,
             onClick = onToday,
-            variant = PillVariant.Elevated,
+            // **与左胶囊同款**（用户反馈："今天按钮的样式似乎和年份月份的按钮样式
+            // 不太一样，统一一下"）。同一根顶栏上两枚胶囊用两种填充是没道理的 ——
+            // `Elevated` 的浅底+阴影让它看起来比左胶囊"高一级"，但两者只是
+            // "导航"与"回到今天"的区别，没有主次。
+            variant = PillVariant.Outlined,
             modifier = Modifier.semantics {
                 contentDescription = a11yTodayLabel
                 stateDescription = todayLabel
@@ -1596,7 +1606,7 @@ private fun DayPanel(
                     AssistPill(
                         text = stringResource(R.string.index_today),
                         onClick = onToday,
-                        variant = PillVariant.Elevated,
+                        variant = PillVariant.Outlined,
                     )
                 }
             }
