@@ -7,6 +7,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -88,6 +90,7 @@ import com.cov.justdiary.ui.theme.TypeSize
  *
  * 图表是**自绘 Compose Canvas**（方案 §11.2：全 app 只有这一张柱状图，不值得引图表库）。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FootprintScreen(
     state: FootprintViewState,
@@ -128,18 +131,24 @@ fun FootprintScreen(
                     text = summaryLabel(state.locatedCount, state.unlocatedCount),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    // 限宽 + 允许折两行：这一行在 1.5× 字号下会到 ~310dp，
+                    // 不限宽就会把左边的标题挤成一个字（实测 1.3× 已贴着边缘）
+                    maxLines = 2,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.widthIn(max = 260.dp),
                 )
             },
         )
 
-        // 年份胶囊
-        Row(
+        // 年份胶囊：用 FlowRow 换行而不是横滑 ——
+        // 5 个胶囊（全部 + 各年份 + 自定义）在放大字号下会把「自定义」推出屏幕，
+        // 用户看不出右边还有东西（搜索页的时间档同理）。
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.page),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // 年份芯片的选中态只看 yearFilter（规范 §2.2 的修正）：
             // iOS 那边还额外要求 timeKind == .all，于是"先选年份、再选自定义区间"之后

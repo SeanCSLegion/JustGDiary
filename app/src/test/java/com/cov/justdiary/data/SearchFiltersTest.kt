@@ -177,6 +177,47 @@ class SearchFiltersTest {
         assertTrue(SearchFilters.activeFilterItems(SearchUiState(), today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "x" }).isEmpty())
     }
 
+    /**
+     * 顺序固定：**未提交的输入 → 已提交关键词 → 时间 → 地点**（规范 §1.4）。
+     *
+     * 未提交的输入必须是**独立的一种 kind**：点它的 ✕ 要清空输入框，
+     * 而不是去关键词列表里找一个同名项（那样会点不动）。
+     */
+    @Test
+    fun `pending input leads the summary as its own kind`() {
+        val state = SearchUiState(
+            keyword = "外滩",
+            keywords = listOf("深圳"),
+            timeKind = TimeRangeKind.ThisMonth,
+        )
+        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
+        assertEquals(
+            listOf(
+                SearchFilterItem(SearchFilterItem.Kind.KeywordInput, "外滩"),
+                SearchFilterItem(SearchFilterItem.Kind.Keyword, "深圳"),
+                SearchFilterItem(SearchFilterItem.Kind.Time, "9月"),
+            ),
+            items,
+        )
+    }
+
+    @Test
+    fun `pending input that is already a committed keyword is not duplicated`() {
+        val state = SearchUiState(keyword = "深圳", keywords = listOf("深圳"))
+        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
+        assertEquals(
+            listOf(SearchFilterItem(SearchFilterItem.Kind.Keyword, "深圳")),
+            items,
+        )
+    }
+
+    @Test
+    fun `blank pending input produces no chip`() {
+        val state = SearchUiState(keyword = "   ")
+        val items = SearchFilters.activeFilterItems(state, today, DateUtil.WEEK_START_MONDAY, rangeLabel = { "9月" })
+        assertEquals(emptyList<SearchFilterItem>(), items)
+    }
+
     // ------------------------------------------------------------------ 分页
 
     @Test

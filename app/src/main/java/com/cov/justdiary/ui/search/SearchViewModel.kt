@@ -129,6 +129,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         val ui = _state.value.ui
         apply(
             when (kind) {
+                SearchFilterItem.Kind.KeywordInput -> ui.copy(keyword = "")
                 SearchFilterItem.Kind.Keyword -> ui.copy(keyword = "", keywords = emptyList())
                 SearchFilterItem.Kind.Time -> ui.copy(timeKind = TimeRangeKind.All, customRange = null)
                 SearchFilterItem.Kind.Location -> ui.copy(locFilter = LocFilter())

@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -139,6 +140,7 @@ fun SearchScreen(
     var showLocPicker by remember { mutableStateOf(false) }
     var showCustomRange by remember { mutableStateOf(false) }
     var searchFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
     // 结果行无障碍文案里的日期/时刻：**必须**走 `DateFormats` 的语义槽位，
     // 不能自己拼 —— 日期要跟随应用内语言，小时制要跟随设备。
@@ -204,30 +206,46 @@ fun SearchScreen(
 
     @Composable
     fun searchField(modifier: Modifier = Modifier) {
-        OutlinedTextField(
-            value = state.keyword,
-            onValueChange = onKeywordChange,
-            modifier = modifier
-                .fillMaxWidth()
-                .onFocusChanged { searchFocused = it.isFocused }
-                .semantics { contentDescription = placeholderLabel },
-            singleLine = true,
-            shape = CircleShape,
-            textStyle = MaterialTheme.typography.bodyLarge,
-            placeholder = { Text(PLACEHOLDER) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (state.keyword.isNotEmpty()) {
-                    IconButton(onClick = { onKeywordChange("") }) {
-                        Icon(Icons.Filled.Clear, contentDescription = CLEAR_LABEL)
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            OutlinedTextField(
+                value = state.keyword,
+                onValueChange = onKeywordChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { searchFocused = it.isFocused }
+                    .semantics { contentDescription = placeholderLabel },
+                singleLine = true,
+                shape = CircleShape,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                placeholder = { Text(PLACEHOLDER) },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.keyword.isNotEmpty()) {
+                        IconButton(onClick = { onKeywordChange("") }) {
+                            Icon(Icons.Filled.Clear, contentDescription = CLEAR_LABEL)
+                        }
                     }
-                }
-            },
-            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onCommitKeyword() }),
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                imeAction = androidx.compose.ui.text.input.ImeAction.Search,
-            ),
-        )
+                },
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onCommitKeyword() }),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                ),
+            )
+            // 聚焦时右侧**追加**「取消」（规范 §1.2）：清空输入并收起键盘。
+            // 没聚焦时不占位 —— iOS 那边也是靠出现/消失来提示"现在可以退出搜索"。
+            if (searchFocused) {
+                TextButton(
+                    onClick = {
+                        onKeywordChange("")
+                        focusManager.clearFocus()
+                    },
+                ) { Text(CANCEL_LABEL) }
+            }
+        }
     }
 
     /** 生效条件摘要：**每一条都能单独撤销**，最右是「清除全部」。 */
@@ -253,6 +271,8 @@ fun SearchScreen(
                         text = item.label,
                         onRemove = {
                             when (item.kind) {
+                                // 未提交的输入：清空输入框（防抖会自己重查）
+                                SearchFilterItem.Kind.KeywordInput -> onKeywordChange("")
                                 SearchFilterItem.Kind.Keyword -> onRemoveKeyword(item.label)
                                 SearchFilterItem.Kind.Time -> onTimeKindChange(TimeRangeKind.All)
                                 SearchFilterItem.Kind.Location -> {
@@ -895,3 +915,5 @@ private val LABEL_RANGE_TO: String
     @Composable get() = stringResource(R.string.search_time_to)
 private val APPLY_LABEL: String
     @Composable get() = stringResource(R.string.search_time_apply)
+private val CANCEL_LABEL: String
+    @Composable get() = stringResource(R.string.cancel)

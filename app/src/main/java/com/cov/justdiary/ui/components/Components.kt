@@ -305,13 +305,16 @@ fun PageHeader(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineLarge,
+                // 页面标题 = M3 `headlineMedium`（28 / 36，设计规范 §2.2）。
+                // 原来用的 `headlineLarge` 是 32sp —— 那是首页「九月 / 2026年」的高度，
+                // 用在搜索/足迹/设置上会比设计稿重一档。
+                style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

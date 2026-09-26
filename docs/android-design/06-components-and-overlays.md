@@ -24,7 +24,7 @@
 | 组件 | 签名 | 说明 |
 | --- | --- | --- |
 | `IconBadge` | `(icon: ImageVector, size: Dp = 40.dp, container = secondaryContainer)` | 设置行 / 列表行左侧的圆形图标徽标 |
-| `AssistPill` | `(text: String, leading: ImageVector?, variant: PillVariant, onClick)` | **顶栏胶囊**。`variant = Outlined \| Elevated`（首页左 / 右两枚） |
+| `AssistPill` | `(text: String, leading: ImageVector?, variant: PillVariant, onClick)` | **顶栏胶囊**。`variant = Outlined \| Elevated`（首页左 / 右两枚）。⚠️ M3 的 chip 布局高由 `minimumInteractiveComponentSize` 定成 **48dp**，所以设计稿里的「视觉 40dp」在真机上是 48dp（这是 Material 的触控目标硬要求，不要用 `height(40.dp)` 去压） |
 | `FilterPill` | `(text: String, selected: Boolean, leading: ImageVector?, onClick)` | 筛选芯片（搜索时间/地点、足迹年份） |
 | `InputPill` | `(text: String, onRemove: () -> Unit)` | 条件摘要行里的可删除芯片 |
 | `CountBadge` | `(text: String, icon: ImageVector? = null)` | 「找到 3 条日记」「1/3」这类计数徽标 |

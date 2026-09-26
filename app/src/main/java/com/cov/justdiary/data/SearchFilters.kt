@@ -9,9 +9,15 @@ import java.time.LocalDate
 /** 搜索的时间范围档位（对应 iOS `TimeRangeKind`）。 */
 enum class TimeRangeKind { All, ThisWeek, ThisMonth, ThisYear, Custom }
 
-/** 生效条件摘要里的一个条目（对应 iOS `SearchFilterItem`：keyword / time / location 三类）。 */
+/**
+ * 生效条件摘要里的一个条目（对应 iOS `SearchFilterItem`）。
+ *
+ * `KeywordInput` 与 `Keyword` 必须分开：前者是**还没回车提交**的输入框内容，
+ * 点它的 ✕ 要清空输入框；后者是已提交的关键词胶囊，点 ✕ 要从关键词列表里摘掉。
+ * 两者文案可能相同，只有 kind 能区分该走哪条清法。
+ */
 data class SearchFilterItem(val kind: Kind, val label: String) {
-    enum class Kind { Keyword, Time, Location }
+    enum class Kind { KeywordInput, Keyword, Time, Location }
 }
 
 /**
@@ -131,6 +137,11 @@ object SearchFilters {
         noLocLabel: String = NO_LOCATION_LABEL,
     ): List<SearchFilterItem> {
         val items = mutableListOf<SearchFilterItem>()
+        // 顺序固定（规范 §1.4）：未提交的输入 → 已提交关键词 → 时间 → 地点
+        val pending = state.keyword.trim()
+        if (pending.isNotEmpty() && !state.keywords.contains(pending)) {
+            items.add(SearchFilterItem(SearchFilterItem.Kind.KeywordInput, pending))
+        }
         state.keywords.forEach { word ->
             if (word.isNotBlank()) items.add(SearchFilterItem(SearchFilterItem.Kind.Keyword, word))
         }
