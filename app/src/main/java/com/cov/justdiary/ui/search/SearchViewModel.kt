@@ -16,6 +16,7 @@ import com.cov.justdiary.model.LocOption
 import com.cov.justdiary.service.Log
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -60,6 +61,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var searchJob: Job? = null
+    private var locSearchJob: Job? = null
 
     /** 输入框变化 → 250ms 防抖后重查。 */
     fun onKeywordChange(value: String) {
@@ -143,8 +145,21 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         runSearchNow(reset = false)
     }
 
+    /**
+     * 地点面板内的搜索词。
+     *
+     * ⚠️ 必须**真的去查库**。原来这里只把字符串存进状态，界面渲染的却是未过滤的
+     * `locOptions`，于是"搜索地点…"输入框完全没反应（`filteredLocOptions` 是死代码）。
+     * 也不能在客户端过滤：iOS 那边就是 Top20 + 弹窗内过滤，榜外的地点永远搜不到
+     * （README §6 缺陷 7）。这里走 `getLocationOptions(keyword, …)` 的 SQL `LIKE`。
+     */
     fun setLocSearch(value: String) {
         _state.value = _state.value.copy(locSearch = value)
+        locSearchJob?.cancel()
+        locSearchJob = viewModelScope.launch {
+            delay(DEBOUNCE_MS)
+            loadLocationOptions(value)
+        }
     }
 
     /** 打开地点筛选面板时拉候选（关键词为空 = 全部候选）。 */
@@ -155,6 +170,8 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
             val result = runCatching {
                 container.repository.getLocationOptions(keyword, range.from, range.to)
             }.onFailure { Log.db.w("读取地点候选失败：${it.message}") }.getOrNull()
+            // 被取消（用户又敲了一个字）时**不要**写状态：否则会用旧结果覆盖新一轮
+            ensureActive()
             _state.value = _state.value.copy(
                 locOptions = result?.first ?: emptyList(),
                 noLocCount = result?.second ?: 0,

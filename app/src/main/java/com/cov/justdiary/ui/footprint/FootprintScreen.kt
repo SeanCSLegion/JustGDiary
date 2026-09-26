@@ -7,17 +7,18 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,7 +91,6 @@ import com.cov.justdiary.ui.theme.TypeSize
  *
  * 图表是**自绘 Compose Canvas**（方案 §11.2：全 app 只有这一张柱状图，不值得引图表库）。
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FootprintScreen(
     state: FootprintViewState,
@@ -140,26 +140,26 @@ fun FootprintScreen(
             },
         )
 
-        // 年份胶囊：用 FlowRow 换行而不是横滑 ——
-        // 5 个胶囊（全部 + 各年份 + 自定义）在放大字号下会把「自定义」推出屏幕，
-        // 用户看不出右边还有东西（搜索页的时间档同理）。
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.page),
+        // 年份胶囊：**单行横滑**（用户反馈：要可滑动，不要做成多排）。
+        // 候选项只列"当前时间筛选下真的有内容"的年份，且「自定义」是无条件保底项 ——
+        // 所以即便把「自定义」推到屏幕外，它也不是唯一入口，右侧的横滑提示由内容自身给出。
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = Spacing.page),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // 年份芯片的选中态只看 yearFilter（规范 §2.2 的修正）：
             // iOS 那边还额外要求 timeKind == .all，于是"先选年份、再选自定义区间"之后
             // 年份芯片看起来没选中，但两层过滤其实都在生效。
-            FilterChip(
-                selected = yearFilter == YEAR_FILTER_ALL,
-                onClick = { onYearFilterChange(YEAR_FILTER_ALL) },
-                label = { Text(ALL_LABEL) },
-                leadingIcon = yearChipIcon(yearFilter == YEAR_FILTER_ALL),
-            )
-            state.yearOptions.forEach { year ->
+            item {
+                FilterChip(
+                    selected = yearFilter == YEAR_FILTER_ALL,
+                    onClick = { onYearFilterChange(YEAR_FILTER_ALL) },
+                    label = { Text(ALL_LABEL) },
+                    leadingIcon = yearChipIcon(yearFilter == YEAR_FILTER_ALL),
+                )
+            }
+            items(state.yearOptions, key = { it }) { year ->
                 FilterChip(
                     selected = yearFilter == year,
                     onClick = { onYearFilterChange(year) },
@@ -167,32 +167,23 @@ fun FootprintScreen(
                     leadingIcon = yearChipIcon(yearFilter == year),
                 )
             }
-            FilterChip(
-                selected = timeKind == TimeRangeKind.Custom,
-                onClick = { showTimeSheet = true },
-                label = {
-                    Text(
-                        if (timeKind == TimeRangeKind.Custom && customFrom != null && customTo != null) {
-                            rangeLabel(customFrom, customTo)
-                        } else {
-                            CUSTOM_LABEL
-                        },
-                    )
-                },
-                leadingIcon = yearChipIcon(timeKind == TimeRangeKind.Custom),
-            )
-        }
-
-        if (state.locatedCount == 0) {
-            // 空态要真居中（原来 weight(fill = false) 只是"不占满"，内容仍贴顶）
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                EmptyState(
-                    icon = Icons.Filled.Place,
-                    text = EMPTY_LABEL,
-                    modifier = Modifier.align(Alignment.Center),
+            // 保底项：任何时候都在，且永远可点（自定义区间与年份是交集关系）
+            item {
+                FilterChip(
+                    selected = timeKind == TimeRangeKind.Custom,
+                    onClick = { showTimeSheet = true },
+                    label = {
+                        Text(
+                            if (timeKind == TimeRangeKind.Custom && customFrom != null && customTo != null) {
+                                rangeLabel(customFrom, customTo)
+                            } else {
+                                CUSTOM_LABEL
+                            },
+                        )
+                    },
+                    leadingIcon = yearChipIcon(timeKind == TimeRangeKind.Custom),
                 )
             }
-            return@Column
         }
 
         if (landscape) {
@@ -231,6 +222,9 @@ fun FootprintScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.card),
             ) {
+                // 统计卡**常驻**（规范 §2.6：没有地点记录时统计卡照常显示 0，
+                // 只有清单卡换成空态）。原来整页被空态取代 —— 选了个空年份时
+                // 连统计和趋势都消失，用户以为页面坏了。
                 item { StatsCard(state) }
                 // 只有 ≥ 2 个年份时才画趋势（规范 §2.4，与 iOS 一致）：
                 // 一根柱子说明不了"趋势"，而且它没有自己的空态，所以是"整张卡不出现"
@@ -243,12 +237,21 @@ fun FootprintScreen(
                     }
                 }
                 item {
-                    PlaceTreeCard(
-                        nodes = state.nodes,
-                        expanded = expanded,
-                        onToggle = onToggleExpand,
-                        onDayClick = onDayClick,
-                    )
+                    if (state.nodes.isEmpty()) {
+                        DiaryCard {
+                            EmptyState(
+                                icon = Icons.Filled.Place,
+                                text = EMPTY_LABEL,
+                            )
+                        }
+                    } else {
+                        PlaceTreeCard(
+                            nodes = state.nodes,
+                            expanded = expanded,
+                            onToggle = onToggleExpand,
+                            onDayClick = onDayClick,
+                        )
+                    }
                 }
             }
         }
@@ -592,6 +595,9 @@ private fun PlaceRow(
         }
         Row(
             modifier = rowModifier
+                // 触控目标 ≥48dp（规范 01 §7）；一级 46dp、二级及以下 40dp 是设计值，
+                // 但 48 是 Material 的硬要求，所以统一兜到 48
+                .heightIn(min = 48.dp)
                 .padding(start = (depth * INDENT_STEP).dp, top = 6.dp, bottom = 6.dp)
                 // 方案 §八「地点清单」：名称 + 计数合并为**一个**节点读作「中国 9」，
                 // 而不是「中国」「9」两条。可展开行再用 stateDescription 暴露展开/收起

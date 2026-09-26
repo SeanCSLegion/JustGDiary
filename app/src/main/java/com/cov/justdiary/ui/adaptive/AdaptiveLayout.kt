@@ -76,7 +76,7 @@ data class AdaptiveLayout(
         else -> Tier.Expanded
     }
 
-    /** 设置页列数：1 列（<680dp）→ 2 列（≥680dp）→ 3 列（≥1000dp）。 */
+    /** 设置页列数：1 列（<700dp）→ 2 列（≥700dp）→ 3 列（≥1000dp）。 */
     val settingsColumns: Int get() = when {
         width < SETTINGS_TWO_COLUMN_MIN_WIDTH -> 1
         width < EXTRA_WIDE_MIN_WIDTH -> 2
@@ -121,8 +121,8 @@ data class AdaptiveLayout(
         const val WIDE_MIN_WIDTH = 700f
         const val EXTRA_WIDE_MIN_WIDTH = 1000f
 
-        /** 设置页两列的下沿（与 iOS 的 `columnCount` 一致）。 */
-        const val SETTINGS_TWO_COLUMN_MIN_WIDTH = 680f
+        /** 设置页两列的下沿（设计规范 §3.1：<700 一列 / 700–999 两列 / ≥1000 三列）。 */
+        const val SETTINGS_TWO_COLUMN_MIN_WIDTH = 700f
 
         /** 首页/足迹分栏的最小内容宽度（iOS 当前值；v2 的 700 已作废）。 */
         const val SPLIT_MIN_CONTENT_WIDTH = 548.5f

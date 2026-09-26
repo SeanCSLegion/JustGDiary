@@ -240,24 +240,25 @@ private fun SettingsBody(
     // 列数只随宽度变：1 列（<680dp）→ 2 列（≥680dp）→ 3 列（≥1000dp），与 iOS 一致
     val columns = LocalAdaptiveLayout.current.settingsColumns
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columns),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = Spacing.page,
-            end = Spacing.page,
-            top = 12.dp,
-            // 底栏在 RootScreen 的 Scaffold 里、**参与布局**（不是 iOS 那种浮条），
-            // 内容已经被 innerPadding 抬到它之上，这里只需要一点呼吸空间（规范 §4）。
-            bottom = 24.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(Spacing.card),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.card),
-    ) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            PageHeader(title = stringResource(R.string.settings_title))
-        }
-
+    // ⚠️ 页头放在网格**外面**：原来它是网格里一个跨列 item，网格的 16dp contentPadding
+    // 与 PageHeader 自己的 16dp 内边距叠成了 32dp，再加上网格的 12dp 顶边距 ——
+    // 实测「设置」标题在 32dp/72dp，而「搜索」「足迹」在 16dp/60dp（用户反馈：顶部不一致）。
+    Column(modifier = Modifier.fillMaxSize()) {
+        PageHeader(title = stringResource(R.string.settings_title))
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = Spacing.page,
+                end = Spacing.page,
+                top = 0.dp,
+                // 底栏在 RootScreen 的 Scaffold 里、**参与布局**（不是 iOS 那种浮条），
+                // 内容已经被 innerPadding 抬到它之上，这里只需要一点呼吸空间（规范 §4）。
+                bottom = 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(Spacing.card),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.card),
+        ) {
         // ---------------------------------------------------------- 通用
         item {
             SettingsCard {
@@ -446,6 +447,7 @@ private fun SettingsBody(
                 )
             }
         }
+    }
     }
 
     if (dayStartPickerVisible) {
@@ -653,8 +655,7 @@ private fun SwitchRow(
                 onValueChange = onCheckedChange,
             )
             .heightIn(min = rowMinHeight(sub))
-            .padding(horizontal = 12.dp)
-            .semantics { contentDescription = title },
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -674,7 +675,10 @@ private fun SwitchRow(
                 )
             }
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        // ⚠️ `onCheckedChange = null`：整行的 `toggleable` 已经负责切换。
+        // 传了回调的话 Switch 自己也会挂一个 toggleable 语义节点，而 Compose 不会把一个
+        // 独立可聚焦的子节点合并进父节点 → TalkBack 每行要停两次（实测反馈）。
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -850,7 +854,9 @@ private fun SettingsAlertDialog(alert: SettingsAlert, onDismiss: () -> Unit) {
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.save)) }
+            // 单键信息框的确认键是「好」，不是「保存」/「取消」
+            // （06 §2.2；iOS 侧这条曾经写成「取消」，是明确记录过的缺陷）
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.ok)) }
         },
     )
 }

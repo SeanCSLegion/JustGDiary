@@ -122,6 +122,7 @@
     <string name="a11y_week_grid">%1$s week</string>
     <string name="a11y_month_grid">%1$s calendar</string>
     <string name="a11y_back_to_month">Back to month</string>
+    <string name="a11y_back_to_year">Back to year</string>
     <string name="a11y_scroll_to_today">Back to today</string>
     <string name="footprint_title">Footprint</string>
     <string name="footprint_time_all">All</string>

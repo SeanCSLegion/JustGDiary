@@ -113,8 +113,8 @@ class AdaptiveLayoutTest {
 
     @Test
     fun `settings columns are 1 2 3 across the tiers`() {
-        assertEquals(1, layout(679f, 874f).settingsColumns)
-        assertEquals(2, layout(680f, 874f).settingsColumns)
+        assertEquals(1, layout(699f, 874f).settingsColumns)
+        assertEquals(2, layout(700f, 874f).settingsColumns)
         assertEquals(2, layout(999f, 874f).settingsColumns)
         assertEquals(3, layout(1000f, 874f).settingsColumns)
     }

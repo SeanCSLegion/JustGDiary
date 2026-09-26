@@ -19,16 +19,25 @@ data class FootprintViewState(
     val locatedCount: Int,
     /** **不受筛选影响**的未记录天数（对应 iOS 的"未记录 M 篇"）。 */
     val unlocatedCount: Int,
-    /** 年份胶囊的候选项（来自未筛选的已定位记录，倒序）。 */
+    /** 年份胶囊的候选项（倒序；**每一个点下去都一定有内容**）。 */
     val yearOptions: List<String>,
 )
 
 /**
  * 足迹页的数据装配。移植自 iOS `ViewModels/FootprintViewModel.swift:66-95`。
  *
- * 一个容易做错的细节：**"未记录"的计数不受筛选影响** —— iOS 的注释明确说明了这一点
- * （筛选的是"已标注"的视图，而未记录是另一类事实）。年份候选同样来自未筛选的记录，
- * 否则选中某一年后其它年份就会从胶囊里消失。
+ * ## 年份候选项的两条规则（2026-09-26 按用户反馈修正）
+ *
+ * 1. **只列"实际有内容"的年份** —— 候选来自
+ *    `已定位 ∧ 当前时间筛选（不含年份筛选本身）` 的记录。这样每个年份胶囊点下去
+ *    都必然有结果，不会出现一排"点了什么都没有"的空年份。
+ * 2. **`自定义` 是保底项**，由界面无条件渲染（哪怕一个年份都没有）。
+ *
+ * iOS 那边候选来自**完全未筛选**的记录：先选自定义区间、再点某个年份时，
+ * 两个条件一交可能就是空的 —— 这正是要避免的那种"其实是空的年份按钮"。
+ *
+ * 另一条仍然保留的规则：**"未记录"的计数不受任何筛选影响**
+ * （筛选的是"已标注"的视图，而未记录是另一类事实）。
  */
 object FootprintViewStateBuilder {
 
@@ -40,15 +49,16 @@ object FootprintViewStateBuilder {
     ): FootprintViewState {
         val located = rows.filter(FootprintAggregator::hasPlace)
 
-        var filtered = located
-        if (yearFilter != YEAR_FILTER_ALL) {
-            filtered = filtered.filter { it.dayKey.startsWith(yearFilter) }
-        }
-        if (timeRange != null) {
-            filtered = filtered.filter { it.dayKey in timeRange }
+        // 时间筛选先于年份筛选：年份候选项要看得到它，否则会列出空年份
+        val inTimeRange = if (timeRange == null) located else located.filter { it.dayKey in timeRange }
+
+        val filtered = if (yearFilter == YEAR_FILTER_ALL) {
+            inTimeRange
+        } else {
+            inTimeRange.filter { it.dayKey.startsWith(yearFilter) }
         }
 
-        val yearOptions = located
+        val yearOptions = inTimeRange
             .mapNotNull { row -> row.dayKey.takeIf { it.length >= 4 }?.substring(0, 4) }
             .distinct()
             .sortedDescending()

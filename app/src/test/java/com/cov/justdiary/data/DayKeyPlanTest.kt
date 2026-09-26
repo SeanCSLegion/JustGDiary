@@ -78,6 +78,45 @@ class DayKeyPlanTest {
         assertEquals(0, plan.movedBlocks)
     }
 
+    /**
+     * 传递性冲突：**被判为冲突的行同样不会腾空它的旧键**，
+     * 所以排在它后面的那一条也不能移动。
+     *
+     * 实测数据（start 4h → 22h）：
+     *  - C = 9/24 23:30 → 不动（22 点之后仍属 9/24）
+     *  - B = 9/25 21:40 → 想搬 9/24，被 C 占着 → 冲突
+     *  - A = 9/26 21:40 → 想搬 9/25，B "想搬" 但已被判冲突 → **也必须冲突**
+     *
+     * 只判断"持有者想不想搬"会放行 A，写库时 B 还占着 9/25，直接抛 UNIQUE 约束异常。
+     */
+    @Test
+    fun `a row blocked transitively by a conflicted row is also a conflict`() {
+        val utcC = utcAt("2026-09-24", 23, 30)
+        val utcB = utcAt("2026-09-25", 21, 40)
+        val utcA = utcAt("2026-09-26", 21, 40)
+        val rows = listOf(
+            DayKeyRow(1, DateUtil.dayKeyForUtc(utcC, 4), utcC),
+            DayKeyRow(2, DateUtil.dayKeyForUtc(utcB, 4), utcB),
+            DayKeyRow(3, DateUtil.dayKeyForUtc(utcA, 4), utcA),
+        )
+        val plan = planDayKeys(rows, 22)
+        assertEquals(0, plan.movedBlocks)
+        assertEquals(2, plan.conflicts)
+    }
+
+    /** 不动点收敛后，剩下的移动者写下去的键两两不重复、也不会撞到任何留下的键。 */
+    @Test
+    fun `the surviving movers never collide with keys that stay`() {
+        // 构造一串"接力"搬迁：每一条都想搬到前一条的键上
+        val utc = (23..26).map { day -> utcAt("2026-09-${day}", 21, 40) }
+        val rows = utc.mapIndexed { i, u -> DayKeyRow((i + 1).toLong(), DateUtil.dayKeyForUtc(u, 4), u) }
+        val plan = planDayKeys(rows, 22)
+        val staying = rows.filter { it.id !in plan.movers.toSet() }.map { it.oldKey }.toSet()
+        val written = plan.finalKeys.values.toList()
+        assertEquals(written.size, written.toSet().size)          // 移动者之间不重复
+        assertTrue(written.none { it in staying })                 // 也不撞留下的键
+    }
+
     @Test
     fun `swapping neighbours can both move when each one vacates`() {
         // 1 从 9/26 搬到 9/25 的同一天，2 从 9/25 搬到 9/24 —— 互不挡路，两条都移动

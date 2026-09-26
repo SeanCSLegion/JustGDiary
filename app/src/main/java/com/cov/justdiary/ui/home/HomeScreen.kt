@@ -73,6 +73,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -337,7 +338,13 @@ fun HomeScreen(
     // 预测性返回（规范 §6 / 设计规范 Q4）：
     //   年态 / 周态 → 回月态（**不退出应用**）；月态 → 交还系统。
     // iOS 的年态只有"点迷你月"一条退路，Android 用户会先按系统返回键。
-    PredictiveBackHandler(enabled = mode != HomeViewMode.MONTH) {
+    // ⚠️ 必须把 progress flow **消费掉**。activity-compose 1.13.0 在这条协程结束后会执行
+    // `check(completed) { "You must collect the progress flow" }`（PredictiveBackHandler.kt:232），
+    // 不 collect 时手势永远不 complete → onCompletion 不触发 → 抛 IllegalStateException，
+    // 表现为"周态 / 年态按返回键直接闪退"。
+    // 这里不做跟手动画（三态 morph 由 morphSpec 驱动），所以只 collect 不消费事件。
+    PredictiveBackHandler(enabled = mode != HomeViewMode.MONTH) { progress ->
+        progress.collect { }
         backToMonth()
     }
 
@@ -524,6 +531,7 @@ fun HomeScreen(
                         if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
                     },
                     onToday = ::goToday,
+                    mode = mode,
                 )
             }
 
@@ -1061,8 +1069,13 @@ private fun HomeTopBar(
     todayLabel: String,
     onLeftClick: () -> Unit,
     onToday: () -> Unit,
+    mode: HomeViewMode = HomeViewMode.MONTH,
 ) {
-    val backLabel = stringResource(R.string.a11y_back_to_month)
+    // 左胶囊的无障碍文案要**跟着动作走**：月态点它是进年历，周态才是回月历
+    val a11yLeftLabel = stringResource(
+        if (showLeft && mode == HomeViewMode.MONTH) R.string.a11y_back_to_year else R.string.a11y_back_to_month,
+    )
+    val a11yTodayLabel = stringResource(R.string.a11y_scroll_to_today)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1079,17 +1092,21 @@ private fun HomeTopBar(
                 onClick = onLeftClick,
                 leading = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                 variant = PillVariant.Outlined,
-                modifier = Modifier.semantics {
-                    if (leftLabel.isNotEmpty()) contentDescription = backLabel
-                },
+                modifier = Modifier.semantics { contentDescription = a11yLeftLabel },
             )
         }
         Spacer(modifier = Modifier.weight(1f))
+        // 不带前导图标（用户反馈：不要日历图标）。可见文案会在
+        // 今天 / 昨天 / 3 天后 / 9月26日 之间变，因此用 stateDescription 承载它，
+        // contentDescription 固定为「回到今天」，TalkBack 的语义才稳定。
         AssistPill(
             text = todayLabel,
             onClick = onToday,
-            leading = Icons.Filled.DateRange,
             variant = PillVariant.Elevated,
+            modifier = Modifier.semantics {
+                contentDescription = a11yTodayLabel
+                stateDescription = todayLabel
+            },
         )
     }
 }

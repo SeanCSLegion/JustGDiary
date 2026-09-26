@@ -6,8 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -377,7 +375,7 @@ fun SearchScreen(
                 PageHeader(title = TITLE, trailing = { countLabel?.let { CountBadge(it) } })
                 searchField()
                 filterPanel(modifier = Modifier.fillMaxWidth())
-                summaryRow(modifier = Modifier.fillMaxWidth())
+                // 分栏时**不显示**条件摘要行（规范 §1.4/§1.8）：左栏的 chip 组已经表达了全部条件
             }
             HorizontalDivider(
                 modifier = Modifier
@@ -426,7 +424,6 @@ private fun FilterGroupLabel(text: String, topPadding: androidx.compose.ui.unit.
 }
 
 /** 时间档位的胶囊行（「自定义」打开 ModalBottomSheet，不再是一个点不动的空档）。 */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TimeFilterRow(
     state: SearchUiState,
@@ -434,10 +431,12 @@ private fun TimeFilterRow(
     onOpenCustomRange: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    FlowRow(
-        modifier = modifier.fillMaxWidth(),
+    // 单行横滑（用户反馈：放在 scrollview 里左右滑动，**不要做成多排**）
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         timeRangeOptions().forEach { (kind, label) ->
             FilterChip(
@@ -636,8 +635,9 @@ private fun LocationPickerSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // 注意：过滤在 **ViewModel** 侧已经做过（`filteredLocOptions`），这里只按传入的候选渲染。
-    // iOS 那边是弹窗内客户端过滤 + 硬上限 20 项，榜外的地点搜不到 —— Android 走 SQL 查询。
+    // `options` 已经是**按当前关键词查过库**的结果（`SearchViewModel.setLocSearch` →
+    // `loadLocationOptions(keyword)` → SQL LIKE）。不要在客户端再过滤一遍：
+    // iOS 就是 Top20 + 弹窗内过滤，榜外的地点永远搜不到（README §6 缺陷 7）。
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(modifier = Modifier.padding(horizontal = 24.dp)) {
             Text(LOC_TITLE, style = MaterialTheme.typography.titleMedium)
@@ -833,19 +833,20 @@ private fun SearchResultRow(
 /**
  * 把 `<hl>…</hl>` 标记渲染成高亮文本。
  *
- * 与 iOS 一致：命中片段**背景用 `primaryContainer`、前景用 `primary`**。
- * 页内搜索（日记页）用的是同一套配色，两处必须一致。
+ * 规范 §1.7：命中片段只加 `primaryContainer` **底色**，不加粗、不变色。
+ * 页内搜索（日记页）用的是同一套，两处必须一致。
  */
 @Composable
 private fun highlightSnippet(snippet: String): AnnotatedString {
     if (!snippet.contains(SearchUtil.HIGHLIGHT_OPEN)) return AnnotatedString(snippet)
     val background = MaterialTheme.colorScheme.primaryContainer
-    val foreground = MaterialTheme.colorScheme.primary
     val segments = SearchUtil.highlightSnippet(snippet)
     return buildAnnotatedString {
         segments.forEach { segment ->
             if (segment.hit) {
-                withStyle(SpanStyle(background = background, color = foreground)) { append(segment.text) }
+                // 只加底色：规范 §1.7 明确「不用加粗、不用变色」——
+                // 改字色会和"链接/可点"的视觉语义打架
+                withStyle(SpanStyle(background = background)) { append(segment.text) }
             } else {
                 append(segment.text)
             }

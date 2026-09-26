@@ -111,6 +111,7 @@
     <string name="a11y_week_grid">%1$s 那一周</string>
     <string name="a11y_month_grid">%1$s 的月历</string>
     <string name="a11y_back_to_month">返回月历</string>
+    <string name="a11y_back_to_year">返回年历</string>
     <string name="a11y_scroll_to_today">回到今天</string>
     <string name="footprint_title">足迹</string>
     <string name="footprint_time_all">全部</string>

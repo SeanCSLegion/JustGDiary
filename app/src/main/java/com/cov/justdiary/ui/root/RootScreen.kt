@@ -222,7 +222,7 @@ private fun TabContent(
             FootprintScreen(
                 state = state.viewState,
                 yearFilter = state.yearFilter,
-                // 并排由 AdaptiveLayout 统一判定（宽 ≥700 且宽 > 高）
+                // 并排由 AdaptiveLayout 统一判定（内容宽 ≥548.5dp 且 宽 > 高）
                 landscape = LocalAdaptiveLayout.current.splitsMasterDetail,
                 expanded = state.expanded,
                 onYearFilterChange = viewModel::setYearFilter,
@@ -241,6 +241,11 @@ private fun TabContent(
         AppTab.Search -> {
             val viewModel: SearchViewModel = viewModel(factory = SearchViewModel.factory(container))
             val state by viewModel.state.collectAsState()
+            // 日记数据变过之后重查（与其它的标签页一致）。原来是唯一漏掉这条的页面，
+            // 于是在日记页改完内容回到搜索页，结果还是旧的。
+            LaunchedEffect(dataVersion) { viewModel.refresh() }
+            val searchSettingsVersion by container.settings.version.collectAsState()
+            LaunchedEffect(searchSettingsVersion) { viewModel.refresh() }
             SearchScreen(
                 state = state.ui,
                 filterItems = state.filterItems,

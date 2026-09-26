@@ -216,8 +216,46 @@ class FootprintAggregatorTest {
         assertEquals(1, only2025.locatedCount)
         assertEquals("未记录的计数不受筛选影响", 1, only2025.unlocatedCount)
         assertEquals(setOf("中国"), only2025.stats.countries)
-        // 年份候选也不受筛选影响，否则选中一年后其它年份会消失
+        // 年份候选**不受年份筛选本身影响**，否则选中一年后其它年份会消失
         assertEquals(listOf("2026", "2025"), only2025.yearOptions)
+    }
+
+    /**
+     * 年份候选受**时间筛选**影响（2026-09-26 按用户反馈改）：
+     * 只列"当前时间范围下真的有内容"的年份，避免出现一排点了没反应的空年份。
+     */
+    @Test
+    fun `year options only list years that have content inside the time range`() {
+        val rows = listOf(
+            row(1, "2024-05-01", "中国", "上海市", "黄浦区"),
+            row(2, "2026-01-05", "法国", "法兰西岛", "巴黎"),
+            row(3, "2026-06-30", "日本", "东京都", "涩谷区"),
+        )
+        // 不限时间 → 两年都在
+        assertEquals(listOf("2026", "2024"), FootprintViewStateBuilder.build(rows).yearOptions)
+        // 只到 2026 上半年 → 2024 那一年没有内容，就不该出现在胶囊里
+        val h1 = FootprintViewStateBuilder.build(
+            rows,
+            timeRange = DayKeyRange("2026-01-01", "2026-06-30"),
+        )
+        assertEquals(listOf("2026"), h1.yearOptions)
+        // 年份筛选**不**参与候选计算：选了 2024 之后 2026 仍在（否则切不回去）
+        val only2024 = FootprintViewStateBuilder.build(rows, yearFilter = "2024")
+        assertEquals(listOf("2026", "2024"), only2024.yearOptions)
+    }
+
+    /** 时间范围与年份都命中不了任何记录时，候选为空 —— 界面靠「自定义」这个保底项兜住。 */
+    @Test
+    fun `year options are empty when nothing falls inside the range`() {
+        val rows = listOf(row(1, "2026-01-05", "法国"))
+        val empty = FootprintViewStateBuilder.build(
+            rows,
+            timeRange = DayKeyRange("2020-01-01", "2020-12-31"),
+        )
+        assertEquals(0, empty.locatedCount)
+        assertTrue(empty.yearOptions.isEmpty())
+        // 统计卡仍然可用（全 0），只有清单卡该换成空态
+        assertEquals(0, empty.stats.blocks)
     }
 
     @Test
