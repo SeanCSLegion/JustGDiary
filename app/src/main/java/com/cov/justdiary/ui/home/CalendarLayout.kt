@@ -294,6 +294,49 @@ object CalendarLayout {
         preferred: Float = PORTRAIT_CELL_H,
     ): Float = ((areaH - headerH) / MONTH_ROWS).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
 
+    /**
+     * 竖屏行高：**由列宽推出**，让"上下间隔"与"左右间隔"接近。
+     *
+     * 用户真机反馈："目前的日期上下间隔太大了，参考左右间隔来设置上下间隔。"
+     * 原因是行高被"把整页均分给行数"算成了 114dp（5 行月），而列宽只有 ~51dp ——
+     * 行距是列距的两倍多，看着就散。
+     *
+     * 1.2 这个系数：设计稿的 `PORTRAIT_CELL_H = 56` 对应 51dp 列宽（≈1.1），
+     * iOS 参考图约 1.34，取中间偏设计稿。
+     */
+    const val CELL_H_PER_COL_W = 1.2f
+
+    /** 月格字号的上限（`monthMetrics` 里的 `clamp` 用的是同一组值）。 */
+    const val DAY_FONT_MAX = 20f
+    const val LUNAR_FONT_MAX = 11f
+
+    /** 日号与农历之间的空档要收掉多少 dp（圆底比数字本身高出一截）。 */
+    const val LUNAR_TIGHTEN = 6f
+
+    /** 一格"日号 + 农历"的自然高度（`CalendarDayCell` 注释实测 ≈ 70dp，留 2dp 余量）。 */
+    const val DAY_CELL_CONTENT_H = 72f
+
+    /** 一格只有日号（无农历）时的自然高度：以选中圆直径为据。 */
+    const val DAY_CELL_NO_LUNAR_H = 48f
+
+    /**
+     * 竖屏行高 = **列宽**与**文字实际高度**两者取大。
+     *
+     * 只按列宽会**裁掉农历**：字号是从 `cellH` 推出来的（`dayFont = cellH×0.34` 上限 20、
+     * `lunarFont = cellH×0.18` 上限 11），之后还要乘系统字号缩放 ——
+     * 用户把系统字号调大时，列宽推出的行高装不下"日期 + 农历"（真机实测农历被切一半）。
+     * 所以这里按上限字号 × 缩放系数估一个内容高度，取较大者。
+     */
+    fun dayCellHeightFor(calendarW: Float, fontScale: Float = 1f, showLunar: Boolean = true): Float {
+        val byWidth = calendarW / 7f * CELL_H_PER_COL_W
+        // 内容下限：`CalendarDayCell` 的注释写明"日号 + 农历 ≈ 70dp"，
+        // 取 72dp 留一点余量。**低于它会裁掉农历**（真机实测：61dp 时农历被切一半）。
+        // 有农历时用 72，无农历（纯日号）时用圆直径那档就够。
+        val natural = if (showLunar) DAY_CELL_CONTENT_H else DAY_CELL_NO_LUNAR_H
+        val byContent = natural * max(1f, fontScale)
+        return max(byWidth, byContent).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
+    }
+
     /** 网格的**实际**高度（当月行数 × 行高）。 */
     fun monthGridHeight(rows: Int, cellH: Float): Float = max(0, rows) * cellH
 

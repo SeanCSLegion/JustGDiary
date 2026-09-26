@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -256,6 +257,11 @@ private fun CalendarDayCell(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
+            // 与下面农历的 `-LUNAR_TIGHTEN` 配对，让"日号 + 农历"这一组在格子里
+            // （也就是分隔线之间）**光学居中**。
+            // ⚠️ 必须用 `offset`（不参与布局）而不是 `padding` —— 加 padding 会把 Column 的
+            // 布局高度撑大 6dp，内容正好顶到格子下沿，**农历又被裁掉**（实测踩到）。
+            modifier = Modifier.offset(y = CalendarLayout.LUNAR_TIGHTEN.dp / 2f),
         ) {
             Box(
                 modifier = Modifier.size(circleDiameter),
@@ -295,24 +301,34 @@ private fun CalendarDayCell(
                     maxLines = 1,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Center,
+                    // 日号底下那个圆比数字本身高一大截，农历因此离得很远（用户反馈"间隔太大"）。
+                    // 往上提 LUNAR_TIGHTEN，把这段空档收掉。
+                    modifier = Modifier.offset(y = -CalendarLayout.LUNAR_TIGHTEN.dp),
                 )
             }
-            if (hasDiary) {
-                DiaryMark(color = markColor, width = diaryMarkWidth)
-            }
+            // ⚠️ 标记**始终占位**：只在 `hasDiary` 时才组合的话，
+            // 有日记的格子内容会整体比别的格子高 3dp、看着不齐（用户提醒"注意保留标记位置"）。
+            DiaryMark(color = markColor, width = diaryMarkWidth, visible = hasDiary)
         }
     }
 }
 
 /** "有日记"标记：2dp 高、1dp 圆角的短横线（对应 iOS 的 `Radius.hairline`）。 */
 @Composable
-private fun DiaryMark(color: Color, width: Dp) {
+private fun DiaryMark(color: Color, width: Dp, visible: Boolean = true) {
     Box(
         modifier = Modifier
             .padding(top = 1.dp)
-            .size(width = width, height = 2.dp)
-            .background(color, RoundedCornerShape(Radius.hairline)),
-    )
+            .size(width = width, height = 2.dp),
+    ) {
+        if (visible) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(color, RoundedCornerShape(Radius.hairline)),
+            )
+        }
+    }
 }
 
 /**

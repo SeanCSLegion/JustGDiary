@@ -496,7 +496,13 @@ fun HomeScreen(
         val headerH = if (split) splitHeaderH else {
             CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H
         }
-        val cellH = CalendarLayout.fitCellHeight(monthAreaH - headerH, shownRows)
+        // 行高**由列宽推出**（不是把整页均分给行数）：见 `dayCellHeightFor` 的说明 ——
+        // 均分会让 5 行月的行距达到列距的两倍多，用户反馈"上下间隔太大"。
+        val cellH = CalendarLayout.dayCellHeightFor(
+            calendarW = calendarW,
+            fontScale = LocalDensity.current.fontScale,
+            showLunar = showLunarHere,
+        )
             .let { if (weekStripOnly) it.coerceAtMost(CalendarLayout.WEEK_STRIP_H) else it }
         val gridH = CalendarLayout.monthGridHeight(shownRows, cellH)
         val metrics = remember(calendarW, cellH, showLunarHere) {
@@ -797,6 +803,18 @@ fun HomeScreen(
                 // 其它字段（metrics / cellHeight / selectedKey / todayKey / flags）与月份无关，
                 // 沿用是对的；只有标题是**跟着月份走**的。
                 monthTitleLabel = monthTitleText(first, dateFormats, context),
+                // 非当前月走**紧凑形态**：小号内联标签、不画星期栏 ——
+                // 大标题与星期栏由顶部钉住层提供，只有一份（用户给的 iOS 参考版面）。
+                compactMonth = !withMorph,
+                // 非当前月：把标签怼到"1 号那一列"上（`displayed` 的首行里 1 号的下标）
+                titleIndentDp = if (withMorph) {
+                    0f
+                } else {
+                    val col = weeks.first().indexOfFirst { it.dayOfMonth == 1 }
+                        .coerceAtLeast(0)
+                    col * CalendarLayout.monthCellW(calendarArgs.calendarW)
+                },
+                showBigTitle = withMorph && calendarArgs.showBigTitle,
                 fadeForYear = if (withMorph) calendarArgs.fadeForYear else 0f,
             )
         }
@@ -937,11 +955,74 @@ fun HomeScreen(
                                             CalendarSection(
                                                 args = monthArgsAt(key, withMorph = key == monthKey),
                                             )
-                                            // 月与月之间空一行（用户要求的分隔）
-                                            Spacer(modifier = Modifier.height(cellH.dp))
+                                            // 月与月之间**不再另加间隔**：紧凑月标签占的那一整行
+                                            // 就是间隔（用户要求"每个月之间的分割线要跟日期间的
+                                            // 间隔线一样"）。
                                         }
                                     }
                                 }
+                                    // === 顶部**钉住层**（用户给的 iOS 参考版面）===
+                                    //
+                                    // 大标题 + 星期栏只有这一份，固定在顶部、**不随滚动移动**；
+                                    // 下面的日期在它下面无级滑动。声明在列表**之后**（画在上面），
+                                    // 且必须带 `surface` 底色 —— 否则滚上来的日期会从标题底下透出来。
+                                    //
+                                    // morph 期间隐藏（`p < 0.01f`）：那时大标题要淡出、
+                                    // 星期栏要跟着周条落位，由块内那一份接管（几何与原来完全一致）。
+                                    if (p < 0.01f) {
+                                        // 标题跟着滚动**连续换字**：取"刚露出钉住层下沿的那一项"。
+                                        //
+                                        // 用 `firstVisibleItemIndex` 不行 —— 上一月还露着一条边时它仍是上一月，
+                                        // 于是标题要等到吸附完成才换（参考图里是滑动过程中就换掉的）。
+                                        val topKey by remember {
+                                            derivedStateOf {
+                                                val info = monthListState.layoutInfo
+                                                val probe = info.viewportStartOffset +
+                                                    (CalendarLayout.BIG_TITLE_H +
+                                                        CalendarLayout.WEEKDAY_HEADER_H) * 2.75f + 1f
+                                                val item = info.visibleItemsInfo.firstOrNull {
+                                                    probe >= it.offset && probe < it.offset + it.size
+                                                } ?: info.visibleItemsInfo.firstOrNull()
+                                                item?.let { CalendarGrid.MONTH_KEYS.getOrNull(it.index) }
+                                            }
+                                        }
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .align(Alignment.TopCenter),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(calendarW.dp)
+                                                    .height(CalendarLayout.BIG_TITLE_H.dp),
+                                                contentAlignment = Alignment.CenterStart,
+                                            ) {
+                                                Text(
+                                                    text = topKey?.let {
+                                                        monthTitleText(
+                                                            CalendarGrid.monthFirstOfMonthKey(it),
+                                                            dateFormats,
+                                                            context,
+                                                        )
+                                                    } ?: monthTitle,
+                                                    fontSize = DynamicTypeMetrics.effectiveSp(
+                                                        TypeSize.display,
+                                                        LocalDensity.current.fontScale,
+                                                    ),
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.padding(horizontal = 20.dp),
+                                                )
+                                            }
+                                            Box(modifier = Modifier.width(calendarW.dp)) {
+                                                CalendarWeekdayHeader(weekStart = weekStart)
+                                            }
+                                        }
+                                    }
+
                             }
                             // 年层：与月层同一套"跟手 + 邻页"结构。
                             //
@@ -1132,6 +1213,18 @@ private data class CalendarSectionArgs(
     val jumpYear: (Int) -> Unit,
     /** 是否画 72dp 的大标题槽（竖屏 true；分栏时为省高度画 false）。 */
     val showBigTitle: Boolean,
+    /**
+     * **非当前月**的紧凑形态：只留一个小的内联月标签，不画星期栏。
+     * 参考 iOS 的版面（用户 2026-09-26 给的截图）：大标题与星期栏只有顶部那一份。
+     */
+    val compactMonth: Boolean = false,
+    /**
+     * 紧凑月标签的**横向缩进**（dp）：对齐到"1 号所在的那一列"。
+     *
+     * 用户反馈："日期的月份，非顶栏，显示位置不对，你现在还是在左上角，
+     * 而不是对应月 1 月的上方。" —— 参考图里「1月」是压在 1 号那一列上的。
+     */
+    val titleIndentDp: Float = 0f,
     /** 大标题文案（`九月`）。 */
     val monthTitleLabel: String,
 )
@@ -1222,10 +1315,13 @@ private fun CalendarSection(args: CalendarSectionArgs) {
     // 正好是周条的真实位置 —— 这就是"动画终点即真实图层"。
     // 竖屏：72dp 的 32sp 大标题；分栏：34dp 的 24sp 紧凑标题（规范 §5.8，与 iOS 的
     // `compactMonthTitleH` 一致 —— 横屏高度稀缺，但完全不画标题会让左栏失去锚点）。
-    val bigTitleH = if (args.showBigTitle) {
-        CalendarLayout.BIG_TITLE_H
-    } else {
-        CalendarLayout.COMPACT_MONTH_TITLE_H
+    val bigTitleH = when {
+        // 紧凑月（非当前月）的标签**占一整行的高度**（= 行高）：
+        // 用户要求"月份与日期之间的间隔要和日期间的间隔一样"，而月份之间的那条线
+        // 也要和行分隔线一样 —— 于是标签行就当成"一行"来排。
+        args.compactMonth -> args.cellHeight
+        args.showBigTitle -> CalendarLayout.BIG_TITLE_H
+        else -> CalendarLayout.COMPACT_MONTH_TITLE_H
     }
     val shiftY = bigTitleH * p
     val titleOpacity = 1f - CalendarLayout.clamp01(p * 2f)
@@ -1257,7 +1353,11 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     translationY = -bigTitleH * p * density
                     alpha = titleOpacity
                 },
-                contentAlignment = Alignment.CenterStart,
+                contentAlignment = if (args.compactMonth) {
+                    Alignment.BottomStart
+                } else {
+                    Alignment.CenterStart
+                },
             ) {
                 // 32sp 大标题（规范 §5.2）：iOS 的视觉重心就在这一行，
                 // 首轮把它并进顶栏，于是整块版面又扁又空（实测缺陷 D5）。
@@ -1272,11 +1372,19 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = if (args.showBigTitle) 20.dp else 16.dp),
+                    modifier = Modifier
+                        .padding(horizontal = if (args.showBigTitle) 20.dp else 16.dp)
+                        // 紧凑月标签对齐到 1 号那一列；当前月（钉住层那份）缩进为 0
+                        .offset(x = args.titleIndentDp.dp),
                 )
         }
         Box(modifier = Modifier.graphicsLayer { translationY = -shiftY * density }) {
-            CalendarWeekdayHeader(weekStart = args.weekStart, compact = !args.showBigTitle)
+            // 紧凑月（非当前月）**不画星期栏** —— 星期栏在顶部只有一份（钉住层里的那条）。
+            // 这里仍然占住同样的高度，块与块之间的间距才稳定。
+            // 紧凑月**完全不占**星期栏的高度：那 30dp 正是"月份与日期之间间隔太大"的来源。
+            if (!args.compactMonth) {
+                CalendarWeekdayHeader(weekStart = args.weekStart, compact = !args.showBigTitle)
+            }
         }
         // 高度在「月态网格」与「周条」之间插值：用 `if` 二选一会让容器瞬间跳掉一整块。
         // 不加 clipToBounds —— 周条在 morph 前段位于容器上边界之外，裁掉会露出空白；
