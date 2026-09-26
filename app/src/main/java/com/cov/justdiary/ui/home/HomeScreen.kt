@@ -1326,11 +1326,10 @@ private fun CalendarSection(args: CalendarSectionArgs) {
         // 紧凑月（非当前月）的标签**占一整行的高度**（= 行高）：
         // 用户要求"月份与日期之间的间隔要和日期间的间隔一样"，而月份之间的那条线
         // 也要和行分隔线一样 —— 于是标签行就当成"一行"来排。
-        // 用户更正："我之前说月份是不占高度的，实际上参考图里面的月份显示是占高度的。"
-        // 所以标签行**占一整行**（= 行高），文字**在行内居中** ——
-        // 与日期行同一套节拍：行、行、线、标签行、行……
-        // （字号仍按用户反馈用 18sp，不是 24sp。）
-        args.compactMonth -> args.cellHeight
+        // 用户："月份的高度是紧贴字体显示的，不是和日期一样高的。"
+        // 所以标签行**只按字号撑开**（用设计稿里的紧凑标题高度 34dp），
+        // 不占一整行；字号 18sp、行内居中。
+        args.compactMonth -> CalendarLayout.COMPACT_MONTH_TITLE_H
         args.showBigTitle -> CalendarLayout.BIG_TITLE_H
         else -> CalendarLayout.COMPACT_MONTH_TITLE_H
     }
@@ -1378,8 +1377,18 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                 }
                 // 32sp 大标题（规范 §5.2）：iOS 的视觉重心就在这一行，
                 // 首轮把它并进顶栏，于是整块版面又扁又空（实测缺陷 D5）。
+                // 标签宽度要**量出来**才能做溢出保护：11 月 1 号落在最后一列时，
+                // "列缩进 + 标签宽度"会超出日历宽度，标签就被切到屏幕外（用户实测）。
+                var labelWidthPx by remember { mutableStateOf(0) }
+                val labelIndent = if (!args.compactMonth) {
+                    args.titleIndentDp
+                } else {
+                    val avail = args.calendarW - labelWidthPx / LocalDensity.current.density - 16f
+                    args.titleIndentDp.coerceAtMost(avail.coerceAtLeast(0f))
+                }
                 Text(
                     text = args.monthTitleLabel,
+                    onTextLayout = { labelWidthPx = it.size.width },
                     fontSize = when {
                         args.compactMonth ->
                             DynamicTypeMetrics.effectiveSp(TypeSize.statValue, fontScale)
@@ -1394,8 +1403,9 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .padding(horizontal = if (args.showBigTitle) 20.dp else 16.dp)
-                        // 紧凑月标签对齐到 1 号那一列；当前月（钉住层那份）缩进为 0
-                        .offset(x = args.titleIndentDp.dp),
+                        // 紧凑月标签对齐到 1 号那一列；当前月（钉住层那份）缩进为 0。
+                        // 已经过溢出保护：右边缘不会超出日历宽度。
+                        .offset(x = labelIndent.dp),
                 )
         }
         Box(modifier = Modifier.graphicsLayer { translationY = -shiftY * density }) {
