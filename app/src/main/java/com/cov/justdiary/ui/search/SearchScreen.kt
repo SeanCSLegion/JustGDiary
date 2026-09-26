@@ -115,6 +115,8 @@ fun SearchScreen(
     state: SearchUiState,
     filterItems: List<SearchFilterItem>,
     modifier: Modifier = Modifier,
+    /** 应用内语言：结果行的日期 / 时刻格式跟随它，而不是系统语言。 */
+    appLanguage: String = AppSettings.LANGUAGE_SYSTEM,
     onKeywordChange: (String) -> Unit = {},
     onCommitKeyword: () -> Unit = {},
     onRemoveKeyword: (String) -> Unit = {},
@@ -143,7 +145,10 @@ fun SearchScreen(
     // 结果行无障碍文案里的日期/时刻：**必须**走 `DateFormats` 的语义槽位，
     // 不能自己拼 —— 日期要跟随应用内语言，小时制要跟随设备。
     val context = LocalContext.current
-    val formats = remember(context) { DateFormats.forContext(context, AppSettings.LANGUAGE_SYSTEM) }
+    // ⚠️ 用**应用内语言**而不是系统语言：模板字符串走 `context.getString`（受
+    // `setApplicationLocales` 影响），月份/星期名如果取系统语言就会混搭出「9月 8」这种
+    // 中英夹心；而且 `remember(context)` 在应用内切语言时不会失效。
+    val formats = remember(appLanguage) { DateFormats.forContext(context, appLanguage) }
     val split = LocalAdaptiveLayout.current.splitsMasterDetail
 
     if (showLocPicker) {
@@ -780,10 +785,12 @@ private fun SearchResultRow(
     DiaryCard(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            // 整行只留**一条**语义：清掉子节点各自的文本，点击动作与 Role 来自外层 clickable
-            .clearAndSetSemantics { contentDescription = description },
+            .heightIn(min = 48.dp),
         onClick = onClick,
+        // 整行只留**一条**语义：清掉子节点各自的文本。
+        // ⚠️ 必须走 `contentModifier`（在 clickable **之内**）——放在外层 modifier 上
+        // 会把 clickable 的 onClick 与 Role 一并清掉，TalkBack 能读但按不动。
+        contentModifier = Modifier.clearAndSetSemantics { contentDescription = description },
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),

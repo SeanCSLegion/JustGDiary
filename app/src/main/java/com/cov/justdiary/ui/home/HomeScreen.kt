@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -89,6 +90,7 @@ import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.Log
 import com.cov.justdiary.service.Lunar
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.AssistPill
 import com.cov.justdiary.ui.components.PillVariant
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
@@ -161,6 +163,16 @@ fun HomeScreen(
     onSelectDay: (String) -> Unit = {},
     /** 内联图片加载器（接 `MediaStore`）。 */
     imageLoader: (String) -> ImageBitmap? = { null },
+    /**
+     * 数据版本（导入备份、别处改过日记）。
+     *
+     * 变化时**重置回「今天 + 月态」**（规范 §1 规则 3）。
+     * 原来 `monthKey/selectedKey/mode` 是 `rememberSaveable` 且没有任何重置路径 ——
+     * 切主题会重建 Activity，`rememberSaveable` 反倒把"年态"恢复回来。
+     */
+    dataVersion: Int = 0,
+    /** 设置版本（语言 / 主题 / 周起始 / `auto_time`）。变化时同样重置。 */
+    settingsVersion: Int = 0,
 ) {
     val todayKey = DateUtil.dayKeyOf(today)
     var monthKey by rememberSaveable { mutableStateOf(CalendarGrid.monthKeyOf(today)) }
@@ -220,6 +232,16 @@ fun HomeScreen(
         }
     }
 
+    // 数据 / 设置变化 → 无动画回到「今天 + 月态」（规范 §1 规则 3）
+    LaunchedEffect(dataVersion, settingsVersion) {
+        if (dataVersion == 0 && settingsVersion == 0) return@LaunchedEffect   // 首帧不重置
+        yearProgress.snapTo(0f)
+        weekProgress.snapTo(0f)
+        mode = HomeViewMode.MONTH
+        selectedKey = todayKey
+        monthKey = CalendarGrid.monthKeyOf(today)
+    }
+
     // 选中日与年份变化上报给上层（与 iOS 的同名回调等价）
     LaunchedEffect(selectedKey) { onSelectDay(selectedKey) }
     val monthFirst = remember(monthKey) { CalendarGrid.monthFirstOfMonthKey(monthKey) }
@@ -247,6 +269,7 @@ fun HomeScreen(
     // 而且挂在底部 overlay 上只留 24dp —— 真触发会压住浮条。这里用 M3 的 SnackbarHost。
     val snackbarHostState = remember { SnackbarHostState() }
     val futureToastText = stringResource(R.string.index_future_toast)
+    val gotItLabel = stringResource(R.string.action_got_it)
 
     /**
      * 翻月（规范 §6.2）。
@@ -485,7 +508,10 @@ fun HomeScreen(
                     },
                     onDragCancel = { accumulated = 0f },
                     onDragEnd = {
-                        val velocity = tracker.calculateVelocity().y
+                        // ⚠️ 单位必须统一：`accumulated` 是 **dp**（下面除了 `densityScale`），
+                        // 而 `VelocityTracker` 给的是 **px/s** —— 直接相加会让甩动阈值
+                        // 随屏幕密度变化（参考机 2.625×）。这里把速度也换成 dp/s。
+                        val velocity = tracker.calculateVelocity().y / densityScale
                         val predictedEnd =
                             accumulated + velocity * CalendarLayout.DragPagerMath.PROJECTION_SECONDS
                         when (CalendarLayout.DragPagerMath.decide(accumulated, predictedEnd, true, true)) {
@@ -508,7 +534,10 @@ fun HomeScreen(
                     },
                 )
             }
-        val pagerModifier = if (morphing) {
+        // 周态**没有**「上下滑翻月」这条手势（规范 §6）：那条手势只改 `monthKey` 不改
+        // `selectedKey`，而周条是从选中日推出来的 —— 结果竖直拖一下，周条会悄悄变成
+        // "另一个月的第一周"，而下方日期标题与当日面板还是旧日期。
+        val pagerModifier = if (morphing || mode == HomeViewMode.WEEK) {
             Modifier
                 .fillMaxWidth()
                 .height(bandH.dp)
@@ -546,7 +575,13 @@ fun HomeScreen(
                     // 周态：点另一天 = 换选中
                     key != selectedKey -> selectedKey = key
                     // 未来日期：只给一条 Snackbar，不打开日记（规范 §6.3）
-                    key > todayKey -> scope.launch { snackbarHostState.showSnackbar(futureToastText) }
+                    // 未来日期：一条带「知道了」动作的 Snackbar（规范 §6.3 / 06 §2.1）
+                    key > todayKey -> scope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = futureToastText,
+                            actionLabel = gotItLabel,
+                        )
+                    }
                     else -> onOpenDay(date)
                 }
             }
@@ -587,10 +622,13 @@ fun HomeScreen(
                 // ⚠️ 三块必须在 **Row** 里（规范 §2.3）：放进 Column 会被按高度分配，
                 // 表现为"日历占满左半边、右栏整块消失"。
                 Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                // 左栏：上下滑翻月（翻月时把选中日带到新月份的同一天，右栏才跟着走）
+                // 左栏：上下滑翻月（翻月时把选中日带到新月份的同一天，右栏才跟着走）。
+                // **宽度取 `adaptive.masterWidth`（clamp(内容宽×0.46, 260, 440)）而不是
+                // `weight(1f)`** —— 两个 weight(1f) 是 50/50，1280dp 平板上左栏会占 591dp，
+                // 日历只有 440dp、右边 151dp 死区，分隔线也落在屏幕正中（规范 §2.3）。
                 Box(
                     modifier = Modifier
-                        .weight(1f)
+                        .width(adaptive.masterWidth.dp)
                         .fillMaxHeight()
                         .then(pagerModifier),
                 ) {
@@ -647,31 +685,67 @@ fun HomeScreen(
                         )
                     }
 
-                    // 月态：整屏（宽窗口里限宽居中）
-                    HomeViewMode.MONTH -> Box(
-                        modifier = pagerModifier,
-                        contentAlignment = Alignment.TopCenter,
-                    ) {
-                        CalendarSection(args = calendarArgs)
-                    }
-
-                    // 年态：整屏（12 张迷你月 + 页内大标题）
-                    HomeViewMode.YEAR -> Box(
-                        modifier = pagerModifier,
-                        contentAlignment = Alignment.TopCenter,
-                    ) {
-                        YearLayer(
-                            args = calendarArgs,
-                            year = year,
-                            monthFirst = monthFirst,
-                            monthTitleLabel = monthTitle,
-                            yearHeight = yearHeight,
-                            yearWidth = calendarW,
-                            monthGridH = gridH,
-                            yearProgress = yearProgress.value,
-                            dateFormats = dateFormats,
-                            onMonthClick = { month -> openMonthFromYear(month) },
-                        )
+                    // 月态 / 年态：**两层同时存在**（规范 §7.2）
+                    //
+                    // ⚠️ 原来这里是 `when (mode)` 两个互斥分支，而 `openYear()` 会立刻把
+                    // `mode` 翻成 YEAR —— 于是 morph 前段只有年层在场，而年层的
+                    // `yearOpacity = clamp01((p-0.45)/0.55)` 在 p<0.45 时是 0，
+                    // **日历区整屏空白约 180ms**（反向约 220ms）。
+                    //
+                    // 现在两层都组合：月层按 `1 - p` 淡出并朝「源月卡片中心」等比缩小，
+                    // 年层按它自己的曲线淡入并放大 —— 两者在整段区间里都是可见的。
+                    // 用**等比**缩小而不是逐格重排：等比不会让字形变形，
+                    // 而 400ms 内逐格重排的收益看不出来（规范 §7.2 的几何插值在此降级为
+                    // 「整层缩放 + 交叉淡入」，刻度见 03-home.md）。
+                    HomeViewMode.MONTH, HomeViewMode.YEAR -> {
+                        val yp = yearProgress.value
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            // 月层：morph 结束后（年态且 p=1）完全不画，省一次整屏组合
+                            if (!(mode == HomeViewMode.YEAR && yp >= 1f)) {
+                                val src = CalendarLayout.yearCardRect(
+                                    monthFirst.monthValue,
+                                    calendarW,
+                                    yearHeight,
+                                )
+                                Box(
+                                    modifier = pagerModifier
+                                        .graphicsLayer {
+                                            alpha = 1f - yp
+                                            // 1 → 0.28：接近迷你月卡片相对月网格的尺度
+                                            val k = CalendarLayout.lerp(1f, 0.28f, yp)
+                                            scaleX = k
+                                            scaleY = k
+                                            transformOrigin = TransformOrigin(
+                                                pivotFractionX = ((src.x + src.w / 2f) / calendarW)
+                                                    .coerceIn(0f, 1f),
+                                                pivotFractionY = ((src.y + src.h / 2f) / yearHeight)
+                                                    .coerceIn(0f, 1f),
+                                            )
+                                        },
+                                    contentAlignment = Alignment.TopCenter,
+                                ) { CalendarSection(args = calendarArgs) }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(bandH.dp)
+                                    .clipToBounds(),
+                                contentAlignment = Alignment.TopCenter,
+                            ) {
+                                YearLayer(
+                                    args = calendarArgs,
+                                    year = year,
+                                    monthFirst = monthFirst,
+                                    monthTitleLabel = monthTitle,
+                                    yearHeight = yearHeight,
+                                    yearWidth = calendarW,
+                                    monthGridH = gridH,
+                                    yearProgress = yp,
+                                    dateFormats = dateFormats,
+                                    onMonthClick = { month -> openMonthFromYear(month) },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -735,7 +809,10 @@ private fun YearLayer(
         yearTitle = dateFormats?.year(year) ?: context.getString(R.string.date_year, year),
         zodiacLabel = dateFormats?.yearZodiac(year).orEmpty(),
         modifier = Modifier
-            .fillMaxWidth()
+            // ⚠️ 必须与月历用**同一个限宽**：原来这里是 `fillMaxWidth()`，只有月历层被限到
+            // `calendarW`。平板竖屏下年历会拿到 ~703dp，卡片被拉成 ~220dp 的空盒，
+            // 而且年历与月历横向错位 ~31dp —— morph 的锚点也就对不上了（规范 §2.2/§5.2）。
+            .width(yearWidth.dp)
             .height(yearHeight.dp)
             .graphicsLayer {
                 alpha = morph.yearOpacity
@@ -1251,7 +1328,6 @@ private fun DayPanel(
                     AssistPill(
                         text = stringResource(R.string.index_today),
                         onClick = onToday,
-                        leading = Icons.Filled.DateRange,
                         variant = PillVariant.Elevated,
                     )
                 }
@@ -1313,9 +1389,12 @@ private fun DayEmptyState(isFuture: Boolean, isToday: Boolean, onWrite: () -> Un
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = if (isFuture) "🌙" else "✏️",
-                style = MaterialTheme.typography.titleMedium,
+            // Material 图标而不是 emoji：emoji 的字形随厂商变化，也不是设计语言的一部分
+            Icon(
+                imageVector = if (isFuture) AppIcons.DarkMode else AppIcons.Edit,
+                contentDescription = null,
+                modifier = Modifier.size(28.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Text(

@@ -218,6 +218,27 @@ class CalendarLayoutTest {
         assertTrue("402pt 高的横屏不会触发周条", 330f - 60f >= 44f * 6)
     }
 
+    /**
+     * 三档阈值的边界（规范 §5.3）：`perRow ≥ 60` 画农历 / `≥ 38` 只画日号 / 否则周条。
+     *
+     * 这里把 38 与 60 两个数钉死：曾经两档共用 44，于是 `perRow ∈ [38,44)` 被误判成
+     * "连一行都放不下"、错误降级为周条；同时 `roundToInt()` 会让判定与实际行高差 1dp，
+     * 网格比日历区高、最后一行被裁掉半行。
+     */
+    @Test
+    fun `density thresholds are 38 and 60 and round down`() {
+        // 6 行、每行恰好 37 / 38 → 37 降级、38 保留（只画日号）
+        assertEquals(CalendarLayout.DensityKind.WeekStrip, CalendarLayout.resolveDensity(37f * 6, 6, true).kind)
+        val at38 = CalendarLayout.resolveDensity(38f * 6, 6, true)
+        assertEquals(CalendarLayout.DensityKind.Month, at38.kind)
+        assertTrue("38 这一档不画农历", !at38.showLunar)
+        // 59 / 60 → 59 不画农历、60 画
+        assertTrue(!CalendarLayout.resolveDensity(59f * 6, 6, true).showLunar)
+        assertTrue(CalendarLayout.resolveDensity(60f * 6, 6, true).showLunar)
+        // 向下取整：59.9 / 6 = 9.98 → 9，仍是周条
+        assertEquals(CalendarLayout.DensityKind.WeekStrip, CalendarLayout.resolveDensity(59.9f, 6, true).kind)
+    }
+
     @Test
     fun `year grid geometry matches the formulas`() {
         val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)

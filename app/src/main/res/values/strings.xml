@@ -34,28 +34,28 @@
     <string name="settings_lang_zh">中文</string>
     <string name="settings_lang_en">English</string>
     <string name="settings_theme">Theme</string>
-    <string name="settings_theme_sub">Light, dark, or follow the system</string>
+    <string name="settings_theme_sub">Light, dark, or follow system</string>
     <string name="settings_theme_system">Follow system</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
     <!-- Android 专有（Material You 动态取色；不进 settingsJson） -->
     <string name="settings_dynamic_color">Dynamic color</string>
-    <string name="settings_dynamic_color_sub">Match colors to your wallpaper</string>
+    <string name="settings_dynamic_color_sub">Match your wallpaper</string>
 
     <string name="settings_section_rules">Diary rules</string>
     <string name="settings_day_start">Start of a new day</string>
-    <string name="settings_day_start_sub">Entries before this time belong to the previous day</string>
+    <string name="settings_day_start_sub">Earlier entries count as the day before</string>
     <string name="settings_day_start_confirm_title">Change the day boundary?</string>
     <string name="settings_day_start_confirm_msg">%1$d entries will change the day they belong to. Continue?</string>
     <string name="settings_day_start_confirm_ok">Continue</string>
     <string name="settings_day_recalc_title">Recompute dates</string>
     <string name="settings_day_recalc_msg">%1$d entries kept their original date due to the rule change.</string>
     <string name="settings_week_start">Start of the week</string>
-    <string name="settings_week_start_sub">Choose whether calendars begin on Monday or Sunday</string>
+    <string name="settings_week_start_sub">First day of the week</string>
     <string name="settings_week_monday">Monday</string>
     <string name="settings_week_sunday">Sunday</string>
     <string name="settings_auto_time">Auto-record time</string>
-    <string name="settings_auto_time_sub">Record and show the start time; hide it when off</string>
+    <string name="settings_auto_time_sub">Record and show each entry time</string>
     <string name="settings_auto_loc">Auto-insert location</string>
     <string name="settings_auto_loc_sub">Requires location permission</string>
     <string name="settings_loc_permission">Location permission</string>
@@ -64,11 +64,11 @@
     <string name="settings_loc_exact">Precise</string>
     <string name="settings_loc_fuzzy">Approximate</string>
     <string name="settings_history_edit">Edit past entries</string>
-    <string name="settings_history_edit_sub">Modify or delete existing blocks only; new blocks can\'t be added to past days</string>
+    <string name="settings_history_edit_sub">Edit past days, but no new entries</string>
 
     <string name="settings_section_remind">Reminders</string>
     <string name="settings_remind_enabled">Journal reminder</string>
-    <string name="settings_remind_enabled_sub">Remind me when I haven\'t written today</string>
+    <string name="settings_remind_enabled_sub">Remind me when a day is blank</string>
     <string name="settings_remind_time">Reminder time</string>
     <string name="settings_remind_time_sub">Once a day</string>
     <string name="settings_notif_permission">Notification permission</string>
@@ -112,7 +112,8 @@
     <string name="index_year_view">Year</string>
     <string name="index_month_view">Month</string>
     <string name="index_week_view">Week</string>
-    <string name="index_future_toast">This day hasn\'t arrived yet</string>
+    <string name="index_future_toast">This day hasn\'t arrived yet — you can\'t write about it</string>
+    <string name="action_got_it">Got it</string>
     <string name="index_day_heading">Day content</string>
     <string name="index_has_diary">Has entry</string>
     <string name="index_no_diary">No entry</string>

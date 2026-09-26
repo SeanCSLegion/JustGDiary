@@ -26,27 +26,27 @@
     <string name="settings_lang_zh">中文</string>
     <string name="settings_lang_en">English</string>
     <string name="settings_theme">主题</string>
-    <string name="settings_theme_sub">切换浅色、深色或跟随系统</string>
+    <string name="settings_theme_sub">浅色、深色或跟随系统</string>
     <string name="settings_theme_system">跟随系统</string>
     <string name="settings_theme_light">浅色</string>
     <string name="settings_theme_dark">深色</string>
     <string name="settings_dynamic_color">动态取色</string>
-    <string name="settings_dynamic_color_sub">跟随壁纸取色（Material You）</string>
+    <string name="settings_dynamic_color_sub">跟随壁纸取色</string>
 
     <string name="settings_section_rules">日记规则</string>
     <string name="settings_day_start">新一天的开始时间</string>
-    <string name="settings_day_start_sub">在此时间之前写的内容，归入前一天</string>
+    <string name="settings_day_start_sub">此时间前写的内容归入前一天</string>
     <string name="settings_day_start_confirm_title">改变归属日？</string>
     <string name="settings_day_start_confirm_msg">有 %1$d 篇日记会因为规则变化改变归属日，是否继续？</string>
     <string name="settings_day_start_confirm_ok">继续</string>
     <string name="settings_day_recalc_title">日期重算</string>
     <string name="settings_day_recalc_msg">有 %1$d 篇日记因规则变化保留了原归属日。</string>
     <string name="settings_week_start">一周从哪一天开始</string>
-    <string name="settings_week_start_sub">选择日历从周一开始还是周日开始</string>
+    <string name="settings_week_start_sub">日历一周的起始日</string>
     <string name="settings_week_monday">周一</string>
     <string name="settings_week_sunday">周日</string>
     <string name="settings_auto_time">自动记录时间</string>
-    <string name="settings_auto_time_sub">自动记录并显示开始时间；关闭后不显示</string>
+    <string name="settings_auto_time_sub">记录并显示片段开始时间</string>
     <string name="settings_auto_loc">自动插入地点</string>
     <string name="settings_auto_loc_sub">需要位置信息权限</string>
     <string name="settings_loc_permission">位置权限</string>
@@ -55,11 +55,11 @@
     <string name="settings_loc_exact">精确</string>
     <string name="settings_loc_fuzzy">模糊</string>
     <string name="settings_history_edit">允许修改 / 删除历史日记</string>
-    <string name="settings_history_edit_sub">仅可修改或删除已有编辑块，历史日期不可新增内容</string>
+    <string name="settings_history_edit_sub">可改历史日记，但不可新增</string>
 
     <string name="settings_section_remind">提醒</string>
     <string name="settings_remind_enabled">写日记提醒</string>
-    <string name="settings_remind_enabled_sub">当天未写日记时提醒我</string>
+    <string name="settings_remind_enabled_sub">当天没写日记时提醒我</string>
     <string name="settings_remind_time">提醒时间</string>
     <string name="settings_remind_time_sub">每天提醒一次</string>
     <string name="settings_notif_permission">通知权限</string>
@@ -101,7 +101,8 @@
     <string name="index_year_view">年历</string>
     <string name="index_month_view">月历</string>
     <string name="index_week_view">周历</string>
-    <string name="index_future_toast">这一天还没有到来</string>
+    <string name="index_future_toast">这一天还没到，不能写日记</string>
+    <string name="action_got_it">知道了</string>
     <string name="index_day_heading">当日内容</string>
     <string name="index_has_diary">有日记</string>
     <string name="index_no_diary">无日记</string>

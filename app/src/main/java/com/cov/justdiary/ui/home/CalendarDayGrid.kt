@@ -355,7 +355,8 @@ fun CalendarWeekdayHeader(
                 // 就是"列标题"这一层强调，直接用即可。
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelMedium,
-                fontSize = DynamicTypeMetrics.calendarSp(11.dp, fontScale),
+                // 规范 §4.4：星期栏 13sp（原来写 11 且覆盖了 labelMedium 的 12）
+                fontSize = DynamicTypeMetrics.calendarSp(13.dp, fontScale),
                 maxLines = 1,
             )
         }

@@ -7,47 +7,60 @@
 
 ---
 
-## 1. 组件清单
+## 1. 组件清单（**已按实现核对**，2026-09-26）
 
-### 1.1 容器
+> ⚠️ 这一节曾经列了 16 个**并不存在**的组件（`SectionCard` / `ListRow` / `FilterPill` /
+> `DiarySearchBar` / `PrimaryButton` / `MonthGrid` / `YearGrid` / `TrendBarChart` / `PlaceTree` /
+> `ShareLongImage` …），签名也与实现不符。照着那份清单去调，只会调到一个不存在的名字。
+> 现在这一节是**代码里真实有的东西**，新增组件时请连同用例一起补进来。
 
-| 组件 | 签名 | 用途 |
+### 1.1 `ui/components/Components.kt`（共享基础组件，10 个）
+
+| 组件 | 签名要点 | 用途 / 注意 |
 | --- | --- | --- |
-| `DiaryCard` | `(modifier, shape = Shapes.large, containerColor = surfaceContainerLow, onClick: (() -> Unit)? = null, content)` | **所有内容卡片**。`onClick != null` 时整卡可点并带涟漪 |
-| `SectionCard` | `(title: String, modifier, content)` | 带章节标题的设置卡（通用 / 日记规则 / …） |
-| `ListRow` | `(icon: ImageVector?, title: String, subtitle: String?, value: String?, trailing: ListRowTrailing, onClick: (() -> Unit)?)` | 设置行 / 结果行。`ListRowTrailing = None \| Chevron \| Switch(onToggle) \| Custom(slot)` |
-| `RowDivider` | `(insetStart: Dp = 72.dp)` | 卡片内的行分隔线 |
-| `GroupedCardGroup` | `(modifier, content)` | 一列设置卡的容器（处理卡间距与列布局） |
-
-### 1.2 控件
-
-| 组件 | 签名 | 说明 |
-| --- | --- | --- |
-| `IconBadge` | `(icon: ImageVector, size: Dp = 40.dp, container = secondaryContainer)` | 设置行 / 列表行左侧的圆形图标徽标 |
-| `AssistPill` | `(text: String, leading: ImageVector?, variant: PillVariant, onClick)` | **顶栏胶囊**。`variant = Outlined \| Elevated`（首页左 / 右两枚）。⚠️ M3 的 chip 布局高由 `minimumInteractiveComponentSize` 定成 **48dp**，所以设计稿里的「视觉 40dp」在真机上是 48dp（这是 Material 的触控目标硬要求，不要用 `height(40.dp)` 去压） |
-| `FilterPill` | `(text: String, selected: Boolean, leading: ImageVector?, onClick)` | 筛选芯片（搜索时间/地点、足迹年份） |
-| `InputPill` | `(text: String, onRemove: () -> Unit)` | 条件摘要行里的可删除芯片 |
-| `CountBadge` | `(text: String, icon: ImageVector? = null)` | 「找到 3 条日记」「1/3」这类计数徽标 |
-| `DiarySearchBar` | `(value, onValueChange, onClear, onCancel, focused, placeholder)` | 搜索页 / 日记页内搜索共用的输入条 |
-| `PrimaryButton` / `TonalButton` / `OutlinedTextButton` / `TextActionButton` | `(text, onClick, enabled, modifier)` | 直接包 M3 的 `Button` 变体，统一最小宽度与高度 |
-| `StatusSwitchRow` | `(icon, title, subtitle, checked, onCheckedChange)` | **整行可点**的开关行（新代码用这个，不要直接用 `ListRow` 拼） |
-| `EmptyState` | `(icon: ImageVector, title: String, subtitle: String?, action: (@Composable () -> Unit)?)` | 统一空态 |
+| `DiaryCard` | `(modifier, onClick: (() -> Unit)? = null, contentPadding, contentModifier, content)` | **所有内容卡片**。`onClick != null` 时整卡可点并带涟漪。描边 1dp `outlineVariant`（增强对比度下 1.5dp `onSurfaceVariant`），**无阴影** |
+| `PageHeader` | `(title, modifier, subtitle: String? = null, trailing: (@Composable () -> Unit)? = null)` | 页面大标题。**三屏锚点必须一致**（左 16dp、标题顶 60dp）；放在滚动容器**外面**，别塞进 `LazyVerticalGrid` 的 item（内边距会叠） |
+| `SectionTitle` | `(text, modifier)` | 卡片内的章节标题（「通用」「日记规则」…） |
+| `IconBadge` | `(icon, size = 40.dp, contentDescription = null)` | 设置行左侧的圆形图标徽标（`secondaryContainer`） |
+| `AssistPill` | `(text, onClick, leading: ImageVector? = null, variant: PillVariant, modifier)` | **顶栏胶囊** + 当日面板的「今天」。`variant = Outlined \| Elevated`。⚠️ M3 chip 的布局高由 `minimumInteractiveComponentSize` 定成 **48dp**，不要用 `height(40.dp)` 去压 |
+| `InputPill` | `(text, onRemove: () -> Unit)` | 条件摘要行里的可删除芯片 |
+| `CountBadge` | `(text, leading: ImageVector? = null)` | 「找到 3 条日记」「1/3」这类计数徽标 |
+| `EmptyState` | `(icon, text, modifier)` | 统一空态（图标 + 一行说明） |
 | `SkeletonRows` | `(count: Int = 3)` | 加载骨架 |
-| `BusyOverlay` | `(text: String, visible: Boolean)` | 全屏忙碌遮罩（不可取消） |
-| `SegmentedToggle` | `(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit)` | 仅在需要 2–3 选一且不需要展开菜单时使用（当前无用例） |
+| `BusyOverlay` | `(text: String, visible: Boolean)` | 全屏忙碌遮罩（带 scrim、不可取消） |
 
-### 1.3 日历 / 图表（自绘）
+**筛选芯片**用 M3 的 `FilterChip`，没有自己的包装；**按钮**直接用 M3 的
+`Button` / `TextButton`，也没有包装层（曾经的 `PrimaryButton` 等一律不存在）。
+**开关行**在 `SettingsScreen.kt` 里是私有的 `SwitchRow`（整行 `toggleable`，
+内层 `Switch` 必须 `onCheckedChange = null`，否则 TalkBack 停两次）。
 
-| 组件 | 签名 | 说明 |
+### 1.2 图标：`ui/components/AppIcons.kt`
+
+不引 `material-icons-extended`（零第三方依赖的硬约束），缺的图标在这里
+**内联 Material Symbols 的 path**，经 `materialIcon(name, path)` 构造。
+
+现有：`CalendarMonth` `DirectionsWalk` `Language` `Palette` `DarkMode` `Schedule` `Place`
+`MyLocation` `Edit` `Notifications` `Upload` `Download` `Info` `Globe`。
+标准图标（`Icons.Filled.*`）直接使用，不要重复内联。
+
+### 1.3 各页面私有的自绘组件
+
+这些**故意不共享**：它们与所在页面的几何是绑死的，抽出来只会多一层参数搬运。
+
+| 组件 | 位置 | 说明 |
 | --- | --- | --- |
-| `MonthGrid` | `(year, month, weekStart, selectedDate, today, hasEntry: (LocalDate) -> Boolean, cellH: Dp, showLunar: Boolean, onDayClick)` | 月态网格 + 周条共用；`showAdjacent` **不存在这个参数** —— 相邻月永不绘制 |
-| `MonthBigTitle` | `(month: YearMonth, height: Dp, fontSize: TextUnit)` | 大标题槽；**morph 的终点**，几何必须与真实排版一致 |
-| `MiniMonthCard` | `(year, month, hasEntry, today, selected, onClick)` | 年态的迷你月历卡片 |
-| `YearGrid` | `(year, weekStart, hasEntry, today, selectedDate, onMonthClick)` | 3 × 4 迷你月历 |
-| `WeekStrip` | `(weekStartDate, selectedDate, hasEntry, onDayClick)` | 周态的一行日期 |
-| `TrendBarChart` | `(data: List<YearStat>, height: Dp, modifier)` | 足迹柱状图；**无点击交互** |
-| `PlaceTree` | `(nodes: List<PlaceNode>, expanded: Set<String>, onToggle, depth = 0)` | 足迹三级树 |
-| `ShareLongImage` | `(dayKey, blocks, isDark, showTime) -> File` | 分享长图渲染（离屏 Canvas） |
+| `CalendarDayGrid` | `ui/home/` | 月网格 + 周条共用；相邻月**永不绘制** |
+| `CalendarWeekdayHeader` | `ui/home/` | 星期栏（极短文案，13sp） |
+| `CalendarSection` / `YearLayer` / `YearCanvas` | `ui/home/` | 三态的日历主体；几何全部来自 `CalendarLayout` 的纯函数 |
+| `HomeTopBar` | `ui/home/` | 顶栏两枚胶囊（外层私有） |
+| `StatsCard` / `StatCell` / `TrendCard` / `YearBarChart` / `PlaceTreeCard` / `PlaceRow` | `ui/footprint/` | 统计 5 格、年度柱状图、三级地点树 |
+| `CustomRangeSheet` | `ui/search/` | 自定义时间范围面板 |
+| `FootprintTimeSheet` | `ui/footprint/` | 同上，与搜索页**同构**（⚠️ 目前是两份近似拷贝，第二次改动时应抽成一个共享 composable） |
+| `LocationPickerSheet` | `ui/search/` | 地点选择面板（`ModalBottomSheet`） |
+| `RangeDayField` / `DayKeyField` | `ui/*/` | 起止日期输入（⚠️ 纯文本、无校验，见 §5 待办） |
+
+**几何纯函数**在 `ui/home/CalendarLayout.kt`（有 30+ 条单测）；
+**图表度量**在各页面文件的常量区。
 
 ---
 

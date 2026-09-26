@@ -211,6 +211,9 @@ private fun TabContent(
                 onOpenDay = { onOpenDay(DateUtil.dayKeyOf(it)) },
                 onWrite = { onWriteDay(DateUtil.dayKeyOf(it)) },
                 imageLoader = { src -> container.mediaStore.image(src)?.asImageBitmap() },
+                // 这两个版本号一变，首页就无动画回到「今天 + 月态」（规范 §1 规则 3）
+                dataVersion = dataVersion,
+                settingsVersion = settingsVersion,
             )
         }
 
@@ -267,6 +270,7 @@ private fun TabContent(
                 onOpenLocPicker = { viewModel.loadLocationOptions() },
                 onSelectLocation = viewModel::selectLocation,
                 onResetLocation = viewModel::resetLocationFilter,
+                appLanguage = container.settings.load().appLanguage,
             )
         }
 

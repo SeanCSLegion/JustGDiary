@@ -477,12 +477,17 @@ private fun SettingsBody(
 
 // ---------------------------------------------------------------------- 行组件
 
-/** 卡片容器：内部行自己控制间距，因此内容 padding 为 0。 */
+/**
+ * 卡片容器：内部行自己控制上下呼吸，因此卡片只留一点点内边距。
+ *
+ * 原来是 12dp —— 与行自身的 9dp 叠加后，末行文字下方会有 20dp 以上的空白，
+ * 单行副标题时尤其明显（用户反馈"底部留白太多"）。现在 4dp，视觉上仍然有分隔感。
+ */
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
     DiaryCard(
         modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        contentPadding = PaddingValues(vertical = 4.dp),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) { content() }
     }
@@ -503,7 +508,11 @@ private fun RowDivider() {
 
 /** 行高的两条档位（规范 §3.1）：带副标题 64dp、不带 56dp。 */
 private fun rowMinHeight(sub: String?): androidx.compose.ui.unit.Dp =
-    if (sub != null) 64.dp else 56.dp
+    // 这是**最小**高度，不是固定高度：副标题折成两行时行会自己长高，不会裁切。
+    // 原来的 64/56 是按"副标题两行"定的，于是单行副标题的行上下各留 9dp，
+    // 加上卡片自身的 12dp 内边距，末行下方会有 20dp 以上的空白（用户反馈"底部留白太多"）。
+    // 现在收到 56/48：单行副标题正好是 24+2+20，2×5dp 呼吸；双行自然长到 ~76。
+    if (sub != null) 56.dp else 48.dp
 
 /**
  * 右侧的取值 [+ 尖角]。

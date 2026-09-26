@@ -59,6 +59,16 @@ fun DiaryCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(Spacing.card),
+    /**
+     * 加在**内容层**（`Surface` 的 clickable 之内）的修饰符。
+     *
+     * 需要 `clearAndSetSemantics` 时**必须用它**，不能塞进 [modifier]：
+     * `Surface(onClick)` 把自己的 `.clickable` 追加在调用方 modifier **之后**，
+     * 而 Compose 是自内向外算语义、遇到 `shouldClearDescendantSemantics` 就重置 ——
+     * 放在外层会把 clickable 的 onClick 与 Role 一起清掉，
+     * 结果 TalkBack 只读得到描述、**按不动**（实测缺陷）。
+     */
+    contentModifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val increased = LocalIncreasedContrast.current
@@ -80,7 +90,7 @@ fun DiaryCard(
             contentColor = MaterialTheme.colorScheme.onSurface,
             border = border,
         ) {
-            Box(modifier = Modifier.padding(contentPadding)) { content() }
+            Box(modifier = Modifier.padding(contentPadding).then(contentModifier)) { content() }
         }
     } else {
         Surface(
@@ -90,7 +100,7 @@ fun DiaryCard(
             contentColor = MaterialTheme.colorScheme.onSurface,
             border = border,
         ) {
-            Box(modifier = Modifier.padding(contentPadding)) { content() }
+            Box(modifier = Modifier.padding(contentPadding).then(contentModifier)) { content() }
         }
     }
 }

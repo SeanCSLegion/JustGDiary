@@ -2,6 +2,7 @@ package com.cov.justdiary.ui.home
 
 import com.cov.justdiary.model.DateUtil
 import java.time.LocalDate
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -113,8 +114,25 @@ object CalendarLayout {
      */
     const val CALENDAR_MAX_WIDTH = 640f
 
-    /** 每行最小高度（低于它就要降级为周条）。 */
+    /** 画农历所需的每行高度（规范 §5.3 第一档：`perRow ≥ 60` 才画农历）。 */
+    const val LUNAR_ROW_HEIGHT = 60f
+
+    /**
+     * 每行最小高度：**低于它就放弃农历**（不是降级为周条）。
+     *
+     * 规范 §5.3 的两档阈值：`perRow ≥ 60` 画农历 / `≥ 38` 不画农历 / 否则降级为周条。
+     * 这里的 44 是"带农历"的下沿（60 是**舒适**下沿，44 是硬下沿）；只隐藏农历的那一档
+     * 用 [NO_LUNAR_ROW_HEIGHT]。
+     */
     const val MINIMUM_ROW_HEIGHT = 44f
+
+    /**
+     * 不画农历时的每行最小高度（规范 §5.3 的第二档）。
+     *
+     * ⚠️ 原来这里与 [MINIMUM_ROW_HEIGHT] 共用 44，导致 `perRow ∈ [38, 44)` 被误判成
+     * "连一行都放不下"、错误降级为周条。
+     */
+    const val NO_LUNAR_ROW_HEIGHT = 38f
 
     /** 月历固定 6 行。 */
     const val MONTH_ROWS = 6
@@ -406,10 +424,15 @@ object CalendarLayout {
      */
     fun resolveDensity(availableHeight: Float, rows: Int, wantsLunar: Boolean): Density {
         val safeRows = max(1, rows)
-        val perRow = (availableHeight / safeRows).roundToInt()
+        // **向下取整**（与 `rowHeight` 保持一致）：向上取整会出现"判定说放得下、
+        // 实际每行高出 1dp"，网格于是比日历区高、最后一行被裁掉半行
+        val perRow = floor(availableHeight / safeRows).toInt()
         return when {
-            perRow >= (MINIMUM_ROW_HEIGHT + 16f).toInt() -> Density(DensityKind.Month, wantsLunar)
-            perRow >= MINIMUM_ROW_HEIGHT.toInt() -> Density(DensityKind.Month, false)
+            // ≥ 60：够画农历
+            perRow >= LUNAR_ROW_HEIGHT.toInt() -> Density(DensityKind.Month, wantsLunar)
+            // ≥ 38：只放日号与选中圆
+            perRow >= NO_LUNAR_ROW_HEIGHT.toInt() -> Density(DensityKind.Month, false)
+            // 再低就只剩一行可以看：降级为周条（只画选中日所在那一行）
             else -> Density(DensityKind.WeekStrip, false)
         }
     }
@@ -535,7 +558,9 @@ object CalendarLayout {
             ),
             lunarAlpha = lunarAlpha,
             dividerAlpha = dividerAlpha,
-            yearOpacity = clamp01((p - 0.45f) / 0.55f),
+            // 从 p=0.25 就开始淡入（原来 0.45）：月层的淡出是 1-p，两者必须在整段区间里
+            // 至少有一层可见，否则 morph 前段会露出空白
+            yearOpacity = clamp01((p - 0.25f) / 0.75f),
             yearScale = 1f + (1f - p) * 0.6f,
             sourceMiniTitleOpacity = clamp01((p - 0.7f) / 0.3f),
         )

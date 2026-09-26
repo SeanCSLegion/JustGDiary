@@ -151,37 +151,42 @@ fun FootprintScreen(
             // 年份芯片的选中态只看 yearFilter（规范 §2.2 的修正）：
             // iOS 那边还额外要求 timeKind == .all，于是"先选年份、再选自定义区间"之后
             // 年份芯片看起来没选中，但两层过滤其实都在生效。
+            // 年份这一排是**单一选择**：点年份就把自定义时间范围清掉（并回到"全部"），
+            // 避免出现「全部」和「自定义」同时打勾、而实际生效的是两者交集那种看不懂的状态。
             item {
+                val on = yearFilter == YEAR_FILTER_ALL && timeKind != TimeRangeKind.Custom
                 FilterChip(
-                    selected = yearFilter == YEAR_FILTER_ALL,
-                    onClick = { onYearFilterChange(YEAR_FILTER_ALL) },
+                    selected = on,
+                    onClick = {
+                        onYearFilterChange(YEAR_FILTER_ALL)
+                        onClearTimeFilter()
+                    },
                     label = { Text(ALL_LABEL) },
-                    leadingIcon = yearChipIcon(yearFilter == YEAR_FILTER_ALL),
+                    leadingIcon = yearChipIcon(on),
                 )
             }
             items(state.yearOptions, key = { it }) { year ->
+                val on = yearFilter == year && timeKind != TimeRangeKind.Custom
                 FilterChip(
-                    selected = yearFilter == year,
-                    onClick = { onYearFilterChange(year) },
+                    selected = on,
+                    onClick = {
+                        onYearFilterChange(year)
+                        onClearTimeFilter()
+                    },
                     label = { Text(year) },
-                    leadingIcon = yearChipIcon(yearFilter == year),
+                    leadingIcon = yearChipIcon(on),
                 )
             }
-            // 保底项：任何时候都在，且永远可点（自定义区间与年份是交集关系）
+            // 保底项：任何时候都在，且永远可点。
+            // 文案**固定**为「自定义」—— 具体日期只在面板里给（用户反馈：
+            // 芯片后面跟着一串 2026-01-01 – 2026-01-02 太啰嗦，芯片条以年份为准）。
             item {
+                val on = timeKind == TimeRangeKind.Custom
                 FilterChip(
-                    selected = timeKind == TimeRangeKind.Custom,
+                    selected = on,
                     onClick = { showTimeSheet = true },
-                    label = {
-                        Text(
-                            if (timeKind == TimeRangeKind.Custom && customFrom != null && customTo != null) {
-                                rangeLabel(customFrom, customTo)
-                            } else {
-                                CUSTOM_LABEL
-                            },
-                        )
-                    },
-                    leadingIcon = yearChipIcon(timeKind == TimeRangeKind.Custom),
+                    label = { Text(CUSTOM_LABEL) },
+                    leadingIcon = yearChipIcon(on),
                 )
             }
         }

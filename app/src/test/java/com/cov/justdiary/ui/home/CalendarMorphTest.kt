@@ -82,10 +82,22 @@ class CalendarMorphTest {
 
     @Test
     fun `year layer opacity and scale ramp up with progress`() {
+        // 两层交叉淡入淡出的前提：任一帧都至少有一层可见
+        for (step in 0..20) {
+            val p = step / 20f
+            val state = CalendarLayout.yearMonthMorph(p, miniGrid, fullGrid, showLunar = true)
+            val monthAlpha = 1f - p
+            assertTrue(
+                "p=$p 时两层都不可见（月 $monthAlpha / 年 ${state.yearOpacity}）",
+                monthAlpha > 0f || state.yearOpacity > 0f,
+            )
+        }
         val middle = CalendarLayout.yearMonthMorph(0.5f, miniGrid, fullGrid, showLunar = true)
         assertEquals(0.5f, middle.t, 1e-6f)
         assertEquals(1f + 0.5f * 0.6f, middle.yearScale, 1e-6f)
-        assertEquals((0.5f - 0.45f) / 0.55f, middle.yearOpacity, 1e-4f)
+        // 年层从 p=0.25 就淡入（不是 0.45）：月层的淡出是 1-p，
+        // 两条曲线必须在整段区间里至少有一层可见（否则 morph 前段整屏空白）
+        assertEquals((0.5f - 0.25f) / 0.75f, middle.yearOpacity, 1e-4f)
         // 农历与分隔线的淡入都晚于中点
         assertEquals(0f, middle.lunarAlpha, 1e-6f)
         assertEquals(0f, middle.dividerAlpha, 1e-6f)
