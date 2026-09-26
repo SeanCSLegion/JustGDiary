@@ -1,5 +1,10 @@
 package com.cov.justdiary.ui.settings
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -447,7 +452,7 @@ private fun SettingsBody(
     }
 
     if (dayStartPickerVisible) {
-        HourPickerDialog(
+        HourPickerSheet(
             formats = formats,
             initialHour = settings.dayStartHour,
             onDismiss = { dayStartPickerVisible = false },
@@ -459,7 +464,7 @@ private fun SettingsBody(
         )
     }
     if (remindPickerVisible) {
-        ReminderTimeDialog(
+        ReminderTimeSheet(
             initialHour = settings.remindHour,
             initialMinute = settings.remindMinute,
             onDismiss = { remindPickerVisible = false },
@@ -695,31 +700,44 @@ private data class MenuOption(
     val onSelect: () -> Unit,
 )
 
-/** "新一天的开始时间"：24 个整点的滚动列表，文案走 `DateFormats.dayStartLabel`。 */
+/**
+ * "新一天的开始时间"：24 个整点的滚动列表，文案走 `DateFormats.dayStartLabel`。
+ *
+ * ⚠️ 容器是 **`ModalBottomSheet`** 而不是 `AlertDialog`：本项目的硬约束是
+ * "参数编辑一律用底部面板"（`README` 硬约束 3 / 06 §2.3）。选值不是确认破坏性动作，
+ * 用对话框会把"选择"与"确认"混成同一层级。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HourPickerDialog(
+private fun HourPickerSheet(
     formats: DateFormats,
     initialHour: Int,
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
 ) {
     var selected by remember { mutableStateOf(initialHour) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_day_start)) },
-        text = {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text(
+                text = stringResource(R.string.settings_day_start),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
+            )
             LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
                 items(count = 24) { hour ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .selectable(selected == hour, onClick = { selected = hour })
-                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 24.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = formats.dayStartLabel(hour),
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
@@ -733,20 +751,31 @@ private fun HourPickerDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(selected) }) { Text(stringResource(R.string.save)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-        },
-    )
+            // 底部动作区：取消在左、保存在右（与 06 §2.3 的动作顺序一致）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(onClick = { onConfirm(selected) }) { Text(stringResource(R.string.save)) }
+            }
+        }
+    }
 }
 
-/** 提醒时刻：Material 3 [TimePicker]（对应 iOS 的滚轮 `DatePicker`）。 */
+/**
+ * 提醒时刻：Material 3 [TimePicker]（对应 iOS 的滚轮 `DatePicker`）。
+ *
+ * 容器同样是 `ModalBottomSheet`（硬约束 3）—— Material 的 `TimePicker` 本身
+ * 就是按"面板里的一个控件"设计的（宽 328dp、无自己的确认键）。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReminderTimeDialog(
+private fun ReminderTimeSheet(
     initialHour: Int,
     initialMinute: Int,
     onDismiss: () -> Unit,
@@ -758,19 +787,36 @@ private fun ReminderTimeDialog(
         initialMinute = initialMinute,
         is24Hour = AndroidDateFormat.is24HourFormat(context),
     )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_remind_time)) },
-        text = { TimePicker(state = pickerState) },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(pickerState.hour, pickerState.minute) }) {
-                Text(stringResource(R.string.save))
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = stringResource(R.string.settings_remind_time),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 8.dp),
+            )
+            TimePicker(state = pickerState)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(onClick = { onConfirm(pickerState.hour, pickerState.minute) }) {
+                    Text(stringResource(R.string.save))
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-        },
-    )
+        }
+    }
 }
 
 /** 导入方式确认（对应 iOS 的 `confirmationDialog`：这是确认破坏性动作，不是选值）。 */
