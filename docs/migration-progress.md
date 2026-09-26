@@ -1371,6 +1371,34 @@ Rail 占 0–80dp、分隔线 80–81dp，共 81dp。后果：600–629dp 的横
   还需要实测帧才能判断是重建还是别的，**未动手改**。
 - 「设置里有没有可以换成官方 SDK 的部分」：还没逐个核对。
 
+### R5 · 第二轮：语言切换闪烁的实测 + 官方组件审计
+
+**「切换语言时整个界面闪一下」—— 实测是真的，而且是一帧纯黑**
+用快速连续 `screencap` 抓了切换瞬间的 14 帧，逐帧算平均亮度：
+
+```
+f1 235.7 → f2 0.0 → f3 235.6 → … → f14 235.8
+```
+
+`f2` 亮度 **0.0**，即**整屏纯黑的一帧**。成因：`AppCompatDelegate.setApplicationLocales`
+在 API 33+ 经系统 `LocaleManager`，**按设计会重建 Activity**；重建过程中旧窗口已销毁、
+新窗口还没画出第一帧，中间那一帧没有任何窗口在画 —— 于是露黑。
+
+窗口底色本身没问题（`window_background` 在 `values/` 与 `values-night/` 两套里都配了，
+分别是 `#FDFBFF` / `#101318`），所以**不是"闪白"**，是重建的空档。
+
+**处置：暂不改。** 要彻底消除只能绕开 Activity 重建（在 Compose 层用
+`CompositionLocalProvider` 覆写 `LocalContext`/`LocalConfiguration`），
+但代码里有多处**在组合之外**读 `appContext.getString(...)`
+（例如 `SearchViewModel` 的"未记录地点"文案），那些路径会继续用旧语言 →
+出现中英混排，比闪一帧更糟。这个取舍交给用户定，不擅自改。
+
+**官方组件审计**：设置页逐个交互核对完 —— **已经全部是官方组件**
+（`Switch` / `DropdownMenu` / `TimePicker` / `ModalBottomSheet` / `AlertDialog` /
+SAF 文件选择器 / 系统权限弹窗 / 新换的 `DatePicker`）。唯一半自绘的是小时列表，
+而 Material 3 **没有"只选小时"的控件**，`TimePicker` 会强制选分钟 →
+按"前提是功能一致"**不替换**。结论写进 05 §3.0。
+
 ### 已知遗留
 
 - 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见
