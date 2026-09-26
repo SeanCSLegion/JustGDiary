@@ -83,6 +83,19 @@ DiaryPageScreen（全屏路由，持有 ViewModel）
 
 ---
 
+## 2.5 已就绪的纯逻辑（**未接线**）
+
+步骤 1 要用到的形态判断已经先写好了 —— 只加了一个新文件与一组单测，
+**没有动日记页的任何界面代码**：
+
+| 文件 | 内容 | 为什么先做它 |
+| --- | --- | --- |
+| `data/DiaryTopBarState.kt` | `of(isRead, editingIndex, selectMode, selectedIds, canEditToday, showSearch)` → 三态 + 每个动作的 `canSave` / `canDeleteSelected` / `showWrite` / `showShare` / `searchActive` / `selectTitleCount` | 顶栏最容易做错的是"阅读 / 编辑 / 多选是三个维度而不是两态"：多选态下 `isRead` 仍是 `true`，写成 `if (isRead) 阅读 else 编辑` 会把多选误判成编辑。这类错误不崩、只是"某个按钮不见了" |
+| 同上 · `DiaryProgress` | `hitOrdinal` / `todoProgress` / `showTodoProgress` | 两处边界容易反：命中下标在片段被删后会越界；待办 `done > total` 时会显示 `7/5` |
+
+单测 13 条（`DiaryTopBarStateTest`），其中 3 条专门钉住优先级与"残留标志位不泄漏"。
+**步骤 1 只需要把它的结果喂给顶栏**，不需要再判一遍形态。
+
 ## 3. 分步实施（每步都可编译、可单独验证）
 
 > 每一步都保持"能跑、能看"，不要在一步里同时动状态机与像素。
