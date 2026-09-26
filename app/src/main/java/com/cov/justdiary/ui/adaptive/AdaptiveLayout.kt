@@ -45,8 +45,22 @@ data class AdaptiveLayout(
     val safeBottom: Float = 0f,
 ) {
 
-    /** 可用于放内容、且不会被系统占位吃掉的宽度（横屏左右安全区分别扣）。 */
-    val contentWidth: Float get() = max(0f, width - max(0f, safeLeading) - max(0f, safeTrailing))
+    /**
+     * 可用于放内容、且不会被系统占位吃掉的宽度。
+     *
+     * 要扣三样：左右安全区（横屏时常不等）、以及 **Rail 形态下的导航栏与它右侧的分隔线**。
+     *
+     * ⚠️ 原来只扣了安全区。于是 600–680dp 宽的横屏窗口会算出 `contentWidth ≥ 548.5`
+     * 而**实际内容宽只有 ~503dp**，错误地进入分栏、详情栏还不足 240dp。
+     * 81 = M3 `NavigationRail` 的默认宽 80dp + 1dp `VerticalDivider`（已在
+     * 2560×1600@320dpi 的平板上实测：栏占 0–80dp、分隔线 80–81dp）。
+     */
+    val contentWidth: Float
+        get() = max(
+            0f,
+            width - max(0f, safeLeading) - max(0f, safeTrailing) -
+                if (navForm == NavForm.Rail) NAV_RAIL_TOTAL_WIDTH else 0f,
+        )
 
     /**
      * 首页（以及足迹）是否左右分栏。
@@ -121,7 +135,10 @@ data class AdaptiveLayout(
         const val WIDE_MIN_WIDTH = 700f
         const val EXTRA_WIDE_MIN_WIDTH = 1000f
 
-        /** 设置页两列的下沿（设计规范 §3.1：<700 一列 / 700–999 两列 / ≥1000 三列）。 */
+        /** Rail 形态下导航栏 + 分隔线占掉的宽度。 */
+    const val NAV_RAIL_TOTAL_WIDTH = 81f
+
+    /** 设置页两列的下沿（设计规范 §3.1：<700 一列 / 700–999 两列 / ≥1000 三列）。 */
         const val SETTINGS_TWO_COLUMN_MIN_WIDTH = 700f
 
         /** 首页/足迹分栏的最小内容宽度（iOS 当前值；v2 的 700 已作废）。 */
@@ -136,7 +153,7 @@ data class AdaptiveLayout(
         const val EDITING_MAX_WIDTH = 620f
         const val MIN_CONTENT_COLUMN = 240f
 
-        const val TREND_HEIGHT_PHONE = 132f
+        const val TREND_HEIGHT_PHONE = 168f
         const val TREND_HEIGHT_WIDE = 200f
         const val FOOTPRINT_BLOCK_HEIGHT_RESERVE = 262f
 

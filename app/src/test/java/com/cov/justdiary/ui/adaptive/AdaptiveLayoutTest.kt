@@ -72,26 +72,31 @@ class AdaptiveLayoutTest {
 
     @Test
     fun `side safe areas count against the content width`() {
+        // 这些用例说的是「内容宽」，而 Rail 形态还会扣掉 81dp 导航栏 —— 所以传参时补上。
+        val rail = AdaptiveLayout.NAV_RAIL_TOTAL_WIDTH
         // 横屏有侧边系统占位时：874 - 62 = 812 ≥ 548.5 仍然分栏
-        assertTrue(layout(874f, 402f, leading = 62f).splitsMasterDetail)
+        assertTrue(layout(874f + rail, 402f, leading = 62f).splitsMasterDetail)
         // 扣完不够就不分栏
-        assertFalse(layout(600f, 382f, leading = 62f).splitsMasterDetail)
+        assertFalse(layout(600f + rail, 382f, leading = 62f).splitsMasterDetail)
         // 刚好卡在临界：600 - 51.5 = 548.5
-        assertTrue(layout(600f, 382f, leading = 51.5f).splitsMasterDetail)
+        assertTrue(layout(600f + rail, 382f, leading = 51.5f).splitsMasterDetail)
     }
 
     @Test
     fun `tablet portrait never splits even at 800dp wide`() {
         // 平板竖屏 800×1280：宽度远超阈值，但宽 < 高 → 保持单栏（与 iOS 一致）
         assertFalse(layout(800f, 1280f).splitsMasterDetail)
-        // 平板横屏 1280×800（已扣侧栏 96dp → 内容 1184）→ 分栏
-        assertTrue(layout(1184f, 800f).splitsMasterDetail)
+        // 平板横屏 1280×800 → 内容 1280 − 81（rail + 分隔线）= 1199 → 分栏
+        val landscape = layout(1280f, 800f)
+        assertEquals(1199f, landscape.contentWidth, 1e-3f)
+        assertTrue(landscape.splitsMasterDetail)
     }
 
     @Test
     fun `master width matches the iOS value at 750dp content width`() {
         // iOS：0.46 × 750 = 345 —— 与设计稿的横屏左栏宽度一致
-        assertEquals(345f, layout(750f, 382f).masterWidth, 0.001f)
+        // （补 81dp 让**内容宽**正好是 750）
+        assertEquals(345f, layout(750f + AdaptiveLayout.NAV_RAIL_TOTAL_WIDTH, 382f).masterWidth, 0.001f)
     }
 
     @Test
@@ -107,6 +112,28 @@ class AdaptiveLayoutTest {
         val l = layout(548.5f, 400f)
         val detail = l.contentWidth - l.masterWidth - 32f - 16.5f
         assertEquals(240f, detail, 0.01f)
+    }
+
+    /**
+     * Rail 形态必须扣掉导航栏 + 分隔线（81dp）。
+     *
+     * 600–680dp 的横屏窗口在"整窗"口径下算出来 ≥ 548.5 → 会误判为可分栏，
+     * 而实际内容宽只有 ~519dp、详情栏不足 240dp。这正是修复前的行为。
+     */
+    @Test
+    fun `rail rail width is deducted from the content width`() {
+        // 620dp 正好落在"整窗够、扣完不够"的窗口里：
+        // 620 − 81 = 539 < 548.5 → 不该分栏；而 620 ≥ 548.5 按旧口径会分栏。
+        val l = layout(620f, 400f)
+        assertEquals(AdaptiveLayout.NavForm.Rail, l.navForm)
+        assertEquals(620f - AdaptiveLayout.NAV_RAIL_TOTAL_WIDTH, l.contentWidth, 1e-3f)
+        assertTrue("rail 形态下 620dp 窗口的内容宽只有 539dp，不该分栏", !l.splitsMasterDetail)
+        assertTrue(620f >= AdaptiveLayout.SPLIT_MIN_CONTENT_WIDTH)
+
+        // Bar 形态（窄窗口）不扣
+        val bar = layout(400f, 874f)
+        assertEquals(AdaptiveLayout.NavForm.Bar, bar.navForm)
+        assertEquals(400f, bar.contentWidth, 1e-3f)
     }
 
     // ------------------------------------------------------------------ 设置列数
@@ -128,10 +155,11 @@ class AdaptiveLayoutTest {
 
     @Test
     fun `footprint list width follows the iOS formula`() {
-        // 874 → max(240, 349.6) = 349.6 → min(320, …) = 320
-        assertEquals(320f, layout(874f, 402f).footprintListWidth, 0.001f)
-        // 700 → 0.4 × 700 = 280
-        assertEquals(280f, layout(700f, 400f).footprintListWidth, 0.001f)
+        val rail = AdaptiveLayout.NAV_RAIL_TOTAL_WIDTH
+        // 内容宽 874 → max(240, 349.6) = 349.6 → min(320, …) = 320
+        assertEquals(320f, layout(874f + rail, 402f).footprintListWidth, 0.001f)
+        // 内容宽 700 → 0.4 × 700 = 280
+        assertEquals(280f, layout(700f + rail, 400f).footprintListWidth, 0.001f)
     }
 
     @Test

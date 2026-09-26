@@ -80,6 +80,20 @@ class CalendarMorphTest {
         assertEquals(1f, state.sourceMiniTitleOpacity, 1e-6f)
     }
 
+    /**
+     * 翻页的收尾时长：提交比放弃略慢（回弹要"轻"），两者都在 `medium` 量级。
+     * 这两个值决定"松手后补完动画"的观感，被改小会让翻页显得很硬。
+     */
+    @Test
+    fun `page settle timings stay in the medium range`() {
+        assertTrue(CalendarLayout.DragPagerMath.PAGE_SETTLE_MS in 150..300)
+        assertTrue(CalendarLayout.DragPagerMath.PAGE_CANCEL_MS in 150..300)
+        assertTrue(
+            "放弃要比提交快，回弹才显得轻",
+            CalendarLayout.DragPagerMath.PAGE_CANCEL_MS <= CalendarLayout.DragPagerMath.PAGE_SETTLE_MS,
+        )
+    }
+
     @Test
     fun `year layer opacity and scale ramp up with progress`() {
         // 两层交叉淡入淡出的前提：任一帧都至少有一层可见

@@ -49,6 +49,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -175,6 +176,13 @@ fun HomeScreen(
     settingsVersion: Int = 0,
 ) {
     val todayKey = DateUtil.dayKeyOf(today)
+    // 「上下滑翻月」的**跟手位移**（px）与**收尾动画**。
+    // 两个分开：拖动中直接改 `dragOffsetPx`（不启动协程），松手后才用 `settleAnim` 补动画。
+    var dragOffsetPx by remember { mutableFloatStateOf(0f) }
+    var settled by remember { mutableStateOf(false) }
+    val settleAnim = remember { Animatable(0f) }
+    val pageOffsetPx = dragOffsetPx + settleAnim.value
+
     var monthKey by rememberSaveable { mutableStateOf(CalendarGrid.monthKeyOf(today)) }
     var selectedKey by rememberSaveable { mutableStateOf(todayKey) }
     var mode by rememberSaveable { mutableStateOf(HomeViewMode.MONTH) }
@@ -504,9 +512,15 @@ fun HomeScreen(
                 detectVerticalDragGestures(
                     onDragStart = {
                         accumulated = 0f
+                        // 上一次的收尾动画还在跑就先掐掉，否则位移会叠在动画上
+                        scope.launch { settleAnim.stop() }
+                        dragOffsetPx = 0f
                         tracker.resetTracking()
                     },
-                    onDragCancel = { accumulated = 0f },
+                    onDragCancel = {
+                        accumulated = 0f
+                        dragOffsetPx = 0f
+                    },
                     onDragEnd = {
                         // ⚠️ 单位必须统一：`accumulated` 是 **dp**（下面除了 `densityScale`），
                         // 而 `VelocityTracker` 给的是 **px/s** —— 直接相加会让甩动阈值
@@ -514,13 +528,33 @@ fun HomeScreen(
                         val velocity = tracker.calculateVelocity().y / densityScale
                         val predictedEnd =
                             accumulated + velocity * CalendarLayout.DragPagerMath.PROJECTION_SECONDS
-                        when (CalendarLayout.DragPagerMath.decide(accumulated, predictedEnd, true, true)) {
-                            // 分栏翻月带走选中日（右栏跟着走），竖屏不带走
-                            CalendarLayout.PageTarget.Next ->
+                        val target = CalendarLayout.DragPagerMath.decide(accumulated, predictedEnd, true, true)
+                        // 收尾：把已拖出的位移**动画补完到一页**（提交）或**弹回 0**（放弃），
+                        // 动画结束后才真正换月 —— 于是换月那一帧的画面与动画终点完全一致，
+                        // 不会出现"啪"地跳一下。
+                        val pagePx = bandH * densityScale
+                        val commitPx = when (target) {
+                            CalendarLayout.PageTarget.Next -> -pagePx
+                            CalendarLayout.PageTarget.Previous -> pagePx
+                            CalendarLayout.PageTarget.Stay -> 0f
+                        }
+                        settled = target != CalendarLayout.PageTarget.Stay
+                        scope.launch {
+                            settleAnim.animateTo(
+                                targetValue = commitPx - dragOffsetPx,
+                                animationSpec = tween(
+                                    durationMillis = if (settled) CalendarLayout.DragPagerMath.PAGE_SETTLE_MS else CalendarLayout.DragPagerMath.PAGE_CANCEL_MS,
+                                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                                ),
+                            )
+                            if (settled) {
+                                // 分栏翻月带走选中日（右栏跟着走），竖屏不带走
                                 if (mode == HomeViewMode.YEAR) jumpYear(1) else pageMonth(1, split)
-                            CalendarLayout.PageTarget.Previous ->
-                                if (mode == HomeViewMode.YEAR) jumpYear(-1) else pageMonth(-1, split)
-                            CalendarLayout.PageTarget.Stay -> Unit
+                            }
+                            // 换月后当前页就是刚才的邻页，把位移归零（同一帧内完成，看不出跳）
+                            dragOffsetPx = 0f
+                            settleAnim.snapTo(0f)
+                            settled = false
                         }
                         accumulated = 0f
                     },
@@ -531,6 +565,22 @@ fun HomeScreen(
                             accumulated + delta / densityScale,
                             cellH,
                         )
+                        // **跟手**：位移直接作用到日历层（规范 §6.1）。
+                        // 方向：向上拖（`accumulated` 为负）→ 内容上移 → 下一个月从下方进来，
+                        // 与 `decide()` 里"向上拖 = Next"一致（注意**不要**再取负号，
+                        // 取了负号就变成"手往上、内容往下"，实测就是反的）。
+                        // 超过一页的部分加橡皮筋阻尼，松手后回弹（规范 §9）。
+                        val raw = accumulated * densityScale
+                        val pagePx = bandH * densityScale
+                        dragOffsetPx = if (kotlin.math.abs(raw) <= pagePx) {
+                            raw
+                        } else {
+                            val sign = if (raw < 0f) -1f else 1f
+                            sign * (pagePx + CalendarLayout.DragPagerMath.rubberBand(
+                                kotlin.math.abs(raw) - pagePx,
+                                pagePx,
+                            ))
+                        }
                     },
                 )
             }
@@ -617,6 +667,23 @@ fun HomeScreen(
                 showBigTitle = !split,
                 monthTitleLabel = monthTitle,
             )
+
+        // 邻月页的 args：只换 `displayed` / `monthFirst`，morph 相关字段归零
+        // （翻月拖动只可能发生在月态，此时 weekProgress 恒为 0）。
+        fun neighborMonthArgs(offsetMonths: Long): CalendarSectionArgs {
+            val first = monthFirst.plusMonths(offsetMonths)
+            val weeks = CalendarGrid.displayedWeeks(first, weekStart)
+            return calendarArgs.copy(
+                displayed = weeks,
+                monthFirst = first,
+                rowOffsets = FloatArray(weeks.size),
+                rowAlphas = FloatArray(weeks.size) { 1f },
+                rowMetrics = null,
+                selectedWeekIndex = -1,
+                fadeForYear = 0f,
+            )
+        }
+
             if (split) {
                 // 横屏 / 宽窗口：左右双栏。左栏只有月态（分栏下没有年份入口，也没有周态）。
                 // ⚠️ 三块必须在 **Row** 里（规范 §2.3）：放进 Column 会被按高度分配，
@@ -699,6 +766,11 @@ fun HomeScreen(
                     // 「整层缩放 + 交叉淡入」，刻度见 03-home.md）。
                     HomeViewMode.MONTH, HomeViewMode.YEAR -> {
                         val yp = yearProgress.value
+                        // 拖动方向决定要组合哪一张邻页：向上拖（负位移）出「下一个月」。
+                        // 没在拖的时候（|位移| < 1px）一张邻页都不组合 —— 月历是自绘的，
+                        // 常驻三张会让每帧多画两遍。
+                        val dragNext = pageOffsetPx < -1f
+                        val dragPrev = pageOffsetPx > 1f
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             // 月层：morph 结束后（年态且 p=1）完全不画，省一次整屏组合
                             if (!(mode == HomeViewMode.YEAR && yp >= 1f)) {
@@ -710,6 +782,8 @@ fun HomeScreen(
                                 Box(
                                     modifier = pagerModifier
                                         .graphicsLayer {
+                                            // 跟手位移（翻页时整层上下走）
+                                            translationY = pageOffsetPx
                                             alpha = 1f - yp
                                             // 1 → 0.28：接近迷你月卡片相对月网格的尺度
                                             val k = CalendarLayout.lerp(1f, 0.28f, yp)
@@ -723,7 +797,27 @@ fun HomeScreen(
                                             )
                                         },
                                     contentAlignment = Alignment.TopCenter,
-                                ) { CalendarSection(args = calendarArgs) }
+                                ) {
+                                    // 拖动中把邻页也画上：邻页与本页之间正好隔一个 bandH，
+                                    // 于是"本页滑出屏幕"的同时"邻页滑进来"，中间不会露白。
+                                    if (dragNext) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(bandH.dp)
+                                                .graphicsLayer { translationY = bandH * densityScale },
+                                        ) { CalendarSection(args = neighborMonthArgs(1)) }
+                                    }
+                                    if (dragPrev) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(bandH.dp)
+                                                .graphicsLayer { translationY = -bandH * densityScale },
+                                        ) { CalendarSection(args = neighborMonthArgs(-1)) }
+                                    }
+                                    CalendarSection(args = calendarArgs)
+                                }
                             }
                             Box(
                                 modifier = Modifier
@@ -743,6 +837,7 @@ fun HomeScreen(
                                     yearProgress = yp,
                                     dateFormats = dateFormats,
                                     onMonthClick = { month -> openMonthFromYear(month) },
+                                    dragOffsetPx = pageOffsetPx,
                                 )
                             }
                         }
@@ -780,6 +875,8 @@ private fun YearLayer(
     yearProgress: Float,
     dateFormats: DateFormats?,
     onMonthClick: (Int) -> Unit,
+    /** 「上下滑翻年」的跟手位移（px）。 */
+    dragOffsetPx: Float = 0f,
 ) {
     val context = LocalContext.current
     val morph = remember(yearProgress, yearHeight, monthGridH, yearWidth, args.showLunar, args.selectedWeekIndex, args.cellHeight) {
@@ -815,6 +912,7 @@ private fun YearLayer(
             .width(yearWidth.dp)
             .height(yearHeight.dp)
             .graphicsLayer {
+                translationY = dragOffsetPx
                 alpha = morph.yearOpacity
                 scaleX = morph.yearScale
                 scaleY = morph.yearScale

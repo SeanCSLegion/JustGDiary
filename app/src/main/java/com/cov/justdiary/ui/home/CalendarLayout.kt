@@ -655,6 +655,12 @@ object CalendarLayout {
         /** 翻页判定的**当前位移**阈值。 */
         const val TRANSLATION_THRESHOLD = 60f
 
+        /** 提交翻页时的收尾动画时长（规范 §9：与 morph 同一套 `medium` 量级）。 */
+        const val PAGE_SETTLE_MS = 220
+
+        /** 放弃翻页、弹回原位时的时长（比提交略快，回弹要"轻"）。 */
+        const val PAGE_CANCEL_MS = 180
+
         /**
          * 把松手时的速度投影成"预测终点"所用的时间常数（秒）。
          *

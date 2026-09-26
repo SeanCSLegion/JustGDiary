@@ -339,18 +339,13 @@ fun CalendarWeekdayHeader(
             .height(height.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        labels.forEachIndexed { index, label ->
-            // 周末列降一档（规范 §5.2）：一周从周一起算时是第 6、7 列，从周日起算时是第 1、7 列。
-            val isWeekend = if (weekStart == DateUtil.WEEK_START_SUNDAY) {
-                index == 0 || index == 6
-            } else {
-                index >= 5
-            }
+        labels.forEachIndexed { _ , label ->
+            // 规范 §4.4：星期列**不做特殊配色**（曾经按"周末降一档"算过一个 isWeekend，
+            // 但从未用在颜色上，注释与代码相反，已删除）
             Text(
                 text = label,
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
-                // 周末列同样不压 alpha（0.6 的 onSurfaceVariant 只有 3.16:1，
                 // 而星期栏是 11sp 小字，需要 4.5:1）。M3 的 `onSurfaceVariant` 本身
                 // 就是"列标题"这一层强调，直接用即可。
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
