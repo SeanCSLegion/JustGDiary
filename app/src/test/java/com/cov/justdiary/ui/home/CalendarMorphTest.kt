@@ -44,6 +44,39 @@ class CalendarMorphTest {
 
     // ------------------------------------------------------------------ 年 ↔ 月
 
+    /**
+     * **不变量**：p = 0 时，每一行的目标 y 必须**逐行等于自然排布** `row × cellH`。
+     *
+     * 这条断言如果早就有，就不会出现"行位移一挂上就跳一格"的问题
+     * （原测试把错误值当期望值钉住了）。
+     */
+    @Test
+    fun `at rest every row offset equals its natural position`() {
+        val metrics = CalendarLayout.monthMetrics(
+            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
+        )
+        val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
+        for (selected in 0 until CalendarLayout.MONTH_ROWS) {
+            val baseRowY = metrics.cellH * selected
+            val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
+            val state = CalendarLayout.monthWeekMorph(0f, baseRowY, monthHeight, metrics, week)
+            val offsets = CalendarLayout.monthWeekRowOffsets(
+                state = state,
+                rows = CalendarLayout.MONTH_ROWS,
+                selectedWeekIndex = selected,
+                cellH = metrics.cellH,
+            )
+            for (row in 0 until CalendarLayout.MONTH_ROWS) {
+                assertEquals(
+                    "selected=$selected row=$row",
+                    row * metrics.cellH,
+                    offsets[row],
+                    1e-3f,
+                )
+            }
+        }
+    }
+
     @Test
     fun `year month morph starts exactly at the month grid`() {
         val state = CalendarLayout.yearMonthMorph(0f, miniGrid, fullGrid, showLunar = true)
@@ -191,7 +224,9 @@ class CalendarMorphTest {
         assertEquals(metrics.cellH, state.metrics.cellH, 1e-3f)
         assertEquals(metrics.dayFont, state.metrics.dayFont, 1e-3f)
         assertEquals(1f, state.rowAboveAlpha, 1e-6f)
-        assertEquals(baseRowY, state.rowAboveY, 1e-3f)
+        // p=0 时"选中行上方那一行"的目标 y = 它**自己的**自然位置（差一格的 bug 就出在这里）
+        assertEquals(baseRowY - metrics.cellH, state.rowAboveY, 1e-3f)
+        assertEquals(baseRowY + metrics.cellH, state.rowBelowY, 1e-3f)
         assertEquals(0f, state.titleOffsetY, 1e-6f)
         assertEquals(1f, state.titleOpacity, 1e-6f)
         assertEquals(0f, state.contentT, 1e-6f)

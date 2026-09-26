@@ -684,9 +684,16 @@ object CalendarLayout {
             selectedRowY = lerp(baseRowY, stripTopY, p),
             metrics = monthMetrics.lerp(weekMetrics, p),
             selectedRowAlpha = 1f,
-            rowAboveY = baseRowY - p * (baseRowY + monthMetrics.cellH),
+            // ⚠️ **差一格的错误就在这两行**（2026-09-26 用户实测"动画不是从实际位置开始"）。
+            //
+            // p=0 时，选中行**上方**那一行的目标 y 必须是它**自己的自然位置**
+            // `baseRowY − cellH`，而原来写的是 `baseRowY`（= 选中行自己的位置）——
+            // 于是行位移一挂上（p > 0.01），上方各行整体跳一格。
+            // 下方同理（原来 p=0 给的是 `baseRowY`，应为 `baseRowY + cellH`）。
+            // 两端的期望值分别是"自然位置"（p=0）与"移出容器"（p=1），线性插值即可。
+            rowAboveY = lerp(baseRowY - monthMetrics.cellH, -monthMetrics.cellH, p),
             rowAboveAlpha = rowAboveAlpha,
-            rowBelowY = baseRowY + p * (monthHeight - baseRowY),
+            rowBelowY = lerp(baseRowY + monthMetrics.cellH, monthHeight, p),
             rowBelowAlpha = rowAboveAlpha,
             titleOffsetY = -p * BIG_TITLE_H,
             titleOpacity = 1f - clamp01(p * 2f),
@@ -694,6 +701,25 @@ object CalendarLayout {
             contentOffsetY = stripBottom + (dayTitleH + 20f) * (1f - contentT),
             contentAlpha = clamp01((p - 0.3f) / 0.5f),
         )
+    }
+
+    /**
+     * 每一行的**绝对**网格局部 y（[CalendarDayGrid] 的 `rowOffsets` 用的就是它）。
+     *
+     * 抽成纯函数是为了可测：**p = 0 时它必须逐行等于自然排布 `row × cellH`**，
+     * 否则行位移一挂上就会整块跳一格（这个 bug 就是这么漏出去的）。
+     */
+    fun monthWeekRowOffsets(
+        state: MonthWeekMorphState,
+        rows: Int,
+        selectedWeekIndex: Int,
+        cellH: Float,
+    ): FloatArray = FloatArray(rows) { row ->
+        when {
+            row == selectedWeekIndex -> state.selectedRowY
+            row < selectedWeekIndex -> state.rowAboveY - cellH * (selectedWeekIndex - row - 1)
+            else -> state.rowBelowY + cellH * (row - selectedWeekIndex - 1)
+        }
     }
 
     // ------------------------------------------------------------------ 翻页

@@ -549,14 +549,14 @@ fun HomeScreen(
                 stripTopY = 0f,
             )
         }
-        // 每一行的**绝对**网格局部 y（rowOffsets 用的就是它）。
-        val rowOffsets = FloatArray(rows) { row ->
-            when {
-                row == selectedWeekIndex -> morphed.selectedRowY
-                row < selectedWeekIndex -> morphed.rowAboveY - cellH * (selectedWeekIndex - row - 1)
-                else -> morphed.rowBelowY + cellH * (row - selectedWeekIndex - 1)
-            }
-        }
+        // 每一行的**绝对**网格局部 y（构造逻辑抽到 CalendarLayout 里，便于单测钉住"p=0 =
+        // 自然排布"这条不变量）。
+        val rowOffsets = CalendarLayout.monthWeekRowOffsets(
+            state = morphed,
+            rows = rows,
+            selectedWeekIndex = selectedWeekIndex,
+            cellH = cellH,
+        )
         val rowAlphas = FloatArray(rows) { row ->
             if (row == selectedWeekIndex) 1f else morphed.rowAboveAlpha
         }
