@@ -130,6 +130,27 @@ fun CalendarDayGrid(
             }
             val drawDivider = showDividers && m.dividerAlpha > 0.01f && monthCols.isNotEmpty() &&
                 (row > 0 || dividerAboveFirst)
+            // 目标 y（绝对）− 流动 y = 需要施加的位移
+            val offsetY = rowOffsets?.getOrNull(row)?.let { absY -> absY - flowY } ?: 0f
+            val rowAlpha = rowAlphas?.getOrNull(row) ?: 1f
+            val rowH = m.cellH.dp
+
+            // ⚠️ 分割线画在**行自己的顶部**（叠层），**不占布局高度**。
+            //
+            // 原来它是 Column 里的一个兄弟节点并 `flowY += 1f`，于是网格实际高度 =
+            // 行数 × 行高 + (行数 − 1)，比容器多出 4~5dp —— **最后一行被挤出容器、
+            // 农历被切掉**（用户实测："最后一行日期的农历显示还是有被遮挡"）。
+            // 改成叠层后高度恒等于 `行数 × 行高`，与 `calendarGridHeight` 及 morph 的
+            // 几何完全一致，那两个函数也不必动（动了会让 morph 的度量推导失配）。
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(rowH)
+                    .graphicsLayer {
+                        translationY = offsetY * density
+                        alpha = rowAlpha
+                    },
+            ) {
             if (drawDivider) {
                 Box(
                     modifier = Modifier
@@ -145,21 +166,11 @@ fun CalendarDayGrid(
                             .background(outlineVariant.copy(alpha = 0.35f * m.dividerAlpha)),
                     )
                 }
-                flowY += 1f
             }
-            // 目标 y（绝对）− 流动 y = 需要施加的位移
-            val offsetY = rowOffsets?.getOrNull(row)?.let { absY -> absY - flowY } ?: 0f
-            val rowAlpha = rowAlphas?.getOrNull(row) ?: 1f
-            val rowH = m.cellH.dp
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(rowH)
-                    .graphicsLayer {
-                        translationY = offsetY * density
-                        alpha = rowAlpha
-                    },
+                    .height(rowH),
             ) {
                 week.forEach { date ->
                     val inMonth =
@@ -185,6 +196,7 @@ fun CalendarDayGrid(
                         modifier = Modifier.weight(1f),
                     )
                 }
+            }
             }
             flowY += m.cellH
         }
