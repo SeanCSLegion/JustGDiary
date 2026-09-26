@@ -223,10 +223,9 @@ class CalendarMorphTest {
         assertEquals(baseRowY, state.selectedRowY, 1e-3f)
         assertEquals(metrics.cellH, state.metrics.cellH, 1e-3f)
         assertEquals(metrics.dayFont, state.metrics.dayFont, 1e-3f)
-        assertEquals(1f, state.rowAboveAlpha, 1e-6f)
-        // p=0 时"选中行上方那一行"的目标 y = 它**自己的**自然位置（差一格的 bug 就出在这里）
-        assertEquals(baseRowY - metrics.cellH, state.rowAboveY, 1e-3f)
-        assertEquals(baseRowY + metrics.cellH, state.rowBelowY, 1e-3f)
+        // p=0：两侧位移都为 0 -> 每一行都在**自然位置**（差一格的 bug 就出在这里）
+        assertEquals(0f, state.upShift, 1e-3f)
+        assertEquals(0f, state.downShift, 1e-3f)
         assertEquals(0f, state.titleOffsetY, 1e-6f)
         assertEquals(1f, state.titleOpacity, 1e-6f)
         assertEquals(0f, state.contentT, 1e-6f)
@@ -250,9 +249,9 @@ class CalendarMorphTest {
         assertEquals(CalendarLayout.WEEKDAY_HEADER_H, state.selectedRowY, 1e-3f)
         assertEquals(week.cellH, state.metrics.cellH, 1e-3f)
         assertEquals(week.dayFont, state.metrics.dayFont, 1e-3f)
-        assertEquals(0f, state.rowAboveAlpha, 1e-6f)
-        assertEquals(-metrics.cellH, state.rowAboveY, 1e-3f)
-        assertEquals(monthHeight, state.rowBelowY, 1e-3f)
+        // p=1：上移量刚好把选中行送到周条位置；下移量刚好把下方首行推出底部
+        assertEquals(baseRowY - CalendarLayout.WEEKDAY_HEADER_H, state.upShift, 1e-3f)
+        assertEquals(monthHeight - baseRowY, state.downShift, 1e-3f)
         assertEquals(-CalendarLayout.BIG_TITLE_H, state.titleOffsetY, 1e-3f)
         assertEquals(0f, state.titleOpacity, 1e-6f)
         assertEquals(1f, state.contentT, 1e-6f)
@@ -270,15 +269,19 @@ class CalendarMorphTest {
         val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
 
         var previousRowY = Float.MAX_VALUE
-        var previousRowAboveAlpha = Float.MAX_VALUE
+        var previousUpShift = -1f
+        var previousDownShift = -1f
         var previousContentAlpha = -1f
         for (step in 0..20) {
             val state = CalendarLayout.monthWeekMorph(step / 20f, baseRowY, monthHeight, metrics, week)
             assertTrue("选中行应持续上移", state.selectedRowY <= previousRowY + 1e-3f)
-            assertTrue("上方行应持续淡出", state.rowAboveAlpha <= previousRowAboveAlpha + 1e-6f)
+            // 两侧位移都**单调递增**（用户要的是"整体位移"，不是"压缩+淡出"）
+            assertTrue("上方整体应持续上移", state.upShift >= previousUpShift - 1e-3f)
+            assertTrue("下方整体应持续下移", state.downShift >= previousDownShift - 1e-3f)
             assertTrue("内容区应持续淡入", state.contentAlpha >= previousContentAlpha - 1e-6f)
             previousRowY = state.selectedRowY
-            previousRowAboveAlpha = state.rowAboveAlpha
+            previousUpShift = state.upShift
+            previousDownShift = state.downShift
             previousContentAlpha = state.contentAlpha
         }
     }

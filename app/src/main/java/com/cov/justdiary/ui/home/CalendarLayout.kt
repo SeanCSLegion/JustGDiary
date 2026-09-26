@@ -639,12 +639,17 @@ object CalendarLayout {
         val metrics: DayMetrics,
         /** 选中行的透明度。 */
         val selectedRowAlpha: Float,
-        /** 上方各行的 y 与透明度。 */
-        val rowAboveY: Float,
-        val rowAboveAlpha: Float,
-        /** 下方各行的 y 与透明度。 */
-        val rowBelowY: Float,
-        val rowBelowAlpha: Float,
+        /**
+         * 两侧的**整体位移量**（用户 2026-09-26 明确描述的动效模型）。
+         *
+         * 选中行及其**上方**各行一起上移 [upShift]（相对间距**不变**），
+         * 直到选中行到达周条位置；选中行**下方**各行一起下移 [downShift] 直到移出屏幕。
+         *
+         * 原来是"上方各行向选中行压缩并淡出"，那会让观感变成
+         * "先上移压缩、再展开周视图"两段动画 —— 用户否掉了那个模型。
+         */
+        val upShift: Float,
+        val downShift: Float,
         /** 大标题的位移与透明度。 */
         val titleOffsetY: Float,
         val titleOpacity: Float,
@@ -677,24 +682,17 @@ object CalendarLayout {
         stripTopY: Float = WEEKDAY_HEADER_H,
     ): MonthWeekMorphState {
         val p = clamp01(progress)
-        val rowAboveAlpha = 1f - clamp01(p * 1.4f)
         val contentT = clamp01((p - 0.25f) / 0.75f)
 
         return MonthWeekMorphState(
             selectedRowY = lerp(baseRowY, stripTopY, p),
             metrics = monthMetrics.lerp(weekMetrics, p),
             selectedRowAlpha = 1f,
-            // ⚠️ **差一格的错误就在这两行**（2026-09-26 用户实测"动画不是从实际位置开始"）。
-            //
-            // p=0 时，选中行**上方**那一行的目标 y 必须是它**自己的自然位置**
-            // `baseRowY − cellH`，而原来写的是 `baseRowY`（= 选中行自己的位置）——
-            // 于是行位移一挂上（p > 0.01），上方各行整体跳一格。
-            // 下方同理（原来 p=0 给的是 `baseRowY`，应为 `baseRowY + cellH`）。
-            // 两端的期望值分别是"自然位置"（p=0）与"移出容器"（p=1），线性插值即可。
-            rowAboveY = lerp(baseRowY - monthMetrics.cellH, -monthMetrics.cellH, p),
-            rowAboveAlpha = rowAboveAlpha,
-            rowBelowY = lerp(baseRowY + monthMetrics.cellH, monthHeight, p),
-            rowBelowAlpha = rowAboveAlpha,
+            // 上移量：选中行从 `baseRowY` 走到 `stripTopY`；上方各行**同步同量**上移
+            // （所以它们之间的相对间距完全不变 -> 观感是"整块往上走"）。
+            upShift = (baseRowY - stripTopY) * p,
+            // 下移量：下方第一行从 `baseRowY + cellH` 走到 `monthHeight + cellH`，即刚好移出底部。
+            downShift = (monthHeight - baseRowY) * p,
             titleOffsetY = -p * BIG_TITLE_H,
             titleOpacity = 1f - clamp01(p * 2f),
             contentT = contentT,
@@ -715,11 +713,10 @@ object CalendarLayout {
         selectedWeekIndex: Int,
         cellH: Float,
     ): FloatArray = FloatArray(rows) { row ->
-        when {
-            row == selectedWeekIndex -> state.selectedRowY
-            row < selectedWeekIndex -> state.rowAboveY - cellH * (selectedWeekIndex - row - 1)
-            else -> state.rowBelowY + cellH * (row - selectedWeekIndex - 1)
-        }
+        val natural = row * cellH
+        // 选中行与它上方的行：**同一个位移量**（整体上移，相对间距不变）
+        // 选中行下方的行：整体下移
+        if (row <= selectedWeekIndex) natural - state.upShift else natural + state.downShift
     }
 
     // ------------------------------------------------------------------ 翻页

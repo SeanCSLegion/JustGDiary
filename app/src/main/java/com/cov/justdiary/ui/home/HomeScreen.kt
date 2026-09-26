@@ -557,9 +557,9 @@ fun HomeScreen(
             selectedWeekIndex = selectedWeekIndex,
             cellH = cellH,
         )
-        val rowAlphas = FloatArray(rows) { row ->
-            if (row == selectedWeekIndex) 1f else morphed.rowAboveAlpha
-        }
+        // 各行**不淡出**：动效是纯粹的整体位移（用户："选中日期行和其上日期整体向上移动……
+        // 而其下的日期，则向下移动直到屏幕外"）。淡出会让它看起来像"消失"而不是"移走"。
+        val rowAlphas = FloatArray(rows) { 1f }
         // 选中行在 morph 中**缩小**到周条尺寸（其余行保持月格尺寸后移出）。
         // 只改度量不改行高会让"选中行上移"看起来像整行平移，收尾时和周条对不上。
         val rowMetrics = remember(p, metrics, weekMetrics, rows, selectedWeekIndex) {
@@ -1479,8 +1479,10 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     flags = args.flags,
                     onDayClick = args.onDayClick,
                     onPageWeek = args.onPageWeek,
-                    // 周条在**绝对** y=30 处（星期栏之下）；换算到本容器的局部坐标
-                    modifier = Modifier.offset(y = (CalendarLayout.WEEKDAY_HEADER_H * (p - 1f)).dp),
+                    // 周条**就位**（不再从上方滑入 —— 那是用户否掉的"展开"观感）。
+                    // 它固定在容器局部 y=0（= 选中行的落点），只随 p 淡入：
+                    // 选中行**自己走上来**与它重合，整个过渡因此只有一段位移。
+                    modifier = Modifier.offset(y = 0.dp),
                 )
             }
             if (p < 0.99f) {
