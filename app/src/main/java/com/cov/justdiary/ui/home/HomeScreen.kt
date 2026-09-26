@@ -1738,11 +1738,19 @@ private fun homeTitle(
 }
 
 /** 月历大标题的文案（`九月` / `September`）。 */
+/**
+ * 月历里**内联**的月份标签：中文数字（`11月`）、英文缩写（`Sep`）。
+ *
+ * 直接用 [`DateFormats.monthName`]（= `TextStyle.SHORT`）—— 它本来就是这个用途
+ * （`date_day_only` / `date_day_title` 也用它），`DateFormatsTest` 里已经断言了
+ * `9月` / `Sep` 两种输出，不需要另加一个函数。
+ * 固定区（钉住的大标题）用 [monthTitleText]，即 `monthFull`（`十一月` / `September`）。
+ */
 private fun monthCompactTitleText(
     monthFirst: LocalDate,
     formats: DateFormats?,
     context: android.content.Context,
-): String = formats?.monthCompact(monthFirst)
+): String = formats?.monthName(monthFirst)
     ?: context.getString(R.string.date_month_short, monthFirst.monthValue)
 
 private fun monthTitleText(
