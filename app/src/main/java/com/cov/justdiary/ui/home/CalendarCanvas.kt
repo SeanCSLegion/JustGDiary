@@ -1,5 +1,7 @@
 package com.cov.justdiary.ui.home
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -238,8 +240,13 @@ fun YearCanvas(
                         .offset(x = card.x.dp, y = card.y.dp)
                         .fillMaxWidth(card.w / canvasW)
                         .fillMaxHeight(card.h / canvasH)
-                        // Material 要求状态层；年历卡片是一个整体点击目标，
-                        // 用默认的有界涟漪（矩形内）即可。
+                        // ⚠️ 涟漪必须**按卡片自身的圆角裁剪**。
+                        //
+                        // `ripple()` 是矩形/圆形的，它不认识卡片画出来的圆角矩形 ——
+                        // 不加 `clip` 时按下去出现的是一块**直角**高亮，与卡片形状对不上
+                        // （用户实测反馈："点击效果并不是卡片的圆角，而是直角"）。
+                        // 卡片绘制用的就是 `Radius.card`，这里必须同一个值。
+                        .clip(RoundedCornerShape(Radius.card))
                         .clickable(
                             interactionSource = interaction,
                             indication = ripple(),

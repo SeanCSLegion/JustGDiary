@@ -48,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -181,7 +182,18 @@ fun HomeScreen(
     var dragOffsetPx by remember { mutableFloatStateOf(0f) }
     var settled by remember { mutableStateOf(false) }
     val settleAnim = remember { Animatable(0f) }
-    val pageOffsetPx = dragOffsetPx + settleAnim.value
+    // ⚠️ **不要**在这里把两个 state 加起来。
+    //
+    // `val pageOffsetPx = dragOffsetPx + settleAnim.value` 是**组合期读 state** ——
+    // 拖动时每一帧都会让整个 HomeScreen 重组（含当日面板、图片），实测就是"不跟手、
+    // 明显卡顿"。正确做法是让 `graphicsLayer { }` 那个 **deferred lambda** 自己去读：
+    // 那样变化只让对应的 layer 失效，跳过组合与布局两个阶段。
+    //
+    // 唯一需要参与组合的是"要不要组合邻页"，而它只在**跨过零点**时才变 ——
+    // 所以用 `derivedStateOf` 把它收敛成布尔值，避免每帧重组。
+    val dragNext by remember { derivedStateOf { dragOffsetPx + settleAnim.value < -1f } }
+    val dragPrev by remember { derivedStateOf { dragOffsetPx + settleAnim.value > 1f } }
+    fun pageOffset(): Float = dragOffsetPx + settleAnim.value
 
     var monthKey by rememberSaveable { mutableStateOf(CalendarGrid.monthKeyOf(today)) }
     var selectedKey by rememberSaveable { mutableStateOf(todayKey) }
@@ -788,8 +800,6 @@ fun HomeScreen(
                         // 拖动方向决定要组合哪一张邻页：向上拖（负位移）出「下一个月」。
                         // 没在拖的时候（|位移| < 1px）一张邻页都不组合 —— 月历是自绘的，
                         // 常驻三张会让每帧多画两遍。
-                        val dragNext = pageOffsetPx < -1f
-                        val dragPrev = pageOffsetPx > 1f
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -809,8 +819,9 @@ fun HomeScreen(
                                         .height(bandH.dp)
                                         .clipToBounds()
                                         .graphicsLayer {
-                                            // 跟手位移（翻页时整层上下走）
-                                            translationY = pageOffsetPx
+                                            // 跟手位移（翻页时整层上下走）—— **延迟读 state**
+                                            translationY = pageOffset()
+
                                             alpha = 1f - yp
                                             // 1 → 0.28：接近迷你月卡片相对月网格的尺度
                                             val k = CalendarLayout.lerp(1f, 0.28f, yp)
@@ -827,7 +838,7 @@ fun HomeScreen(
                                 ) {
                                     PagerViewport(
                                         bandH = bandH,
-                                        offsetPx = pageOffsetPx,
+                                        offsetPx = { pageOffset() },
                                         showNext = dragNext,
                                         showPrev = dragPrev,
                                         page = { offsetMonths ->
@@ -857,7 +868,7 @@ fun HomeScreen(
                             if (mode == HomeViewMode.YEAR || yp > 0.01f) {
                             PagerViewport(
                                 bandH = bandH,
-                                offsetPx = pageOffsetPx,
+                                offsetPx = { pageOffset() },
                                 showNext = dragNext,
                                 showPrev = dragPrev,
                                 page = { offsetYears ->
@@ -913,8 +924,7 @@ private fun YearLayer(
     yearProgress: Float,
     dateFormats: DateFormats?,
     onMonthClick: (Int) -> Unit,
-    /** 「上下滑翻年」的跟手位移（px）。 */
-    dragOffsetPx: Float = 0f,
+
 ) {
     val context = LocalContext.current
     val morph = remember(yearProgress, yearHeight, monthGridH, yearWidth, args.showLunar, args.selectedWeekIndex, args.cellHeight) {
@@ -950,7 +960,6 @@ private fun YearLayer(
             .width(yearWidth.dp)
             .height(yearHeight.dp)
             .graphicsLayer {
-                translationY = dragOffsetPx
                 alpha = morph.yearOpacity
                 scaleX = morph.yearScale
                 scaleY = morph.yearScale
@@ -1032,7 +1041,14 @@ private data class CalendarSectionArgs(
 @Composable
 private fun PagerViewport(
     bandH: Float,
-    offsetPx: Float,
+    /**
+     * 位移的**读取器**而不是值。
+     *
+     * 传值意味着调用方在组合期读了 state，于是拖动每一帧都要重组整屏；
+     * 传 lambda 之后 `graphicsLayer` 的 deferred lambda 自己去读，
+     * 位移变化只让 layer 失效（跳过组合与布局）。
+     */
+    offsetPx: () -> Float,
     showNext: Boolean,
     showPrev: Boolean,
     page: @Composable (Int) -> Unit,
@@ -1053,7 +1069,7 @@ private fun PagerViewport(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(bandH.dp)
-                .graphicsLayer { translationY = offsetPx },
+                .graphicsLayer { translationY = offsetPx() },
             contentAlignment = Alignment.TopCenter,
         ) {
             if (showNext) {

@@ -7,5 +7,6 @@
     <color name="window_background">#FDFBFF</color>
 
     <!-- 自适应图标背景 -->
-    <color name="ic_launcher_background">#2563EB</color>
+    <!-- 启动图标底色：取自 iOS `JustDiary.icon/icon.json` 的 fill（Display-P3 → sRGB） -->
+    <color name="ic_launcher_background">#44B8FF</color>
 </resources>

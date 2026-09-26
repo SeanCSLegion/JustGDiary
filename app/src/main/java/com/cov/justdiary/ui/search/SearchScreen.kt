@@ -234,7 +234,16 @@ fun SearchScreen(
                         }
                     }
                 },
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onCommitKeyword() }),
+                // ⚠️ **三个回调都要接**：软键盘的"搜索"键发 `onSearch`，
+                // 但硬件回车 / 部分输入法发的是 `onDone`（甚至 `onGo`）。
+                // 只接 `onSearch` 时，用户按回车什么都不会发生 —— 而页面上**没有别的提交入口**
+                // （没有搜索按钮），于是搜索直接不可用。实测：输入 body + 回车，
+                // 条件行里没有出现任何胶囊，页面停在引导态。
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSearch = { onCommitKeyword() },
+                    onDone = { onCommitKeyword() },
+                    onGo = { onCommitKeyword() },
+                ),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                     imeAction = androidx.compose.ui.text.input.ImeAction.Search,
                 ),
