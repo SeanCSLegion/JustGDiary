@@ -808,7 +808,12 @@ fun HomeScreen(
                 // 看起来"下一个月其实是当前月的内容"（用户实测反馈）。
                 // 其它字段（metrics / cellHeight / selectedKey / todayKey / flags）与月份无关，
                 // 沿用是对的；只有标题是**跟着月份走**的。
-                monthTitleLabel = monthTitleText(first, dateFormats, context),
+                // 紧凑月用**简写**标签（中文 `11月`、英文 `Nov`）；固定区与当前月仍用全写。
+                monthTitleLabel = if (withMorph) {
+                    monthTitleText(first, dateFormats, context)
+                } else {
+                    monthCompactTitleText(first, dateFormats, context)
+                },
                 // 非当前月走**紧凑形态**：小号内联标签、不画星期栏 ——
                 // 大标题与星期栏由顶部钉住层提供，只有一份（用户给的 iOS 参考版面）。
                 compactMonth = !withMorph,
@@ -1733,6 +1738,13 @@ private fun homeTitle(
 }
 
 /** 月历大标题的文案（`九月` / `September`）。 */
+private fun monthCompactTitleText(
+    monthFirst: LocalDate,
+    formats: DateFormats?,
+    context: android.content.Context,
+): String = formats?.monthCompact(monthFirst)
+    ?: context.getString(R.string.date_month_short, monthFirst.monthValue)
+
 private fun monthTitleText(
     monthFirst: LocalDate,
     formats: DateFormats?,

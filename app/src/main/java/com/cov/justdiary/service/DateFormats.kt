@@ -49,6 +49,16 @@ class DateFormats(
     fun monthFull(date: LocalDate): String = date.month.getDisplayName(TextStyle.FULL, locale)
 
     /**
+     * 月历里**内联**的月份标签（用户："日期里面的月份用数字，不要用大写。
+     * 对应的，英文也是用缩写，固定区则是用全写"）。
+     *
+     * Java 的 `TextStyle.SHORT` 在两种语言下正好就是我们要的：
+     * 中文 `11月`、英文 `Nov`。固定区（钉住的大标题）仍用 [monthFull]。
+     */
+    fun monthCompact(date: LocalDate): String =
+        date.month.getDisplayName(TextStyle.SHORT, locale)
+
+    /**
      * 年历页右侧的干支生肖（`丙午马年`）。
      *
      * **只在中文下有内容**：英文用户看干支没有意义，iOS 侧同样只对中文显示
