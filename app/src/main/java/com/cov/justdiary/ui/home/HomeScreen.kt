@@ -1,5 +1,7 @@
 package com.cov.justdiary.ui.home
 
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -1363,78 +1365,77 @@ private fun WeekStrip(
     onPageWeek: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // ⚠️ 与月态同一个教训：**只组合当前一周，横向拖出去的部分就是空白**。
+    //
+    // 现在用"**居中的窗口 + 框架滚动**"：一次放 [WINDOW] 周，当前周固定在正中间，
+    // 左右各有邻周；滑动由 `LazyRow` + 官方吸附负责，停稳后回调 `onPageWeek`，
+    // 再把窗口**无动画地**拨回中间（内容同时被父层换成新的当前周）。
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = WEEK_WINDOW_CENTER)
     val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
-    val delta = remember { Animatable(0f) }
-    val spec = tween<Float>(CalendarLayout.QUICK_SETTLE_DURATION_MS)
-    // 无障碍文案必须在组合期取好：`semantics { }` 的 lambda 不是 @Composable 上下文
     val gridLabel = weekDescription(week)
+
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress to state.firstVisibleItemIndex }
+            .collect { (scrolling, index) ->
+                if (scrolling) return@collect
+                if (state.firstVisibleItemScrollOffset != 0) state.animateScrollToItem(index)
+                val moved = index - WEEK_WINDOW_CENTER
+                if (moved != 0) {
+                    onPageWeek(moved)
+                    // 新的一周成为"当前周"之后它就在窗口正中，拨回去即可继续滑
+                    state.scrollToItem(WEEK_WINDOW_CENTER)
+                }
+            }
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(CalendarLayout.WEEK_STRIP_H.dp)
-            // 手指抬起时按位移判断去留（与翻月同一套 `DragPagerMath`）
-            .pointerInput(weekIndex, stripWidth) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        val current = delta.value
-                        val page = when {
-                            current <= -WEEK_PAGE_THRESHOLD -> 1
-                            current >= WEEK_PAGE_THRESHOLD -> -1
-                            else -> 0
-                        }
-                        scope.launch {
-                            delta.animateTo(-page * stripWidth, spec)
-                            if (page != 0) onPageWeek(page)
-                            // 与新一周在同一帧提交，避免用旧偏移渲染一帧新周
-                            delta.snapTo(0f)
-                        }
-                    },
-                    onDragCancel = { scope.launch { delta.snapTo(0f) } },
-                    onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
-                        // 拖动期间**不启动协程**（每帧 launch 会排队、手感发滞），
-                        // 直接把换算后的 dp 写进 Animatable 的当前值。
-                        scope.launch {
-                            delta.snapTo(
-                                CalendarLayout.DragPagerMath.clampOffset(
-                                    delta.value + dragAmount / density.density,
-                                    stripWidth,
-                                ),
-                            )
-                        }
-                    },
-                )
-            },
+            .height(CalendarLayout.WEEK_STRIP_H.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Row(
+        LazyRow(
+            state = state,
+            // 官方吸附：惯性 + 停在一周上
+            flingBehavior = rememberSnapFlingBehavior(state),
             modifier = Modifier
-                .align(Alignment.Center)
                 .width(stripWidth.dp)
-                .graphicsLayer {
-                    translationX = delta.value * density.density
-                    alpha = progress
-                },
+                .graphicsLayer { alpha = progress },
         ) {
-            CalendarDayGrid(
-                rows = listOf(week),
-                anchorMonth = week.first(),
-                metrics = metrics,
-                selectedKey = selectedKey,
-                todayKey = todayKey,
-                flags = flags,
-                onDayClick = onDayClick,
-                showAdjacent = true,
-                showLunar = showLunar,
-                showDividers = false,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics { contentDescription = gridLabel },
-            )
+            items(count = WEEK_WINDOW, key = { it }) { i ->
+                val days = remember(week, i) { week.map { it.plusWeeks((i - WEEK_WINDOW_CENTER).toLong()) } }
+                Box(modifier = Modifier.width(stripWidth.dp)) {
+                    CalendarDayGrid(
+                        rows = listOf(days),
+                        anchorMonth = days.first(),
+                        metrics = metrics,
+                        selectedKey = selectedKey,
+                        todayKey = todayKey,
+                        flags = flags,
+                        onDayClick = onDayClick,
+                        showAdjacent = true,
+                        showLunar = showLunar,
+                        showDividers = false,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                // 只有**当前周**是无障碍节点：左右邻周是纯视觉的过渡内容
+                                if (i == WEEK_WINDOW_CENTER) {
+                                    Modifier.semantics { contentDescription = gridLabel }
+                                } else {
+                                    Modifier.clearAndSetSemantics { }
+                                },
+                            ),
+                    )
+                }
+            }
         }
     }
 }
+
+/** 周条窗口的周数（奇数，当前周居中）：左右各留 3 周，足够跟手且不会一次组合太多。 */
+private const val WEEK_WINDOW = 7
+private const val WEEK_WINDOW_CENTER = WEEK_WINDOW / 2
 
 /** 顶栏的高度（与 [HomeTopBar] 的 `heightIn(min = 52.dp)` 对应）。 */
 private val CALENDAR_BAND_TOP = 52f

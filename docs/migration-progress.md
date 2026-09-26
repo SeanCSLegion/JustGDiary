@@ -1735,6 +1735,33 @@ LazyColumn(
 
 验证：clean assembleDebug + 401 条 JVM 单测（--rerun-tasks，0 失败）+ SQL 校验。
 
+### R5 · 第十四轮：周条横向拖动留白 —— 用同一个模式修好了
+
+**这是我自查发现、并且前两轮尝试两次都失败（把整条周条画没）的问题。**
+上一轮月态改用 `LazyColumn` 成功之后，同一个模式直接套过来就成了：
+
+```kotlin
+// 居中的窗口 + 框架滚动：一次放 7 周，当前周固定在正中，左右各有邻周
+val state = rememberLazyListState(initialFirstVisibleItemIndex = WEEK_WINDOW_CENTER)
+LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
+    items(WEEK_WINDOW, key = { it }) { i ->
+        val days = week.map { it.plusWeeks((i - WEEK_WINDOW_CENTER).toLong()) }
+        CalendarDayGrid(rows = listOf(days), ...)
+    }
+}
+```
+
+停稳后：吸附到整周 → 若 `index != 中心` 则回调 `onPageWeek(index - 中心)`，
+再 `scrollToItem(中心)` 把窗口**无动画地**拨回去（内容同时也被父层换成新的当前周）。
+
+**真机实测**：拖动中显示的是**完整的一周**（16-22，四周有邻周），无空白；
+松手吸附到整周；选中日从 15 前进到 22；今天（26）的圆环照常（r5-20）。
+
+**为什么前两次失败**：我一直在"给一层 Row 手动加两个兄弟节点"，
+反复卡在 `clipToBounds` / 高度约束 / 位移层的组合上。
+**换成"窗口 + 框架滚动"之后，这些都不需要我关心了** ——
+和月态是同一个教训：**不要手写框架已经做好的东西。**
+
 ### 已知遗留
 
 - 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见
