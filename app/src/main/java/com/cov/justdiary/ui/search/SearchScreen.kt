@@ -74,6 +74,7 @@ import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.SearchUtil
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.CountBadge
+import com.cov.justdiary.ui.components.DateRangeSheet
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.EmptyState
 import com.cov.justdiary.ui.components.InputPill
@@ -163,7 +164,7 @@ fun SearchScreen(
         )
     }
     if (showCustomRange) {
-        CustomRangeSheet(
+        DateRangeSheet(
             initialFrom = state.customRange?.from,
             initialTo = state.customRange?.to,
             onQuickPick = { kind -> onTimeKindChange(kind); showCustomRange = false },
@@ -517,110 +518,6 @@ private fun LocationFilterRow(
 // ---------------------------------------------------------------------- 两个 ModalBottomSheet
 
 /** 自定义时间范围：三个快捷档 + 起止日期。 */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CustomRangeSheet(
-    initialFrom: String?,
-    initialTo: String?,
-    onQuickPick: (TimeRangeKind) -> Unit,
-    onApply: (from: String, to: String) -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val today = remember { LocalDate.now() }
-    val defaultFrom = remember(today) { today.withDayOfMonth(1) }
-    var from by remember { mutableStateOf(initialFrom ?: defaultFrom.toString()) }
-    var to by remember { mutableStateOf(initialTo ?: today.toString()) }
-
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-            Text(SHEET_TIME_TITLE, style = MaterialTheme.typography.titleMedium)
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = false,
-                    onClick = { onQuickPick(TimeRangeKind.ThisWeek) },
-                    label = { Text(stringResource(R.string.search_time_week)) },
-                )
-                FilterChip(
-                    selected = false,
-                    onClick = { onQuickPick(TimeRangeKind.ThisMonth) },
-                    label = { Text(stringResource(R.string.search_time_month)) },
-                )
-                FilterChip(
-                    selected = false,
-                    onClick = { onQuickPick(TimeRangeKind.ThisYear) },
-                    label = { Text(stringResource(R.string.search_time_year)) },
-                )
-            }
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                DayKeyField(
-                    label = LABEL_RANGE_FROM,
-                    value = from,
-                    onValueChange = { from = it },
-                    modifier = Modifier.weight(1f),
-                )
-                DayKeyField(
-                    label = LABEL_RANGE_TO,
-                    value = to,
-                    onValueChange = { to = it },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 20.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onClear) { Text(CLEAR_LABEL) }
-                Button(
-                    onClick = { onApply(from, to) },
-                    modifier = Modifier.padding(start = 8.dp),
-                ) { Text(APPLY_LABEL) }
-            }
-        }
-    }
-}
-
-/**
- * 日期输入。
- *
- * 直接用 `YYYY-MM-DD` 文本框而不是 `DatePickerDialog`：起止两个日期是一个「区间」参数，
- * 弹出的日历面板会遮住另一半；而且这里的输入本来就是键盘友好的。
- */
-@Composable
-private fun DayKeyField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 6.dp),
-        )
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(Radius.field),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            placeholder = { Text("2026-09-01") },
-        )
-    }
-}
-
 /** 地点选择器：从 `AlertDialog` 改成 `ModalBottomSheet`（规范 §1.6）。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

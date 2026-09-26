@@ -65,6 +65,7 @@ import com.cov.justdiary.service.DateFormats
 import java.time.LocalDate
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
+import com.cov.justdiary.ui.components.DateRangeSheet
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.EmptyState
 import com.cov.justdiary.ui.components.PageHeader
@@ -107,7 +108,7 @@ fun FootprintScreen(
 ) {
     var showTimeSheet by remember { mutableStateOf(false) }
     if (showTimeSheet) {
-        FootprintTimeSheet(
+        DateRangeSheet(
             initialFrom = customFrom,
             initialTo = customTo,
             onQuickPick = { kind -> onTimeKindChange(kind); showTimeSheet = false },
@@ -283,111 +284,12 @@ private fun rangeLabel(from: String, to: String): String {
 }
 
 /**
- * 自定义时间范围面板：与搜索页的 `CustomRangeSheet` **同构**（规范 §2.2）。
+ * 自定义时间范围面板：与搜索页共用同一个 `DateRangeSheet`（规范 §2.2 要求同构）。
  *
  * 两处必须是同一个交互：用户在搜索页学会的"三个快捷档 + 起止日期 + 清除/确定"
  * 在足迹页要能直接用。
  */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FootprintTimeSheet(
-    initialFrom: String?,
-    initialTo: String?,
-    onQuickPick: (TimeRangeKind) -> Unit,
-    onApply: (from: String, to: String) -> Unit,
-    onClear: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val today = remember { LocalDate.now() }
-    val defaultFrom = remember(today) { today.withDayOfMonth(1) }
-    var from by remember { mutableStateOf(initialFrom ?: defaultFrom.toString()) }
-    var to by remember { mutableStateOf(initialTo ?: today.toString()) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-            Text(
-                text = stringResource(R.string.search_time_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = false,
-                    onClick = { onQuickPick(TimeRangeKind.ThisWeek) },
-                    label = { Text(stringResource(R.string.search_time_week)) },
-                )
-                FilterChip(
-                    selected = false,
-                    onClick = { onQuickPick(TimeRangeKind.ThisMonth) },
-                    label = { Text(stringResource(R.string.search_time_month)) },
-                )
-                FilterChip(
-                    selected = false,
-                    onClick = { onQuickPick(TimeRangeKind.ThisYear) },
-                    label = { Text(stringResource(R.string.search_time_year)) },
-                )
-            }
-            Row(
-                modifier = Modifier.padding(top = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                RangeDayField(
-                    label = stringResource(R.string.search_time_from),
-                    value = from,
-                    onValueChange = { from = it },
-                    modifier = Modifier.weight(1f),
-                )
-                RangeDayField(
-                    label = stringResource(R.string.search_time_to),
-                    value = to,
-                    onValueChange = { to = it },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 20.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onClear) { Text(stringResource(R.string.search_time_clear)) }
-                Button(
-                    onClick = { onApply(from, to) },
-                    modifier = Modifier.padding(start = 8.dp),
-                ) { Text(stringResource(R.string.search_time_apply)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RangeDayField(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 6.dp),
-        )
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            shape = RoundedCornerShape(Radius.field),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            placeholder = { Text("2026-09-01") },
-        )
-    }
-}
 
 /** 5 格统计卡：省市 / 城市 / 国家 / 片段 / 天数。 */
 @Composable

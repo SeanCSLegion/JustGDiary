@@ -825,22 +825,40 @@ private fun ImportModeDialog(onSkip: () -> Unit, onOverwrite: () -> Unit, onDism
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings_import_mode_title)) },
-        text = { Text(stringResource(R.string.settings_import_sub)) },
+        text = {
+            // 面板正文要说清"两种选择各自的后果"。
+            // 原来正文直接复用了行内副标题（「从其他设备恢复日记」）—— 那是**入口**的说明，
+            // 放在这里等于什么都没说，而用户正要做一个会覆盖数据的决定。
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(stringResource(R.string.settings_import_mode_msg))
+                Text(
+                    text = stringResource(R.string.settings_import_skip_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.settings_import_overwrite_hint),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        // 动作顺序：取消 → 跳过（保留本机）→ **覆盖（破坏性，最右、error 色）**（规范 06 §2.2）。
+        // 原来「跳过」占着确认位、被排到最右，破坏性的「覆盖」挤在中间。
         confirmButton = {
-            TextButton(onClick = onSkip) { Text(stringResource(R.string.settings_import_skip)) }
+            TextButton(
+                onClick = onOverwrite,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) {
+                Text(stringResource(R.string.settings_import_overwrite))
+            }
         },
         dismissButton = {
             Row {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-                // 覆盖 = 破坏性动作：用 error 色与「跳过」在视觉上分开（规范 §3.6）
-                TextButton(
-                    onClick = onOverwrite,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                ) {
-                    Text(stringResource(R.string.settings_import_overwrite))
-                }
+                TextButton(onClick = onSkip) { Text(stringResource(R.string.settings_import_skip)) }
             }
         },
     )

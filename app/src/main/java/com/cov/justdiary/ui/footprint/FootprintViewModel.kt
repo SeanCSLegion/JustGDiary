@@ -11,6 +11,7 @@ import com.cov.justdiary.data.FootprintNode
 import com.cov.justdiary.data.FootprintViewState
 import com.cov.justdiary.data.FootprintViewStateBuilder
 import com.cov.justdiary.data.SearchFilters
+import com.cov.justdiary.data.DayKeyInput
 import com.cov.justdiary.data.TimeRangeKind
 import com.cov.justdiary.data.YEAR_FILTER_ALL
 import com.cov.justdiary.model.FootprintRow
@@ -97,9 +98,15 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
+    /** 应用自定义时间范围（两端先归一化，理由同 `SearchViewModel.applyCustomRange`）。 */
     fun applyCustomRange(from: String, to: String) {
+        val range = DayKeyInput.normalizeRange(from, to) ?: return
         _state.value = rebuild(
-            _state.value.copy(timeKind = TimeRangeKind.Custom, customFrom = from, customTo = to),
+            _state.value.copy(
+                timeKind = TimeRangeKind.Custom,
+                customFrom = range.first,
+                customTo = range.second,
+            ),
         )
     }
 

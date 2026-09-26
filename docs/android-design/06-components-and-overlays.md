@@ -54,8 +54,7 @@
 | `CalendarSection` / `YearLayer` / `YearCanvas` | `ui/home/` | 三态的日历主体；几何全部来自 `CalendarLayout` 的纯函数 |
 | `HomeTopBar` | `ui/home/` | 顶栏两枚胶囊（外层私有） |
 | `StatsCard` / `StatCell` / `TrendCard` / `YearBarChart` / `PlaceTreeCard` / `PlaceRow` | `ui/footprint/` | 统计 5 格、年度柱状图、三级地点树 |
-| `CustomRangeSheet` | `ui/search/` | 自定义时间范围面板 |
-| `FootprintTimeSheet` | `ui/footprint/` | 同上，与搜索页**同构**（⚠️ 目前是两份近似拷贝，第二次改动时应抽成一个共享 composable） |
+| `DateRangeSheet` | `ui/components/DateRangeSheet.kt` | 自定义时间范围面板，**搜索页与足迹页共用同一个**（规范要求两处完全同构；曾经是两份近似拷贝，第二次改动必然分叉） |
 | `LocationPickerSheet` | `ui/search/` | 地点选择面板（`ModalBottomSheet`） |
 | `RangeDayField` / `DayKeyField` | `ui/*/` | 起止日期输入（⚠️ 纯文本、无校验，见 §5 待办） |
 

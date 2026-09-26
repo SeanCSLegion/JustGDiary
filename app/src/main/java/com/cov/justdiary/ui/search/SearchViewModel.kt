@@ -96,8 +96,21 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         runSearchNow(reset = true)
     }
 
+    /**
+     * 应用自定义时间范围。
+     *
+     * 两端先经过 [DayKeyInput.normalizeRange] 归一化 —— 界面已经校验过一遍，
+     * 这里再兜一次：范围过滤是**字符串比较**，未归一化的 `2026-9-1` 会算出空区间。
+     * 归一化失败（理论上不该发生）时什么都不做，宁可保持原状也不要写进一个空区间。
+     */
     fun applyCustomRange(from: String, to: String) {
-        apply(_state.value.ui.copy(timeKind = TimeRangeKind.Custom, customRange = com.cov.justdiary.data.DayKeyRange(from, to)))
+        val range = com.cov.justdiary.data.DayKeyInput.normalizeRange(from, to) ?: return
+        apply(
+            _state.value.ui.copy(
+                timeKind = TimeRangeKind.Custom,
+                customRange = com.cov.justdiary.data.DayKeyRange(range.first, range.second),
+            ),
+        )
         runSearchNow(reset = true)
     }
 

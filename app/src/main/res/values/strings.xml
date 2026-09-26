@@ -87,6 +87,9 @@
     <string name="settings_import">Import backup</string>
     <string name="settings_import_sub">Restore entries from another device</string>
     <string name="settings_import_mode_title">Import mode</string>
+    <string name="settings_import_mode_msg">Entries from the backup are merged into this device. When a day exists in both:</string>
+    <string name="settings_import_skip_hint">Skip — keep the entry already on this device</string>
+    <string name="settings_import_overwrite_hint">Overwrite — replace it with the backup version</string>
     <string name="settings_import_skip">Skip existing</string>
     <string name="settings_import_overwrite">Overwrite existing</string>
     <string name="settings_import_busy">Importing backup…</string>
@@ -156,6 +159,7 @@
     <string name="search_time_from">From</string>
     <string name="search_time_to">To</string>
     <string name="search_time_apply">Apply</string>
+    <string name="search_time_invalid">Enter a date as 2026-09-01</string>
     <string name="search_loc_label">Place</string>
     <string name="search_result_count">%1$d entries found</string>
     <string name="read_search_placeholder">Search this entry…</string>
