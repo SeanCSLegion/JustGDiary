@@ -299,9 +299,7 @@ fun HomeScreen(
                 // 停稳后**吸附到整月**：慢拖（松手时几乎没有速度）不会触发 fling，
                 // 于是可能停在"上个月的尾巴还露一点"的位置。这里补一次动画，
                 // 让静止态永远是"一整个月"（规范 §5.1：一屏一个月）。
-                if (monthListState.firstVisibleItemScrollOffset != 0) {
-                    monthListState.animateScrollToItem(index)
-                }
+                // 不再"停稳后吸附到整月"：月视图是无级滚动（用户明确要求）。
                 val key = CalendarGrid.MONTH_KEYS.getOrNull(index) ?: return@collect
                 if (key != monthKey) monthKey = key
             }
@@ -413,6 +411,14 @@ fun HomeScreen(
     fun goToday() {
         monthKey = CalendarGrid.monthKeyOf(today)
         selectedKey = todayKey
+        // ⚠️ 除了改 `monthKey`，还要**直接**把列表拨回当月开头。
+        //
+        // 只靠 `LaunchedEffect(monthKey)` 不够：如果用户只是"在当前月里往下滑了一点"，
+        // `monthKey` 根本没变（还是当月）→ effect 不重跑 → 点「今天」纹丝不动
+        // （用户反馈"今天按钮没用了"）。这里无条件拨回，语义就是"回到今天"。
+        scope.launch {
+            monthListState.scrollToItem(CalendarGrid.MONTH_KEYS.indexOf(monthKey))
+        }
         when (mode) {
             HomeViewMode.YEAR -> {
                 mode = HomeViewMode.MONTH
@@ -941,9 +947,10 @@ fun HomeScreen(
                                     // 一个月一项、项间空一行、滚动是无级的，松手由官方
                                     // `rememberSnapFlingBehavior` 吸附到最近的月份。
                                     // 手写的分页器（PagerViewport / 位移 / 橡皮筋 / 收尾动画）就此删除。
+                                    // 用户 2026-09-26："月视图不要有吸附。" —— 于是不传
+                                    // `flingBehavior`，用框架默认的自由滚动（无级、有惯性、不吸附）。
                                     LazyColumn(
                                         state = monthListState,
-                                        flingBehavior = rememberSnapFlingBehavior(monthListState),
                                         userScrollEnabled = !morphing,
                                         modifier = Modifier.fillMaxSize(),
                                     ) {
@@ -1319,7 +1326,10 @@ private fun CalendarSection(args: CalendarSectionArgs) {
         // 紧凑月（非当前月）的标签**占一整行的高度**（= 行高）：
         // 用户要求"月份与日期之间的间隔要和日期间的间隔一样"，而月份之间的那条线
         // 也要和行分隔线一样 —— 于是标签行就当成"一行"来排。
-        args.compactMonth -> args.cellHeight
+        // 用户："两个月之间的间隔还是太大了，月份的字号似乎太大了"
+        // —— 标签行原来占**一整行**（≈87dp），文字 24sp；改成 0.5 行 + 18sp，
+        // 标签仍**底对齐**（所以"标签 → 下方首行"的间距保持不变，只是上方空档收掉）。
+        args.compactMonth -> args.cellHeight * 0.5f
         args.showBigTitle -> CalendarLayout.BIG_TITLE_H
         else -> CalendarLayout.COMPACT_MONTH_TITLE_H
     }
@@ -1363,10 +1373,13 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                 // 首轮把它并进顶栏，于是整块版面又扁又空（实测缺陷 D5）。
                 Text(
                     text = args.monthTitleLabel,
-                    fontSize = if (args.showBigTitle) {
-                        DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale)
-                    } else {
-                        DynamicTypeMetrics.effectiveSp(TypeSize.pageTitle, fontScale)
+                    fontSize = when {
+                        args.compactMonth ->
+                            DynamicTypeMetrics.effectiveSp(TypeSize.statValue, fontScale)
+                        args.showBigTitle ->
+                            DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale)
+                        else ->
+                            DynamicTypeMetrics.effectiveSp(TypeSize.pageTitle, fontScale)
                     },
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -1384,6 +1397,14 @@ private fun CalendarSection(args: CalendarSectionArgs) {
             // 紧凑月**完全不占**星期栏的高度：那 30dp 正是"月份与日期之间间隔太大"的来源。
             if (!args.compactMonth) {
                 CalendarWeekdayHeader(weekStart = args.weekStart, compact = !args.showBigTitle)
+            } else {
+                // 月与月之间补一条**和行分隔线一样**的线（用户："每个月之间的分割线其实和
+                // 日期之间的间隔线要一样"）。`CalendarDayGrid` 只在 `row > 0` 时画线，
+                // 所以每个月首行上方那条得在这里补。
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
             }
         }
         // 高度在「月态网格」与「周条」之间插值：用 `if` 二选一会让容器瞬间跳掉一整块。
@@ -1482,6 +1503,18 @@ private fun WeekStrip(
     val density = LocalDensity.current
     val gridLabel = weekDescription(week)
 
+    // **外部换了周 → 把窗口拨回正中**。
+    //
+    // 少了这一条时：点「今天」（或点别的日期）只会换掉 `week` 的内容，
+    // 而 `LazyRow` 的滚动位置停在用户上次滑到的地方 —— 于是周条纹丝不动，
+    // 看起来就是"「今天」按钮没用了"（用户实测反馈）。
+    LaunchedEffect(week.firstOrNull()) {
+        if (state.firstVisibleItemIndex != WEEK_WINDOW_CENTER ||
+            state.firstVisibleItemScrollOffset != 0
+        ) {
+            state.scrollToItem(WEEK_WINDOW_CENTER)
+        }
+    }
     LaunchedEffect(state) {
         snapshotFlow { state.isScrollInProgress to state.firstVisibleItemIndex }
             .collect { (scrolling, index) ->
