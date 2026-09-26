@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -385,6 +386,12 @@ fun HomeScreen(
         if (mode == HomeViewMode.WEEK) {
             monthKey = CalendarGrid.monthKeyOf(selectedDate)
             setWeekMode(false)
+            // 用户："周视图切换到月视图……要让选中日的月份的 1 号在月视图顶部"。
+            // 拨到该项的**起点**（偏移 0）—— 配合上面的 `contentPadding`，
+            // 起点位置正是"标签被盖住、分割线贴住栏底"。
+            scope.launch {
+                monthListState.scrollToItem(CalendarGrid.MONTH_KEYS.indexOf(monthKey))
+            }
             return
         }
         if (mode == HomeViewMode.YEAR) {
@@ -977,6 +984,19 @@ fun HomeScreen(
                                     LazyColumn(
                                         state = monthListState,
                                         userScrollEnabled = !morphing,
+                                        // 顶部内边距 = **钉住栏高度 − 紧凑标签行高度**。
+                                        //
+                                        // 这样"滚到某一项、偏移 0"时（= 静置位置）：
+                                        //   · 该月的紧凑标签正好落在钉住栏**之下被盖住**
+                                        //     —— 用户："不要显示日期的数字月份"（顶栏已经写了月名）；
+                                        //   · 该月首行上方那条分割线正好落在**钉住栏的底边**
+                                        //     —— 用户："日期上的分割线位置就是顶部固定栏的底部"。
+                                        // 也就是列表内容从"标签被盖住、分割线贴住栏底"开始。
+                                        contentPadding = PaddingValues(
+                                            top = (CalendarLayout.BIG_TITLE_H +
+                                                CalendarLayout.WEEKDAY_HEADER_H -
+                                                CalendarLayout.COMPACT_MONTH_TITLE_H).dp,
+                                        ),
                                         modifier = Modifier.fillMaxSize(),
                                     ) {
                                         items(
