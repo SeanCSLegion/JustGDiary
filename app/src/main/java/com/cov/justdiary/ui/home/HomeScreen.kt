@@ -527,6 +527,10 @@ fun HomeScreen(
 
         // 上下滑翻月 / 翻年（规范 §6）：阈值与橡皮筋复用 `DragPagerMath`。
         //
+        // 可拖范围 = 日历带的一半：足够表达"我在翻页"，又不会把整屏推出去。
+        val dragRangeDp = bandH * 0.5f
+
+        //
         // **morph 进行中整条手势撤下**（规范 §1 规则 2）。放在 `then` 里而不是在
         // 回调里 guard：撤下之后系统会把进行中的拖动当作取消，不会留下半截位移。
         // ⚠️ 手势要挂在**日历区的容器**上，不能挂在月层上：年态下月层是不组合的
@@ -591,9 +595,15 @@ fun HomeScreen(
                     onVerticalDrag = { change, delta ->
                         change.consume()
                         tracker.addPosition(change.uptimeMillis, change.position)
+                        // ⚠️ 夹的是**手势的可拖范围**，不是"一格的宽度"。
+                        //
+                        // 原来这里传的是 `cellH`（月格的行高，约 100dp）—— 于是手指滑过
+                        // 100dp 之后内容就**不再跟手**了，而屏幕上还有 700 多 dp 的空间：
+                        // 用户感觉"滑了没反应 / 不跟手"（月态与年态都一样，实测反馈）。
+                        // 现在按日历带高度的一半来夹，`rubberBand` 再接管超出部分。
                         accumulated = CalendarLayout.DragPagerMath.clampOffset(
                             accumulated + delta / densityScale,
-                            cellH,
+                            dragRangeDp,
                         )
                         // **跟手**：位移直接作用到日历层（规范 §6.1）。
                         // 方向：向上拖（`accumulated` 为负）→ 内容上移 → 下一个月从下方进来，
@@ -601,7 +611,7 @@ fun HomeScreen(
                         // 取了负号就变成"手往上、内容往下"，实测就是反的）。
                         // 超过一页的部分加橡皮筋阻尼，松手后回弹（规范 §9）。
                         val raw = accumulated * densityScale
-                        val pagePx = bandH * densityScale
+                        val pagePx = dragRangeDp * densityScale
                         dragOffsetPx = if (kotlin.math.abs(raw) <= pagePx) {
                             raw
                         } else {
@@ -882,7 +892,7 @@ fun HomeScreen(
                                         yearWidth = calendarW,
                                         monthGridH = gridH,
                                         // 当前年跟着 morph；邻年恒为"年态已就位"
-                                        yearProgress = if (neighbor) 1f else yp,
+                                        yearProgress = if (neighbor) ({ 1f }) else ({ yearProgress.value }),
                                         dateFormats = dateFormats,
                                         onMonthClick = { month -> openMonthFromYear(month) },
                                     )
@@ -921,30 +931,43 @@ private fun YearLayer(
     yearWidth: Float,
     /** 月层网格的**实际**高度（行数 × 行高），morph 的月端点。 */
     monthGridH: Float,
-    yearProgress: Float,
+    /**
+     * morph 进度的**读取器**，不是值。
+     *
+     * 传值 = 组合期读 state = 动画每一帧都重组 `YearLayer` 并让这只 Canvas 重画
+     * （12 张迷你月、约 500 次文本测量）。传 lambda 之后，alpha/scale 在
+     * `graphicsLayer { }` 的 deferred lambda 里算 —— 那只让 layer 失效，
+     * **Canvas 不需要重画**（平移/缩放/透明都是 layer 属性）。
+     */
+    yearProgress: () -> Float,
     dateFormats: DateFormats?,
     onMonthClick: (Int) -> Unit,
 
 ) {
     val context = LocalContext.current
-    val morph = remember(yearProgress, yearHeight, monthGridH, yearWidth, args.showLunar, args.selectedWeekIndex, args.cellHeight) {
-        CalendarLayout.yearMonthMorph(
-            progress = yearProgress,
-            // **源卡片 = 当前选中月的那一张**：年↔月 morph 从它自己的迷你网格长出来。
-            // 首轮固定用 1 月那张卡，于是 9 月放大时动画从左上角飞过来（观感"动画不对"）。
-            miniGrid = CalendarLayout.miniGridRect(
-                CalendarLayout.yearCardRect(monthFirst.monthValue, yearWidth, yearHeight),
-            ),
-            // 网格区从「大标题槽 + 星期栏」之下开始，高 = 行数 × 行高。
-            // 这里必须用**封顶/派生之后**的真实网格高，否则收尾时格子尺寸对不上（会跳）。
-            fullGrid = CalendarLayout.fullMonthGridRect(
-                yearWidth,
-                CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H + monthGridH,
-                CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H,
-            ),
-            showLunar = args.showLunar,
+    // 与进度无关的那部分几何：算一次就够（它只跟尺寸和选中月有关）
+    val miniGrid = remember(yearHeight, monthGridH, yearWidth, monthFirst) {
+        CalendarLayout.miniGridRect(
+            CalendarLayout.yearCardRect(monthFirst.monthValue, yearWidth, yearHeight),
         )
     }
+    val fullGrid = remember(yearHeight, monthGridH, yearWidth) {
+        CalendarLayout.fullMonthGridRect(
+            yearWidth,
+            CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H + monthGridH,
+            CalendarLayout.BIG_TITLE_H + CalendarLayout.WEEKDAY_HEADER_H,
+        )
+    }
+    fun morphAt(progress: Float) = CalendarLayout.yearMonthMorph(
+            progress = progress,
+            // **源卡片 = 当前选中月的那一张**：年↔月 morph 从它自己的迷你网格长出来。
+            // 首轮固定用 1 月那张卡，于是 9 月放大时动画从左上角飞过来（观感"动画不对"）。
+            miniGrid = miniGrid,
+            // 网格区从「大标题槽 + 星期栏」之下开始，高 = 行数 × 行高。
+            // 这里必须用**封顶/派生之后**的真实网格高，否则收尾时格子尺寸对不上（会跳）。
+            fullGrid = fullGrid,
+            showLunar = args.showLunar,
+        )
     YearCanvas(
         year = year,
         selectedMonth = monthFirst.monthValue,
@@ -960,6 +983,8 @@ private fun YearLayer(
             .width(yearWidth.dp)
             .height(yearHeight.dp)
             .graphicsLayer {
+                // 进度在 layer 里读（延迟）：动画每一帧只让 layer 失效，Canvas 不重画
+                val morph = morphAt(yearProgress())
                 alpha = morph.yearOpacity
                 scaleX = morph.yearScale
                 scaleY = morph.yearScale
