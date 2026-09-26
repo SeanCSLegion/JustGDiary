@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -21,8 +22,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,11 +61,14 @@ import androidx.compose.ui.unit.dp
 import com.cov.justdiary.data.FootprintNode
 import com.cov.justdiary.data.FootprintViewState
 import com.cov.justdiary.data.FootprintYearStat
+import com.cov.justdiary.data.TimeRangeKind
 import com.cov.justdiary.data.YEAR_FILTER_ALL
+import com.cov.justdiary.service.DateFormats
+import java.time.LocalDate
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.EmptyState
-import com.cov.justdiary.ui.components.IconBadge
 import com.cov.justdiary.ui.components.PageHeader
 import com.cov.justdiary.ui.components.SectionTitle
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
@@ -84,16 +95,42 @@ fun FootprintScreen(
     modifier: Modifier = Modifier,
     landscape: Boolean = false,
     onYearFilterChange: (String) -> Unit = {},
+    /** 时间范围四档（`TimeRangeKind`）；与年份是**交集**（规范 §2.2）。 */
+    timeKind: TimeRangeKind = TimeRangeKind.All,
+    customFrom: String? = null,
+    customTo: String? = null,
+    onTimeKindChange: (TimeRangeKind) -> Unit = {},
+    onApplyCustomRange: (from: String, to: String) -> Unit = { _, _ -> },
+    onClearTimeFilter: () -> Unit = {},
     onDayClick: (String) -> Unit = {},
     /** 展开的树节点（由 `FootprintViewModel` 持有：筛选变化时要剪掉已消失的节点）。 */
     expanded: Set<String> = emptySet(),
     onToggleExpand: (String) -> Unit = {},
 ) {
+    var showTimeSheet by remember { mutableStateOf(false) }
+    if (showTimeSheet) {
+        FootprintTimeSheet(
+            initialFrom = customFrom,
+            initialTo = customTo,
+            onQuickPick = { kind -> onTimeKindChange(kind); showTimeSheet = false },
+            onApply = { from, to -> onApplyCustomRange(from, to); showTimeSheet = false },
+            onClear = { onClearTimeFilter(); showTimeSheet = false },
+            onDismiss = { showTimeSheet = false },
+        )
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         PageHeader(
             title = TITLE,
-            subtitle = summaryLabel(state.locatedCount, state.unlocatedCount),
+            // 摘要放页头右侧一行（规范 §2.1）：`locatedCount` 随筛选变、`unlocated` 是全量
+            trailing = {
+                Text(
+                    text = summaryLabel(state.locatedCount, state.unlocatedCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            },
         )
 
         // 年份胶囊
@@ -104,26 +141,48 @@ fun FootprintScreen(
                 .padding(horizontal = Spacing.page),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // 年份芯片的选中态只看 yearFilter（规范 §2.2 的修正）：
+            // iOS 那边还额外要求 timeKind == .all，于是"先选年份、再选自定义区间"之后
+            // 年份芯片看起来没选中，但两层过滤其实都在生效。
             FilterChip(
                 selected = yearFilter == YEAR_FILTER_ALL,
                 onClick = { onYearFilterChange(YEAR_FILTER_ALL) },
                 label = { Text(ALL_LABEL) },
+                leadingIcon = yearChipIcon(yearFilter == YEAR_FILTER_ALL),
             )
             state.yearOptions.forEach { year ->
                 FilterChip(
                     selected = yearFilter == year,
                     onClick = { onYearFilterChange(year) },
                     label = { Text(year) },
+                    leadingIcon = yearChipIcon(yearFilter == year),
                 )
             }
+            FilterChip(
+                selected = timeKind == TimeRangeKind.Custom,
+                onClick = { showTimeSheet = true },
+                label = {
+                    Text(
+                        if (timeKind == TimeRangeKind.Custom && customFrom != null && customTo != null) {
+                            rangeLabel(customFrom, customTo)
+                        } else {
+                            CUSTOM_LABEL
+                        },
+                    )
+                },
+                leadingIcon = yearChipIcon(timeKind == TimeRangeKind.Custom),
+            )
         }
 
         if (state.locatedCount == 0) {
-            EmptyState(
-                icon = Icons.Filled.Place,
-                text = EMPTY_LABEL,
-                modifier = Modifier.weight(1f, fill = false),
-            )
+            // 空态要真居中（原来 weight(fill = false) 只是"不占满"，内容仍贴顶）
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                EmptyState(
+                    icon = Icons.Filled.Place,
+                    text = EMPTY_LABEL,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
             return@Column
         }
 
@@ -136,19 +195,21 @@ fun FootprintScreen(
                     .padding(horizontal = Spacing.page, vertical = Spacing.card),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.card),
             ) {
-                TrendCard(
-                    yearly = state.yearly,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(LocalAdaptiveLayout.current.footprintBlockHeight.dp),
-                )
+                if (state.yearly.size >= 2) {
+                    TrendCard(
+                        yearly = state.yearly,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(LocalAdaptiveLayout.current.footprintBlockHeight.dp),
+                    )
+                }
                 PlaceTreeCard(
                     nodes = state.nodes,
                     expanded = expanded,
                     onToggle = onToggleExpand,
                     onDayClick = onDayClick,
-                    // 清单宽：iOS `min(320, max(240, contentWidth × 0.4))`
-                    modifier = Modifier.width(LocalAdaptiveLayout.current.footprintListWidth.dp),
+                    // 清单栏固定 300dp（规范 §2.7）
+                    modifier = Modifier.width(300.dp),
                 )
             }
         } else {
@@ -157,16 +218,20 @@ fun FootprintScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = Spacing.page,
                     end = Spacing.page,
-                    bottom = 96.dp,
+                    bottom = 24.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(Spacing.card),
             ) {
                 item { StatsCard(state) }
-                item {
-                    TrendCard(
-                        yearly = state.yearly,
-                        height = LocalAdaptiveLayout.current.trendHeight.dp,
-                    )
+                // 只有 ≥ 2 个年份时才画趋势（规范 §2.4，与 iOS 一致）：
+                // 一根柱子说明不了"趋势"，而且它没有自己的空态，所以是"整张卡不出现"
+                if (state.yearly.size >= 2) {
+                    item {
+                        TrendCard(
+                            yearly = state.yearly,
+                            height = LocalAdaptiveLayout.current.trendHeight.dp,
+                        )
+                    }
                 }
                 item {
                     PlaceTreeCard(
@@ -178,6 +243,137 @@ fun FootprintScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * 年份芯片的前导勾选图标（选中才出现）。
+ *
+ * `FilterChip` 的 `leadingIcon` 是个可空 lambda，写成函数是为了在四处调用点保持一致。
+ */
+@Composable
+private fun yearChipIcon(selected: Boolean): (@Composable () -> Unit)? = if (selected) {
+    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+} else {
+    null
+}
+
+/** 自定义区间的胶囊文案：`9月1日 – 9月26日`。 */
+@Composable
+private fun rangeLabel(from: String, to: String): String {
+    val a = runCatching { LocalDate.parse(from) }.getOrNull()
+    val b = runCatching { LocalDate.parse(to) }.getOrNull()
+    return if (a != null && b != null) {
+        stringResource(R.string.date_range, DateFormats.dateOnlyFor(a), DateFormats.dateOnlyFor(b))
+    } else {
+        "$from – $to"
+    }
+}
+
+/**
+ * 自定义时间范围面板：与搜索页的 `CustomRangeSheet` **同构**（规范 §2.2）。
+ *
+ * 两处必须是同一个交互：用户在搜索页学会的"三个快捷档 + 起止日期 + 清除/确定"
+ * 在足迹页要能直接用。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FootprintTimeSheet(
+    initialFrom: String?,
+    initialTo: String?,
+    onQuickPick: (TimeRangeKind) -> Unit,
+    onApply: (from: String, to: String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val today = remember { LocalDate.now() }
+    val defaultFrom = remember(today) { today.withDayOfMonth(1) }
+    var from by remember { mutableStateOf(initialFrom ?: defaultFrom.toString()) }
+    var to by remember { mutableStateOf(initialTo ?: today.toString()) }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+            Text(
+                text = stringResource(R.string.search_time_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row(
+                modifier = Modifier.padding(top = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = false,
+                    onClick = { onQuickPick(TimeRangeKind.ThisWeek) },
+                    label = { Text(stringResource(R.string.search_time_week)) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { onQuickPick(TimeRangeKind.ThisMonth) },
+                    label = { Text(stringResource(R.string.search_time_month)) },
+                )
+                FilterChip(
+                    selected = false,
+                    onClick = { onQuickPick(TimeRangeKind.ThisYear) },
+                    label = { Text(stringResource(R.string.search_time_year)) },
+                )
+            }
+            Row(
+                modifier = Modifier.padding(top = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                RangeDayField(
+                    label = stringResource(R.string.search_time_from),
+                    value = from,
+                    onValueChange = { from = it },
+                    modifier = Modifier.weight(1f),
+                )
+                RangeDayField(
+                    label = stringResource(R.string.search_time_to),
+                    value = to,
+                    onValueChange = { to = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 20.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onClear) { Text(stringResource(R.string.search_time_clear)) }
+                Button(
+                    onClick = { onApply(from, to) },
+                    modifier = Modifier.padding(start = 8.dp),
+                ) { Text(stringResource(R.string.search_time_apply)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RangeDayField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(Radius.field),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            placeholder = { Text("2026-09-01") },
+        )
     }
 }
 
@@ -400,10 +596,14 @@ private fun PlaceRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.card),
         ) {
-            IconBadge(
-                icon = Icons.Filled.Place,
+            // 树节点用 18dp 的裸图标，不用 40dp 徽标：三级树里每级都挂一个圆形徽标
+            // 会让清单看起来像"一堆设置行"，也把每行的视觉重量拉高了一倍（规范 §2.5）。
+            Icon(
+                // 一级是国家（globe），下面两级是具体地点（place）
+                imageVector = if (depth == 0) AppIcons.Globe else Icons.Filled.Place,
                 contentDescription = null,
-                size = BADGE_SIZE,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 text = node.name,
@@ -413,8 +613,11 @@ private fun PlaceRow(
             )
             Text(
                 text = node.count.toString(),
-                style = MaterialTheme.typography.labelLarge,
+                // 规范 §2.5：计数 12sp + 等宽数字（tabular），否则逐行数字对不齐
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.widthIn(min = 24.dp),
+                textAlign = TextAlign.End,
             )
             if (!node.isLeaf) {
                 Icon(
@@ -449,6 +652,8 @@ private val TITLE: String
     @Composable get() = stringResource(R.string.footprint_title)
 private val ALL_LABEL: String
     @Composable get() = stringResource(R.string.footprint_time_all)
+private val CUSTOM_LABEL: String
+    @Composable get() = stringResource(R.string.search_time_custom)
 private val EMPTY_LABEL: String
     @Composable get() = stringResource(R.string.footprint_empty)
 private val TREND_TITLE: String
@@ -479,6 +684,5 @@ private val AXIS_LABEL_HEIGHT = 18.dp
 private const val BAR_WIDTH_RATIO = 0.55f
 private val BAR_MAX_WIDTH = 48.dp
 
-/** 横屏并排版式的度量（方案 §9.2）。 */
+/** 横屏并排版式的度量（规范 §2.7）。 */
 private val INDENT_STEP = 16
-private val BADGE_SIZE = 32.dp

@@ -293,6 +293,16 @@ class DateFormats(
          * 语言取 `Locale.getDefault()`：应用内语言通过
          * `AppCompatDelegate.setApplicationLocales` 生效后，它就是应用语言。
          */
+        /** 非 Composable 场景下的"月 + 日"（与 `DateFormats.dateOnly` 同模板）。 */
+        fun dateOnlyFor(date: LocalDate, locale: Locale = Locale.getDefault()): String {
+            val month = date.month.getDisplayName(TextStyle.SHORT, locale)
+            return if (locale.language == Locale.CHINESE.language) {
+                "${month}${date.dayOfMonth}日"
+            } else {
+                "$month ${date.dayOfMonth}"
+            }
+        }
+
         fun dayTitleFor(date: LocalDate, locale: Locale = Locale.getDefault()): String {
             val month = date.month.getDisplayName(TextStyle.SHORT, locale)
             val weekday = date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
