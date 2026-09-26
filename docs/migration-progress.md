@@ -1055,3 +1055,64 @@ Material 的。现在直接用 M3 角色的官方行高（36 / 28 / 24 / 20）�
 - `tools/verify_sqlite_schema.py`、`tools/verify_backup_interop.sh` 均通过；
 - 上机复测：月 / 周 / 年三态、点日期 morph、`‹ 九月` 回月态、年历 12 张卡可点、
   深色、设置页与其余三屏无溢出。
+
+---
+
+## R4 —— 按设计规范 v3 改造前四屏 ✅ 已完成（2026-09-26）
+
+依据：[`docs/android-design/`](android-design/README.md)（界面设计规范 v3，取代 v2）。
+**日记页尚未开工**（按计划等前四屏测试通过后再做）。
+
+### 交付（5 个提交，每屏一个）
+
+| # | 提交 | 范围 |
+| --- | --- | --- |
+| 1 | `3ed9d72` | **地基**：手机锁竖屏 / 平板自由旋转；分栏阈值 700 → **548.5**（iOS 当前值）、主栏下沿 280 → 260；补 `AssistPill` / `InputPill` / `CountBadge` / `SkeletonRows` / `BusyOverlay`；`DiaryCard` 去阴影改 tonal elevation；新增 `LocalReduceMotion` |
+| 2 | `d4dbc27` | **首页**：morph 中撤下手势；分栏左栏接上下滑翻月（并带走选中日）；竖屏翻月不动选中日；顶栏两枚胶囊改 assist chip + 右胶囊文案规则；年态返回键；未来日 Snackbar；周态两条分隔线；宽窗口日历限宽 640dp；年历「今天 × 有日记」不再互斥 + 卡片底色；星期栏极短文案；导航图标换 Material Symbols |
+| 3 | `9660595` | **设置页**：行高 64/56、标题 `bodyLarge`、副标题 `bodyMedium`、分隔线缩进 72dp、徽标 40dp 圆；开关行整行可点；版本行去箭头；覆盖按钮改 error 色；忙碌遮罩带 scrim；15 个图标全部换成 Material Symbols；**归属日重算改为先算再问再改，并修掉两端共有的数据损坏缺陷**（见下） |
+| 4 | `ba41cdf` | **搜索页**：筛选收进卡片（两组 + 组标题）；条件摘要用 `InputPill` 逐条可撤销 + 清除全部；新增「自定义时间范围」ModalBottomSheet；地点选择器 `AlertDialog` → `ModalBottomSheet`；结果行本地化日期 + 独立时刻；加载态进度条 + 骨架行；平板横屏「左筛选 + 右结果」 |
+| 5 | `6b2e1b0` | **足迹页**：年份芯片补「自定义」（与搜索页同构的 sheet）；年份选中态不再被 `timeKind` 绑架；趋势卡只在 ≥2 年份时渲染；树节点 40dp 徽标 → 18dp 裸图标（一级 globe / 下面 place）；计数 12sp 右对齐；空态真居中；横屏清单栏固定 300dp |
+
+### 顺带修掉的数据损坏缺陷（两端共有）
+
+`recomputeDayKeys` 的冲突判定写的是 `holderOf[row.oldKey]` + `newKeys[ch] != oldKey`，
+而 `holderOf[k]` 按定义就是"新键 == k 的那一行"，内层条件**恒为假** —— 冲突分支从未进入、
+`conflicts` 永远是 0。真撞车时（目标键被一个**不移动**的记录占着）第二阶段 `UPDATE` 会违反
+`day_key UNIQUE`，iOS 侧被外层 `try?` 吞掉并当作"0 冲突"，但**临时键已经写进去了** ——
+归属日残留成 `tmp#N`。
+
+Android 现在按真实唯一约束判断（目标键被不移动的记录占着 → 记一次冲突并跳过），
+并把纯逻辑抽到 `data/DayKeyPlan.kt`，**预览与执行共用同一个函数**；
+`DayKeyPlanTest` 6 条断言（不移动 / 移动 / 键不变 / 无开始时间 / 撞车记冲突 / 相邻互换）。
+`day_key` 在"不撞车"的所有情形下与 iOS 逐字一致，跨端契约不受影响。
+
+### 验证
+
+```
+./gradlew clean assembleDebug            # 通过
+./gradlew testDebugUnitTest --rerun-tasks # 365 条，0 失败
+python3 tools/verify_sqlite_schema.py     # 通过
+bash    tools/verify_backup_interop.sh    # 通过
+```
+
+上机（Pixel 10 Pro AVD，`docs/ui-audit/r4/`，18 张）：
+
+| 场景 | 截图 |
+| --- | --- |
+| 月态 / 周态（`16天前`）/ 年态（今天圆 + 20 号日记标记 + 9 月卡片高亮） | `01`–`03` |
+| 未来日期 Snackbar | `04` |
+| 平板横屏分栏（左栏滑月 → 右栏跟着走到 10 月 26 日） | `05` |
+| 平板竖屏（侧栏 + 日历限宽居中）/ 平板年历 | `06`、`07` |
+| 手机翻月后右胶囊改显具体日期（`9月26日`） | `08` |
+| 设置页（上 / 下）/ 平板两列 | `09`–`11`、`20` |
+| 搜索：空态 / 结果（计数徽标 + 可撤销胶囊）/ 自定义时间 sheet / 地点 sheet / 平板横屏 | `12`–`15`、`19` |
+| 足迹：空态 / 有数据（统计 + 三根柱 + 三级树）/ 展开 / 深色 | `16`、`17`、`22` |
+| 深色首页 | `21` |
+| 手机锁竖屏（强制 `user_rotation=1` 后截图仍是 1280 × 2856） | — |
+
+### 已知遗留
+
+- 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见
+  [`docs/android-design/07-ios-map-and-plan.md`](android-design/07-ios-map-and-plan.md) §3.1 的 P0-1…P0-3；
+- 设计稿里日记编辑态的格式栏样式待定稿（用户 2026-09-26 反馈"还有点问题"）；
+- 无障碍自定义动作（日格的"上一天 / 下一天"）仍挂在容器上，属 P2。
