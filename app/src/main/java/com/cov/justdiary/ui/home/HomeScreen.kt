@@ -803,15 +803,17 @@ fun HomeScreen(
         fun monthArgsAt(key: Int, withMorph: Boolean): CalendarSectionArgs {
             val first = CalendarGrid.monthFirstOfMonthKey(key)
             val weeks = CalendarGrid.displayedWeeks(first, weekStart)
-            // **一个判据，四处共用**：紧凑形态、标签简写、标签缩进、大标题。
-            // 原来"是否紧凑"看 `p > 0.01`、而"标签用简写还是全写"看 `withMorph` ——
-            // 两者不一致时，当前月会以**紧凑行高**显示**全写**的「九月」（实测 dump 到
-            // 「九月」出现两次）。这类"同一件事两处判断"正是前面踩过的坑。
-            // ⚠️ **两个 morph 都要看**：只判 `weekProgress` 时，年 morph 期间它恒为 0，
-            // 于是当前块保持紧凑形态 —— 而年 morph 的源几何是按"大标题 72 + 星期栏 30"
-            // 算的，两者不符，表现为"月→年切换跳变、月视图在错误的位置消失"
-            // （用户实测反馈："月视图到年视图的切换也存在跳变，是月视图消失的问题"）。
-            val compact = !(withMorph && (p > 0.01f || yearProgress.value > 0.01f))
+            // ⚠️ **恒定紧凑**：不再随 morph 进度切换形态。
+            //
+            // 原来紧凑块 34dp、完整块 102dp，判据又是连续量 `p` 的函数 ——
+            // 于是 p 每跨过一次判据，那一块的高度就突跳 68dp。
+            // 30fps 抽帧拍到的正是那一帧（月→周第 66 帧：大标题消失、网格上跳）。
+            //
+            // 现在**所有月份块一律紧凑**，高度永远一致：
+            //   · 既没有"停稳后闪一下"（块高不随 monthKey 变），
+            //   · 也没有 morph 中的瞬切（块高不随 p 变）。
+            // 大标题与星期栏**只由顶部钉住层提供一份**，并连续跟随 p 折叠/淡出。
+            val compact = true
             return calendarArgs.copy(
                 displayed = weeks,
                 monthFirst = first,
@@ -820,38 +822,9 @@ fun HomeScreen(
                 rowAlphas = if (withMorph) calendarArgs.rowAlphas else FloatArray(weeks.size) { 1f },
                 rowMetrics = if (withMorph) calendarArgs.rowMetrics else null,
                 selectedWeekIndex = if (withMorph) calendarArgs.selectedWeekIndex else -1,
-                // ⚠️ **标题必须一起换**。
-                //
-                // `calendarArgs.copy(...)` 会把当前月的 `monthTitleLabel`（那颗 32sp 的
-                // 「九月」大标题）原样带过来 —— 于是翻页时滑进来的那一页**顶着当前月的标题**，
-                // 看起来"下一个月其实是当前月的内容"（用户实测反馈）。
-                // 其它字段（metrics / cellHeight / selectedKey / todayKey / flags）与月份无关，
-                // 沿用是对的；只有标题是**跟着月份走**的。
-                // 紧凑月用**简写**标签（中文 `11月`、英文 `Nov`）；固定区与当前月仍用全写。
-                monthTitleLabel = if (compact) {
-                    monthCompactTitleText(first, dateFormats, context)
-                } else {
-                    monthTitleText(first, dateFormats, context)
-                },
-                // 紧凑形态的判据**不是"是不是当前月"，而是"morph 是否真的在进行"**。
-                //
-                // ⚠️ 原来是 `!withMorph`（当前月不紧凑）—— 于是当前月那一块比别人
-                // **高 72 + 30 − 34 = 68dp**。滚动停稳、`monthKey` 一更新，这一块的高度就变，
-                // 整列内容跟着跳一下，看起来就是"滚动结束后才刷新真实日期、界面闪一下"
-                // （用户实测反馈）。
-                //
-                // 现在：**空闲时所有月份块几何完全一致**（都是紧凑形态，大标题与星期栏
-                // 只由顶部钉住层提供一份）；只有 morph 真正开始（p > 0.01）时，
-                // 当前块才换成带大标题 + 星期栏的形态 —— morph 的行位移几何需要它。
+                monthTitleLabel = monthCompactTitleText(first, dateFormats, context),
                 compactMonth = compact,
-                // 非当前月：把标签怼到"1 号那一列"上（`displayed` 的首行里 1 号的下标）
-                titleIndentDp = if (!compact) {
-                    0f
-                } else {
-                    val col = weeks.first().indexOfFirst { it.dayOfMonth == 1 }
-                        .coerceAtLeast(0)
-                    col * CalendarLayout.monthCellW(calendarArgs.calendarW)
-                },
+                titleIndentDp = monthsTitleIndent(weeks, calendarArgs.calendarW),
                 showBigTitle = !compact && calendarArgs.showBigTitle,
                 fadeForYear = if (withMorph) calendarArgs.fadeForYear else 0f,
             )
@@ -1021,7 +994,12 @@ fun HomeScreen(
                                     //
                                     // morph 期间隐藏（`p < 0.01f`）：那时大标题要淡出、
                                     // 星期栏要跟着周条落位，由块内那一份接管（几何与原来完全一致）。
-                                    if (p < 0.01f) {
+                                    // ⚠️ **不再用 `if (p < 0.01f)` 开关** —— 那是阶跃：
+                                    // p 一跨过 0.01，整层突然出现/消失。现在它**始终在场**，
+                                    // 只在内部连续跟随 p：大标题高度 72 -> 0、透明度 1 -> 0；
+                                    // 星期栏始终可见（它就是 morph 的终点位置）。
+                                    // 这样 p 从 0 到 1 的每一帧都只有连续变化。
+                                    run {
                                         // 标题跟着滚动**连续换字**：取"刚露出钉住层下沿的那一项"。
                                         //
                                         // 用 `firstVisibleItemIndex` 不行 —— 上一月还露着一条边时它仍是上一月，
@@ -1047,7 +1025,14 @@ fun HomeScreen(
                                             Box(
                                                 modifier = Modifier
                                                     .width(calendarW.dp)
-                                                    .height(CalendarLayout.BIG_TITLE_H.dp),
+                                                    // 高度随 p **折叠**到 0（连续），不是开关
+                                                    .height(
+                                                        CalendarLayout.lerp(
+                                                            CalendarLayout.BIG_TITLE_H,
+                                                            0f,
+                                                            p,
+                                                        ).dp,
+                                                    ),
                                                 contentAlignment = Alignment.CenterStart,
                                             ) {
                                                 Text(
@@ -1066,7 +1051,10 @@ fun HomeScreen(
                                                     color = MaterialTheme.colorScheme.onSurface,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.padding(horizontal = 20.dp),
+                                                    modifier = Modifier
+                                                        .padding(horizontal = 20.dp)
+                                                        // 与高度折叠同步淡出（连续）
+                                                        .graphicsLayer { alpha = 1f - 2f * p },
                                                 )
                                             }
                                             Box(modifier = Modifier.width(calendarW.dp)) {
@@ -1380,7 +1368,14 @@ private fun CalendarSection(args: CalendarSectionArgs) {
         args.showBigTitle -> CalendarLayout.BIG_TITLE_H
         else -> CalendarLayout.COMPACT_MONTH_TITLE_H
     }
-    val shiftY = bigTitleH * p
+    // 行位移量 = **完整标题高（BIG_TITLE_H）× p**，不是 `bigTitleH`（紧凑时 34）× p。
+    //
+    // 因为块虽然恒为紧凑形态（标签 34dp），**它上方还有钉住层的大标题（72dp）**，
+    // 而那个标题会随 p 折叠到 0。校验两端：
+    //   p=0：网格容器绝对 y = 内边距 68 + 标签 34 − 0 = **102** = 钉住栏高（72+30）✓ 正是静置位置；
+    //   p=1：容器绝对 y = 68 + 34 − 72 = **30** = 折叠后钉住栏的高度 ✓ 周条正好落在星期栏之下 ✓
+    // 两端都对，且随 p **线性**变化 ⇒ 中间没有任何一帧跳变。
+    val shiftY = CalendarLayout.BIG_TITLE_H * p
     val titleOpacity = 1f - CalendarLayout.clamp01(p * 2f)
 
     Column(
@@ -1628,6 +1623,15 @@ private fun WeekStrip(
 /** 周条窗口的周数（奇数，当前周居中）：左右各留 3 周，足够跟手且不会一次组合太多。 */
 private const val WEEK_WINDOW = 7
 private const val WEEK_WINDOW_CENTER = WEEK_WINDOW / 2
+
+/**
+ * 紧凑月标签的横向缩进：对齐到"1 号所在的那一列"。
+ * 用户："你现在还是在左上角，而不是对应月 1 月的上方。"
+ */
+private fun monthsTitleIndent(weeks: List<List<LocalDate>>, calendarW: Float): Float {
+    val col = weeks.firstOrNull()?.indexOfFirst { it.dayOfMonth == 1 }?.coerceAtLeast(0) ?: 0
+    return col * CalendarLayout.monthCellW(calendarW)
+}
 
 /** 顶栏的高度（与 [HomeTopBar] 的 `heightIn(min = 52.dp)` 对应）。 */
 private val CALENDAR_BAND_TOP = 52f
