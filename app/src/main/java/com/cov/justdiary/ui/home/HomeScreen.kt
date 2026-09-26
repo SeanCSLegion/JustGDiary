@@ -1326,10 +1326,11 @@ private fun CalendarSection(args: CalendarSectionArgs) {
         // 紧凑月（非当前月）的标签**占一整行的高度**（= 行高）：
         // 用户要求"月份与日期之间的间隔要和日期间的间隔一样"，而月份之间的那条线
         // 也要和行分隔线一样 —— 于是标签行就当成"一行"来排。
-        // 用户："两个月之间的间隔还是太大了，月份的字号似乎太大了"
-        // —— 标签行原来占**一整行**（≈87dp），文字 24sp；改成 0.5 行 + 18sp，
-        // 标签仍**底对齐**（所以"标签 → 下方首行"的间距保持不变，只是上方空档收掉）。
-        args.compactMonth -> args.cellHeight * 0.5f
+        // 用户更正："我之前说月份是不占高度的，实际上参考图里面的月份显示是占高度的。"
+        // 所以标签行**占一整行**（= 行高），文字**在行内居中** ——
+        // 与日期行同一套节拍：行、行、线、标签行、行……
+        // （字号仍按用户反馈用 18sp，不是 24sp。）
+        args.compactMonth -> args.cellHeight
         args.showBigTitle -> CalendarLayout.BIG_TITLE_H
         else -> CalendarLayout.COMPACT_MONTH_TITLE_H
     }
@@ -1363,12 +1364,18 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     translationY = -bigTitleH * p * density
                     alpha = titleOpacity
                 },
-                contentAlignment = if (args.compactMonth) {
-                    Alignment.BottomStart
-                } else {
-                    Alignment.CenterStart
-                },
+                contentAlignment = Alignment.CenterStart,
             ) {
+                // 分割线按**日期**走：一个月的**开始之前**有一条
+                // （用户："一个月的开始前和结束后都是有分割线的"）。
+                // 相邻两月共用这一条 —— 它既是上一月的"结束后"，也是下一月的"开始前"。
+                if (args.compactMonth) {
+                    HorizontalDivider(
+                        modifier = Modifier.align(Alignment.TopStart),
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    )
+                }
                 // 32sp 大标题（规范 §5.2）：iOS 的视觉重心就在这一行，
                 // 首轮把它并进顶栏，于是整块版面又扁又空（实测缺陷 D5）。
                 Text(
@@ -1397,14 +1404,6 @@ private fun CalendarSection(args: CalendarSectionArgs) {
             // 紧凑月**完全不占**星期栏的高度：那 30dp 正是"月份与日期之间间隔太大"的来源。
             if (!args.compactMonth) {
                 CalendarWeekdayHeader(weekStart = args.weekStart, compact = !args.showBigTitle)
-            } else {
-                // 月与月之间补一条**和行分隔线一样**的线（用户："每个月之间的分割线其实和
-                // 日期之间的间隔线要一样"）。`CalendarDayGrid` 只在 `row > 0` 时画线，
-                // 所以每个月首行上方那条得在这里补。
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                )
             }
         }
         // 高度在「月态网格」与「周条」之间插值：用 `if` 二选一会让容器瞬间跳掉一整块。
