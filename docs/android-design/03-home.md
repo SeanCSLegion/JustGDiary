@@ -438,6 +438,71 @@ morph 的每一个端点**必须取自真实排版用的同一个矩形、同一
 是不是真的相邻月/相邻年，标题与日期都要对**。只看"offset 有没有生效"是不够的 ——
 这个 bug 就是 offset 正常、内容也对、只有标题没换。
 
+## 8.7 月态翻页：改用**连续无限滚动**（2026-09-26 用户提议，待实施）
+
+### 为什么改
+
+现在的月态是一个**手写的分页器**：`PagerViewport` 同时组合"上一页 / 当前页 / 下一页"，
+用 `graphicsLayer { translationY }` 整体位移，自己算页高、自己算可拖范围、
+自己做橡皮筋与收尾动画。这条路已经连续踩了七个坑，且每次修一处就冒一处：
+
+- 邻页顶着当前月的标题（`copy()` 漏换字段）
+- 两页之间的空洞（页高跟内容变）
+- 邻页只露出一部分（盒子与内容错位 —— 至今没查清）
+- 拖动顿挫（UI 线程 27% 卡顿，`graphicsLayer` 的 block 属**布局阶段**读取）
+
+**根因是"我在用手写代码复刻框架已经做好的事"。**
+
+### 改法（用户提议）
+
+把月视图做成**一张连续的、可无限上下滚动的列表**：
+一个月一项，项与项之间留一行空白；滚动是**无级**的（像滚一张长纸），
+松手时由框架吸附到最近的一个月。
+
+```kotlin
+val listState = rememberLazyListState(initialFirstVisibleItemIndex = monthIndex)
+LazyColumn(
+    state = listState,
+    // 官方吸附：惯性 + 吸附到 item 边界，不需要自己写收尾动画
+    flingBehavior = rememberSnapFlingBehavior(listState),
+    // morph 期间禁用滚动（规范 §1 规则 2）
+    userScrollEnabled = !morphing,
+) {
+    items(CalendarGrid.MONTH_KEYS.size) { index -> MonthBlock(index) }
+}
+
+// 停稳后同步 monthKey（带动画结束与 fling 结束）
+LaunchedEffect(listState) {
+    snapshotFlow { listState.firstVisibleItemIndex }
+        .collect { monthKey = CalendarGrid.MONTH_KEYS[it] }
+}
+```
+
+### 这一改**删掉**的东西（全部是手写的）
+
+| 删除 | 原因 |
+| --- | --- |
+| `PagerViewport`（裁切 + 位移 + 邻页三件套） | `LazyColumn` 自己渲染相邻项 |
+| `pageOffset()` / `dragOffsetPx` / `settleAnim` | 滚动位置由 `LazyListState` 持有 |
+| `neighborMonthArgs()` | 不存在"邻页参数"这回事了 |
+| `monthPageH` / `dragRangeDp` / `clampOffset` / `rubberBand` 的翻页用途 | 框架的 fling 物理 |
+| 分页收尾动画（`PAGE_SETTLE_MS` / `PAGE_CANCEL_MS`） | `rememberSnapFlingBehavior` |
+
+### 顺带修好的
+
+- **跟手与卡顿**：滚动走框架的优化路径，1:1 跟手 + 惯性；不再有"邻页在拖动中途才被组合"的长帧
+- **邻页空白 / 错位**：不存在"我自己摆两页"这回事
+- **首尾边界**：列表两端自然到头，不需要 `hasNext/hasPrev`
+
+### 要保持不变的
+
+- **月↔周 morph**：仍然发生在**当月那一项内部**（选中行上移到周条位置），
+  morph 期间 `userScrollEnabled = false`
+- **月↔年 morph**：月层整体缩放/淡出到年历；源矩形改用"当月项的当前矩形"
+- **周态 / 年态**：不受影响
+- **分栏**：左栏同样用这个列表（`userScrollEnabled` 保持可滚）
+- **吸附后 `monthKey` 才变**（与现在的"松手后提交"语义一致）
+
 ## 9. 数值速查表
 
 | 常量 | 值 | 出处 |

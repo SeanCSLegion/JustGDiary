@@ -1665,6 +1665,35 @@ bandH=673.45         monthPageH=578.21   cellH=95.24
 
 （调试边框已回退，工作区干净。）
 
+### R5 · 第十二轮：接受用户的架构提议 —— 月态改连续无限滚动
+
+用户："现在是一页只显示一个月的内容，其他月的内容都不显示。其实，可以将整个月视图
+做成一个类似无限上下滑动的界面，每个月之间间隔一行。滑动变成类似无级的效果，
+这样就会好做很多吧？"
+
+**这个判断是对的。** 我做的是一个**手写的分页器**（同时组合上/中/下三页、
+自己算页高与可拖范围、自己做橡皮筋与收尾动画），
+根因就是"在用手写代码复刻框架已经做好的事"—— 于是每修一处就冒一处，
+七轮里踩了：标题不换、两页空洞、邻页只露一部分（至今没查清）、拖动 27% 卡顿。
+
+**已确认框架支持**：项目用的 Compose Foundation 1.12.1 里
+`rememberSnapFlingBehavior` 存在（`androidx/compose/foundation/gestures/snapping/`），
+即"惯性 + 吸附到 item 边界"是官方现成的。
+
+**方案已写进 `03-home.md` §8.7**（含要删掉的 6 处手写件、要保持不变的 4 条语义）。
+核心：
+
+```kotlin
+LazyColumn(
+    state = listState,
+    flingBehavior = rememberSnapFlingBehavior(listState),
+    userScrollEnabled = !morphing,
+) { items(MONTH_KEYS.size) { MonthBlock(it) } }
+```
+
+下一轮实施。**这是本轮的真实产出：确认了可行性 + 定下了删除清单与不变量**，
+不再在旧结构上继续打补丁。
+
 ### 已知遗留
 
 - 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见
