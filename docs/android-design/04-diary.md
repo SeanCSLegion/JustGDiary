@@ -218,7 +218,27 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
 
 - 尺寸：按钮 40 × 40dp（**触控目标 48dp**）；图标 20dp；active = `secondaryContainer` 胶囊底 + `onSecondaryContainer` 前景；disabled = `alpha 0.38` + 不响应点击。
 - **引用有自己的按钮，不在段落样式菜单里**（菜单只有三项）。
-- **放不下时横向滚动**（`Row` 外包 `horizontalScroll`），不换行、不省略。
+- **第 1 个按钮是「菜单」而不是「开关」，必须带下拉指示**：宽 **46dp**，图标 18dp + `expand_more` 14dp。
+  只放一个 `format_size` 图标时用户看不出它会展开展开菜单（iOS 用的也是
+  `textformat.size` + `chevron.down`）。
+
+### 格式栏的宽度预算（决定"一行放得下"还是"要横滑"）
+
+| 元素 | 宽度 |
+| --- | --- |
+| 段落样式（菜单按钮） | 46dp × 1 |
+| 其余 8 个按钮 | 40dp × 8 = 320dp |
+| 2 条分隔线 | 1dp + 两侧各 2dp = 5dp × 2 = 10dp |
+| 格式栏自身左右内边距 | 4dp × 2 = 8dp |
+| **合计** | **384dp** |
+
+- 412dp 手机：可用宽 = 412 − 2×8（外层内边距）= **396dp ≥ 384** → 一行放得下。
+- ≤ 360dp 的窄机：放不下时**横向滚动**，**绝不换行** —— 折行会让「下划线」掉到第二行、
+  整条高度翻倍，还会顶掉输入区的可视高度。
+- 容器用"放得下就居中、放不下就从头排"（Compose 里是
+  `horizontalScroll` + 内容 `widthIn(min = 可用宽)` 后 `wrapContentWidth(CenterHorizontally)`，
+  或简单点：`BoxWithConstraints` 判断后决定 `Arrangement`）。**不要**无条件居中 ——
+  溢出时会把两端的按钮都裁掉一半。
 - **点任意按钮后焦点回到输入框**（`focusRequester.requestFocus()`）—— 连点排版不会收键盘。
 - 竖屏与横屏的按钮列表**完全相同、顺序相同**（iOS 曾把横屏改成竖排贴右，9 个按钮 454dp > 402dp 可用高度被裁掉，已废弃）。
 

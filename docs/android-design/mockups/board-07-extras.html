@@ -28,7 +28,8 @@ function editorTopBar() {
 
 function formatBar() {
   const b = (n, on) => `<div class="fb ${on ? "on" : ""}">${icon(n, { size: 20 })}</div>`;
-  return `<div class="formatbar">${b("format_size")}${b("align_center")}<div class="sep"></div>${b("list")}${b("quote")}${b("checklist")}<div class="sep"></div>${b("bold", true)}${b("italic")}${b("strikethrough")}${b("underline")}</div>`;
+  const menuBtn = `<div class="fb menu" title="段落样式">${icon("format_size", { size: 18 })}${icon("expand_more", { size: 14 })}</div>`;
+  return `<div class="formatbar">${menuBtn}${b("align_center")}<div class="sep"></div>${b("list")}${b("quote")}${b("checklist")}<div class="sep"></div>${b("bold", true)}${b("italic")}${b("strikethrough")}${b("underline")}</div>`;
 }
 
 /* 1 · 图片插入后的编辑卡 */

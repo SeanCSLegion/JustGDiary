@@ -437,15 +437,23 @@ html, body {
 
 /* 格式栏 */
 .formatbar {
-  display: flex; align-items: center; gap: 2px; background: var(--surface-container-high);
-  border-radius: var(--shape-xl); padding: 4px; box-shadow: var(--shadow-2); flex-wrap: wrap; justify-content: center;
+  display: flex; align-items: center; gap: 0; background: var(--surface-container-high);
+  border-radius: var(--shape-xl); padding: 4px; box-shadow: var(--shadow-2);
+  /* 单行、不换行：9 个按钮在 412dp 手机上刚好放得下（384 ≤ 396）。
+     折行会让「下划线」掉到第二行、整条高度翻倍；放不下时横滑。
+     `safe center` = 放得下就居中、放不下就从头排（普通 center 会把两端都裁掉）。 */
+  flex-wrap: nowrap; justify-content: safe center; max-width: 100%; overflow-x: auto;
+  scrollbar-width: none;
 }
+.formatbar::-webkit-scrollbar { display: none; }
 .formatbar .fb {
   width: 40px; height: 40px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
-  color: var(--on-surface-variant); font-size: 15px;
+  color: var(--on-surface-variant); font-size: 15px; flex: none;
 }
+/* 段落样式：带下拉指示、宽 46dp（它是一个菜单，不是开关） */
+.formatbar .fb.menu { width: 46px; gap: 1px; }
 .formatbar .fb.on { background: var(--secondary-container); color: var(--on-secondary-container); }
-.formatbar .sep { width: 1px; height: 24px; background: var(--outline-variant); margin: 0 4px; }
+.formatbar .sep { width: 1px; height: 24px; background: var(--outline-variant); margin: 0 2px; flex: none; }
 
 /* 键盘 */
 .keyboard { flex: none; height: 268px; background: var(--surface-container-high); padding: 8px 4px 0; }

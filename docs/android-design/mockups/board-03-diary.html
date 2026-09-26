@@ -126,7 +126,7 @@ function diaryEdit(opt) {
       <div class="krow"><div class="k wide">⇧</div>${["z","x","c","v","b","n","m"].map(k=>`<div class="k">${k}</div>`).join("")}<div class="k wide">⌫</div></div>
       <div class="krow"><div class="k wide">?123</div><div class="k">，</div><div class="k space">中文</div><div class="k">。</div><div class="k wide">↵</div></div>
     </div>` : ""}
-    <div style="position:absolute;left:0;right:0;bottom:${keyboard ? 8 : 24}px;display:flex;justify-content:center;padding:0 12px">
+    <div style="position:absolute;left:0;right:0;bottom:${keyboard ? 8 : 24}px;display:flex;justify-content:center;padding:0 8px">
       <div class="formatbar">${formatButtons()}</div>
     </div>
   </div>`;
@@ -136,10 +136,13 @@ function diaryEdit(opt) {
 /** 格式栏 9 项：段落样式 · 居中 ‖ 列表 · 引用 · 待办 ‖ B I S U */
 function formatButtons(active) {
   const on = active || ["bold"];
-  const b = (name, label, force) =>
-    `<div class="fb ${(force === undefined ? on.includes(name) : force) ? "on" : ""}" title="${label}">${icon(name, { size: 20 })}</div>`;
+  const b = (name, label, force, extra = "", size = 20) =>
+    `<div class="fb ${extra} ${(force === undefined ? on.includes(name) : force) ? "on" : ""}" title="${label}">${icon(name, { size })}</div>`;
+  // 段落样式是一个**菜单**（大标题/小标题/正文），必须带下拉指示 ——
+  // 光放一个 format_size 图标，用户看不出它会展开；iOS 也是 textformat.size + chevron.down
+  const menuBtn = `<div class="fb menu" title="段落样式">${icon("format_size", { size: 18 })}${icon("expand_more", { size: 14 })}</div>`;
   return [
-    b("format_size", "段落样式", false),
+    menuBtn,
     b("align_center", "居中", false),
     `<div class="sep"></div>`,
     b("list", "列表", false),
@@ -220,7 +223,7 @@ function diaryEdit(opt) {
       <div class="krow"><div class="k wide">⇧</div>${["z","x","c","v","b","n","m"].map(k=>`<div class="k">${k}</div>`).join("")}<div class="k wide">⌫</div></div>
       <div class="krow"><div class="k wide">?123</div><div class="k">，</div><div class="k space">中文</div><div class="k">。</div><div class="k wide">↵</div></div>
     </div>` : ""}
-    <div style="position:absolute;left:0;right:0;bottom:${keyboard ? 8 : 24}px;display:flex;justify-content:center;padding:0 12px">
+    <div style="position:absolute;left:0;right:0;bottom:${keyboard ? 8 : 24}px;display:flex;justify-content:center;padding:0 8px">
       <div class="formatbar">${formatButtons()}</div>
     </div>
   </div>`;
@@ -230,10 +233,13 @@ function diaryEdit(opt) {
 /** 格式栏 9 项：段落样式 · 居中 ‖ 列表 · 引用 · 待办 ‖ B I S U */
 function formatButtons(active) {
   const on = active || ["bold"];
-  const b = (name, label, force) =>
-    `<div class="fb ${(force === undefined ? on.includes(name) : force) ? "on" : ""}" title="${label}">${icon(name, { size: 20 })}</div>`;
+  const b = (name, label, force, extra = "", size = 20) =>
+    `<div class="fb ${extra} ${(force === undefined ? on.includes(name) : force) ? "on" : ""}" title="${label}">${icon(name, { size })}</div>`;
+  // 段落样式是一个**菜单**（大标题/小标题/正文），必须带下拉指示 ——
+  // 光放一个 format_size 图标，用户看不出它会展开；iOS 也是 textformat.size + chevron.down
+  const menuBtn = `<div class="fb menu" title="段落样式">${icon("format_size", { size: 18 })}${icon("expand_more", { size: 14 })}</div>`;
   return [
-    b("format_size", "段落样式", false),
+    menuBtn,
     b("align_center", "居中", false),
     `<div class="sep"></div>`,
     b("list", "列表", false),
