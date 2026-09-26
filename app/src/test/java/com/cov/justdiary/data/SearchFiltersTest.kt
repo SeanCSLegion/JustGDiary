@@ -218,6 +218,26 @@ class SearchFiltersTest {
         assertEquals(emptyList<SearchFilterItem>(), items)
     }
 
+    // ------------------------------------------------------------------ 出错态
+
+    /**
+     * 「出错」与「零结果」必须是两个可区分的状态。
+     *
+     * 原来查询失败只把 `loading` 关掉，界面于是显示「没有找到匹配的日记」——
+     * 用户会以为自己真的没有那篇日记。`hasError` 让界面能优先渲染错误 + 重试。
+     */
+    @Test
+    fun `an error is distinguishable from an empty result`() {
+        val empty = SearchUiState(items = emptyList(), total = 0)
+        assertTrue("零结果不算出错", !empty.hasError)
+        assertTrue(empty.isEmpty)
+
+        val failed = SearchUiState(items = emptyList(), total = -1, error = "disk I/O error")
+        assertTrue("失败必须能被识别出来", failed.hasError)
+        // 两者都 isEmpty —— 所以界面**只能**靠 hasError 区分，顺序不能反
+        assertTrue(failed.isEmpty)
+    }
+
     // ------------------------------------------------------------------ 分页
 
     @Test

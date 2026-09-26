@@ -143,6 +143,8 @@
     <string name="search_placeholder">Search diary content…</string>
     <string name="search_time_clear">Clear</string>
     <string name="search_clear_all">Clear all filters</string>
+    <string name="search_error">Search failed</string>
+    <string name="search_retry">Retry</string>
     <string name="search_loc_no_loc">No place recorded</string>
     <string name="search_preparing">Preparing search index…</string>
     <string name="search_start_title">Search your diary</string>

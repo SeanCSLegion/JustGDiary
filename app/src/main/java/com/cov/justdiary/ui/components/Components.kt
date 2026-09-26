@@ -391,6 +391,8 @@ fun EmptyState(
     hint: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    /** 图标与标题的着色（错误态传 `error`）。 */
+    tint: Color? = null,
 ) {
     Column(
         modifier = modifier
@@ -403,7 +405,7 @@ fun EmptyState(
             imageVector = icon,
             contentDescription = contentDescription,
             modifier = Modifier.size(40.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
             text = text,

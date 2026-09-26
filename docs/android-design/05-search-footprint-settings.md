@@ -175,7 +175,7 @@
 | 4 | 片段 | 已定位片段计数 |
 | 5 | 天数 | 去重 `day_key` |
 
-数值 20sp semibold `onSurface`，标签 12sp `onSurfaceVariant`；两行都 `maxLines = 1` + 缩放，不换行。
+数值 **18sp semibold `onSurface`**（`TypeSize.statValue` —— 这一行原写 20sp，与 01 §2.2 冲突，已按设计系统统一），标签 12sp `onSurfaceVariant`；两行都 `maxLines = 1` + 缩放，不换行。
 
 ### 2.4 年度趋势图（自绘）
 

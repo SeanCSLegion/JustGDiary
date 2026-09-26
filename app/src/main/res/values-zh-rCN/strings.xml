@@ -132,6 +132,8 @@
     <string name="search_placeholder">搜索日记内容…</string>
     <string name="search_time_clear">清除</string>
     <string name="search_clear_all">清除全部条件</string>
+    <string name="search_error">搜索出错</string>
+    <string name="search_retry">重试</string>
     <string name="search_loc_no_loc">未记录地点</string>
     <string name="search_preparing">正在准备搜索索引…</string>
     <string name="search_start_title">搜索你的日记</string>

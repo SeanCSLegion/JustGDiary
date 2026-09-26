@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -122,6 +123,8 @@ fun SearchScreen(
     onTimeKindChange: (TimeRangeKind) -> Unit = {},
     onNoLocationChange: (Boolean) -> Unit = {},
     onLoadMore: () -> Unit = {},
+    /** 查询失败后的「重试」（重新跑一次当前条件）。 */
+    onRetry: () -> Unit = {},
     onOpenDiary: (String) -> Unit = {},
     /** 自定义时间范围（`search_time_apply`）：两端都是 `YYYY-MM-DD`。 */
     onApplyCustomRange: (from: String, to: String) -> Unit = { _, _ -> },
@@ -320,7 +323,19 @@ fun SearchScreen(
                     SkeletonRows()
                 }
 
-                // ③ 未输入条件：引导态（不是"没结果"）
+                // ③ 出错：**不能**显示成"没有找到"
+                // （查库失败与真的没有是两件事；混在一起会让用户以为自己没写过）
+                state.hasError -> EmptyState(
+                    icon = Icons.Filled.Warning,
+                    text = ERROR_LABEL,
+                    hint = state.error,
+                    actionLabel = RETRY_LABEL,
+                    onAction = onRetry,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+
+                // ④ 未输入条件：引导态（不是"没结果"）
                 state.isEmpty && !state.hasAnyCondition -> EmptyState(
                     icon = Icons.Filled.Search,
                     text = START_TITLE,
@@ -328,7 +343,7 @@ fun SearchScreen(
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
 
-                // ④ 有条件但无结果：必须给一个"清除全部条件"的出口
+                // ⑤ 有条件但无结果：必须给一个"清除全部条件"的出口
                 state.isEmpty -> EmptyState(
                     icon = Icons.Filled.Search,
                     text = NO_RESULT_LABEL,
@@ -793,6 +808,10 @@ private val CLEAR_LABEL: String
     @Composable get() = stringResource(R.string.search_time_clear)
 private val CLEAR_ALL_LABEL: String
     @Composable get() = stringResource(R.string.search_clear_all)
+private val ERROR_LABEL: String
+    @Composable get() = stringResource(R.string.search_error)
+private val RETRY_LABEL: String
+    @Composable get() = stringResource(R.string.search_retry)
 private val NO_LOCATION_LABEL_: String
     @Composable get() = stringResource(R.string.search_loc_no_loc)
 private val PREPARING_LABEL: String

@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.data.FootprintNode
@@ -63,6 +64,7 @@ import com.cov.justdiary.data.TimeRangeKind
 import com.cov.justdiary.data.YEAR_FILTER_ALL
 import com.cov.justdiary.service.DateFormats
 import java.time.LocalDate
+import kotlin.math.max
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.DateRangeSheet
@@ -321,8 +323,16 @@ private fun StatCell(value: Int, label: String) {
     ) {
         Text(
             text = value.toString(),
-            style = MaterialTheme.typography.titleLarge,
+            // 数值取**设计系统**里的 `TypeSize.statValue`（18sp）而不是各页面自己定：
+            // 05 §2.3 曾写 20sp、01 §2.2 写 18sp，两处冲突 —— 统一以 01 设计系统为准
+            // （已经把 05 §2.3 那一行改掉）。半粗 + **单行**：5 格并排时每格可用宽只有
+            // ~76dp，放大字号或四位数会换行、把整张统计卡撑高。
+            style = MaterialTheme.typography.titleMedium,
+            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.statValue, LocalDensity.current.fontScale),
+            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            softWrap = false,
         )
         Text(
             text = label,
@@ -401,12 +411,14 @@ fun YearBarChart(
         val slot = chartWidth / yearly.size
         val barWidth = (slot * BAR_WIDTH_RATIO).coerceAtMost(BAR_MAX_WIDTH.toPx())
 
-        // Y 轴网格与数值：0 / 中值 / 最大值（对应设计稿的 0-3-6）
-        val mid = (maxDays + 1) / 2
-        listOf(0, mid, maxDays).distinct().forEach { value ->
+        // Y 轴网格与数值：**5 档**（0 / ¼ / ½ / ¾ / 最大，规范 §2.4）。
+        // 原来只画 0 / 中值 / 最大三条 —— 中间那一大段没有参照，柱子之间差多少看不出来。
+        val gridValues = (0..4).map { step -> maxDays * step / 4 }.distinct()
+        gridValues.forEach { value ->
             val y = chartHeight - (value.toFloat() / maxDays) * chartHeight
             drawLine(
-                color = gridColor,
+                // 网格用 70% 的 `outlineVariant`：满不透明度会和柱子抢视觉重心
+                color = gridColor.copy(alpha = GRID_ALPHA),
                 start = Offset(axisWidth, y),
                 end = Offset(size.width, y),
                 strokeWidth = 1.dp.toPx(),
@@ -420,7 +432,12 @@ fun YearBarChart(
 
         // 柱
         yearly.forEachIndexed { index, stat ->
-            val barHeight = (stat.days.toFloat() / maxDays) * chartHeight
+            // **最小高 3dp**：值为 0 的年份原来完全不画，那一列看起来像"没有数据"；
+            // 画一条底边才读得出"这一年是 0"，而不是"这一年缺失"（规范 §2.4）。
+            val barHeight = max(
+                MIN_BAR_HEIGHT.toPx(),
+                (stat.days.toFloat() / maxDays) * chartHeight,
+            )
             val left = axisWidth + slot * index + (slot - barWidth) / 2f
             drawRoundRect(
                 color = barColor,
@@ -600,6 +617,12 @@ private val AXIS_WIDTH = 22.dp
 private val AXIS_LABEL_HEIGHT = 18.dp
 private const val BAR_WIDTH_RATIO = 0.55f
 private val BAR_MAX_WIDTH = 48.dp
+
+/** 柱子的最小高度：值为 0 时也要有一条底边（规范 §2.4）。 */
+private val MIN_BAR_HEIGHT = 3.dp
+
+/** 网格线的透明度（规范 §2.4：`outlineVariant` @70%）。 */
+private const val GRID_ALPHA = 0.7f
 
 /** 横屏并排版式的度量（规范 §2.7）。 */
 private val INDENT_STEP = 16

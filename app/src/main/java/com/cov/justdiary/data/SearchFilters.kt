@@ -47,9 +47,19 @@ data class SearchUiState(
      * 三档空态一次都看不到。
      */
     val indexing: Boolean = false,
+    /**
+     * 查询失败时的错误信息（`null` = 没有出错）。
+     *
+     * 与"零结果"**必须分开**：原来失败时只把 `loading` 关掉，界面于是显示
+     * 「没有找到匹配的日记」—— 查库出问题时用户会以为自己真的没有那篇日记。
+     */
+    val error: String? = null,
 ) {
     /** 索引重建中 —— 只由 [indexing] 决定，与 `total` 无关。 */
     val indexNotReady: Boolean get() = indexing
+
+    /** 出错（优先于空态显示）。 */
+    val hasError: Boolean get() = error != null
     val isEmpty: Boolean get() = items.isEmpty()
 
     /**

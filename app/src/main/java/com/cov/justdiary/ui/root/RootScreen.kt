@@ -261,6 +261,7 @@ private fun TabContent(
                 onNoLocationChange = viewModel::setNoLocation,
                 onApplyCustomRange = viewModel::applyCustomRange,
                 onLoadMore = viewModel::loadMore,
+                onRetry = viewModel::retry,
                 onOpenDiary = onOpenDay,
                 locOptions = state.locOptions,
                 noLocCount = state.noLocCount,

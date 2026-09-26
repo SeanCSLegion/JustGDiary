@@ -34,17 +34,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ripple
 import androidx.compose.material3.AlertDialog
@@ -954,13 +943,6 @@ private fun locationPermissionLabel(permission: LocationPermissionState): String
     LocationPermissionState.EXACT -> stringResource(R.string.settings_loc_exact)
 }
 
-/**
- * 行图标的**临时映射**（M9 换成真正的 Material Symbols 图标，见方案 §M9）。
- *
- * 现在只用 `material-icons-core` 里的图标（约 40 个），因此取的是**语义最近**的一个：
- * 同一张卡片内不重复，避免视觉上难以区分。扩展包 `material-icons-extended` 有 35 MB，
- * 为几个图标把整包打进 APK 不划算（`isMinifyEnabled = false`）。
- */
 /**
  * 设置行的图标（设计规范 `05-search-footprint-settings.md` §3.3–§3.6 的逐行表）。
  *

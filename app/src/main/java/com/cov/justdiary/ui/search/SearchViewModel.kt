@@ -15,6 +15,7 @@ import com.cov.justdiary.model.LocFilter
 import com.cov.justdiary.model.LocOption
 import com.cov.justdiary.service.Log
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -193,6 +194,12 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** 失败后重试：清掉错误、按当前条件重查。 */
+    fun retry() {
+        _state.value = _state.value.copy(ui = _state.value.ui.copy(error = null))
+        runSearchNow(reset = true)
+    }
+
     /** 刷新（周起始/语言变了以后重算时间范围标签）。 */
     fun refresh() {
         apply(_state.value.ui)
@@ -248,7 +255,10 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         if (query.isEmpty() && !hasFilters) {
             // 无条件不查库：给「零结果 + 索引已就绪」，界面据此显示**空态**而不是转圈。
             _state.value = _state.value.copy(
-                ui = ui.copy(items = emptyList(), hasMore = false, total = 0, loading = false, indexing = false),
+                ui = ui.copy(
+                    items = emptyList(), hasMore = false, total = 0,
+                    loading = false, indexing = false, error = null,
+                ),
                 indexing = false,
             )
             return
@@ -257,7 +267,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         // 只有**真的**要重建索引时才显示"正在准备搜索索引…"
         val needsIndex = !container.repository.searchIndexReady()
         _state.value = _state.value.copy(
-            ui = ui.copy(loading = true, indexing = needsIndex),
+            ui = ui.copy(loading = true, indexing = needsIndex, error = null),
             indexing = needsIndex,
         )
         if (needsIndex) {
@@ -267,13 +277,24 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
 
         val range = currentRange()
         val offset = if (reset) 0 else ui.offset
-        val page = runCatching {
+        val result = runCatching {
             container.repository.search(query, range.from, range.to, ui.locFilter, offset)
-        }.onFailure { Log.db.w("搜索失败：${it.message}") }.getOrNull()
+        }.onFailure { throwable ->
+            // ⚠️ `runCatching` 会把 `CancellationException` 也吞掉 ——
+            // 那是我方主动取消（用户又敲了一个字），**不是**查询失败，
+            // 更不该写任何状态：新一轮已经开始了。
+            if (throwable is CancellationException) throw throwable
+            Log.db.w("搜索失败：${throwable.message}")
+        }
 
+        val page = result.getOrNull()
         if (page == null) {
             _state.value = _state.value.copy(
-                ui = _state.value.ui.copy(loading = false, indexing = false),
+                ui = _state.value.ui.copy(
+                    loading = false,
+                    indexing = false,
+                    error = result.exceptionOrNull()?.message ?: DEFAULT_ERROR,
+                ),
                 indexing = false,
             )
             return
@@ -284,13 +305,17 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         } else {
             SearchFilters.appendPage(_state.value.ui, page)
         }
-        _state.value = _state.value.copy(ui = next.copy(indexing = false), indexing = false)
+        // 成功：清掉上一次的错误
+        _state.value = _state.value.copy(ui = next.copy(indexing = false, error = null), indexing = false)
         apply(next)
     }
 
     companion object {
         /** 与 iOS 一致：输入防抖 250ms。 */
         const val DEBOUNCE_MS = 250L
+
+        /** 查询失败时异常没有 message 的兜底文案（界面直接展示）。 */
+        const val DEFAULT_ERROR = "搜索出错"
 
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer { SearchViewModel(container) }
