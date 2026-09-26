@@ -1,5 +1,10 @@
 package com.cov.justdiary.ui.home
 
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.snapshotFlow
 import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -196,6 +201,12 @@ fun HomeScreen(
     fun pageOffset(): Float = dragOffsetPx + settleAnim.value
 
     var monthKey by rememberSaveable { mutableStateOf(CalendarGrid.monthKeyOf(today)) }
+    // 月列表的滚动状态：初始落在当前月（进程重建后也回到同一月）
+    val monthListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = CalendarGrid.MONTH_KEYS
+            .indexOf(CalendarGrid.monthKeyOf(today))
+            .coerceAtLeast(0),
+    )
     var selectedKey by rememberSaveable { mutableStateOf(todayKey) }
     var mode by rememberSaveable { mutableStateOf(HomeViewMode.MONTH) }
 
@@ -267,6 +278,31 @@ fun HomeScreen(
         mode = HomeViewMode.MONTH
         selectedKey = todayKey
         monthKey = CalendarGrid.monthKeyOf(today)
+    }
+
+    // 月份 ↔ 滚动位置**双向同步**：
+    // - `monthKey` 被外部改（点「今天」、年历点某月）→ 列表滚到那一项；
+    // - 列表滚动**停稳**（含 fling 结束）→ 把 `monthKey` 落到那一项。
+    // 两边判等后再写，不会互相触发成环。
+    LaunchedEffect(monthKey) {
+        val target = CalendarGrid.MONTH_KEYS.indexOf(monthKey)
+        if (target >= 0 && monthListState.firstVisibleItemIndex != target) {
+            monthListState.scrollToItem(target)
+        }
+    }
+    LaunchedEffect(monthListState) {
+        snapshotFlow { monthListState.isScrollInProgress to monthListState.firstVisibleItemIndex }
+            .collect { (scrolling, index) ->
+                if (scrolling) return@collect
+                // 停稳后**吸附到整月**：慢拖（松手时几乎没有速度）不会触发 fling，
+                // 于是可能停在"上个月的尾巴还露一点"的位置。这里补一次动画，
+                // 让静止态永远是"一整个月"（规范 §5.1：一屏一个月）。
+                if (monthListState.firstVisibleItemScrollOffset != 0) {
+                    monthListState.animateScrollToItem(index)
+                }
+                val key = CalendarGrid.MONTH_KEYS.getOrNull(index) ?: return@collect
+                if (key != monthKey) monthKey = key
+            }
     }
 
     // 选中日与年份变化上报给上层（与 iOS 的同名回调等价）
@@ -558,7 +594,8 @@ fun HomeScreen(
         // ⚠️ 手势要挂在**日历区的容器**上，不能挂在月层上：年态下月层是不组合的
         // （morph 收尾后整层撤下），挂在月层上会让年态**完全没有翻页手势** —— 实测回归。
         // 周态没有这条手势（规范 §6），morph 中撤下（规范 §1 规则 2）。
-        val pagerGesture = if (morphing || mode == HomeViewMode.WEEK) {
+        // 月态不再需要自绘手势（交给 `LazyColumn` 的滚动）；周态本来就没有；只有**年态**保留。
+        val pagerGesture = if (mode != HomeViewMode.YEAR || morphing) {
             Modifier
         } else {
             Modifier.pointerInput(mode, rows, cellH, split) {
@@ -733,12 +770,23 @@ fun HomeScreen(
 
         // 邻月页的 args：只换 `displayed` / `monthFirst`，morph 相关字段归零
         // （翻月拖动只可能发生在月态，此时 weekProgress 恒为 0）。
-        fun neighborMonthArgs(offsetMonths: Long): CalendarSectionArgs {
-            val first = monthFirst.plusMonths(offsetMonths)
+        /**
+         * 任意一个月的 `CalendarSectionArgs`。
+         *
+         * [withMorph] 只在"当前月"那一项为真 —— 月↔周 morph 是**当月项内部**的事，
+         * 其余月份的 `weekProgress` 必须是 0，否则它们会跟着一起上移。
+         */
+        fun monthArgsAt(key: Int, withMorph: Boolean): CalendarSectionArgs {
+            val first = CalendarGrid.monthFirstOfMonthKey(key)
             val weeks = CalendarGrid.displayedWeeks(first, weekStart)
             return calendarArgs.copy(
                 displayed = weeks,
                 monthFirst = first,
+                weekProgress = if (withMorph) calendarArgs.weekProgress else 0f,
+                rowOffsets = if (withMorph) calendarArgs.rowOffsets else FloatArray(weeks.size),
+                rowAlphas = if (withMorph) calendarArgs.rowAlphas else FloatArray(weeks.size) { 1f },
+                rowMetrics = if (withMorph) calendarArgs.rowMetrics else null,
+                selectedWeekIndex = if (withMorph) calendarArgs.selectedWeekIndex else -1,
                 // ⚠️ **标题必须一起换**。
                 //
                 // `calendarArgs.copy(...)` 会把当前月的 `monthTitleLabel`（那颗 32sp 的
@@ -747,11 +795,7 @@ fun HomeScreen(
                 // 其它字段（metrics / cellHeight / selectedKey / todayKey / flags）与月份无关，
                 // 沿用是对的；只有标题是**跟着月份走**的。
                 monthTitleLabel = monthTitleText(first, dateFormats, context),
-                rowOffsets = FloatArray(weeks.size),
-                rowAlphas = FloatArray(weeks.size) { 1f },
-                rowMetrics = null,
-                selectedWeekIndex = -1,
-                fadeForYear = 0f,
+                fadeForYear = if (withMorph) calendarArgs.fadeForYear else 0f,
             )
         }
 
@@ -859,9 +903,6 @@ fun HomeScreen(
                                         .height(bandH.dp)
                                         .clipToBounds()
                                         .graphicsLayer {
-                                            // 跟手位移（翻页时整层上下走）—— **延迟读 state**
-                                            translationY = pageOffset()
-
                                             alpha = 1f - yp
                                             // 1 → 0.28：接近迷你月卡片相对月网格的尺度
                                             val k = CalendarLayout.lerp(1f, 0.28f, yp)
@@ -876,19 +917,28 @@ fun HomeScreen(
                                         },
                                     contentAlignment = Alignment.TopCenter,
                                 ) {
-                                    PagerViewport(
-                                        bandH = monthPageH,
-                                        offsetPx = { pageOffset() },
-                                        showNext = dragNext,
-                                        showPrev = dragPrev,
-                                        page = { offsetMonths ->
-                                            if (offsetMonths == 0) {
-                                                CalendarSection(args = calendarArgs)
-                                            } else {
-                                                CalendarSection(args = neighborMonthArgs(offsetMonths.toLong()))
-                                            }
-                                        },
-                                    )
+                                    // 月态 = **一张连续可滚的月列表**（用户提议，2026-09-26）：
+                                    // 一个月一项、项间空一行、滚动是无级的，松手由官方
+                                    // `rememberSnapFlingBehavior` 吸附到最近的月份。
+                                    // 手写的分页器（PagerViewport / 位移 / 橡皮筋 / 收尾动画）就此删除。
+                                    LazyColumn(
+                                        state = monthListState,
+                                        flingBehavior = rememberSnapFlingBehavior(monthListState),
+                                        userScrollEnabled = !morphing,
+                                        modifier = Modifier.fillMaxSize(),
+                                    ) {
+                                        items(
+                                            count = CalendarGrid.MONTH_KEYS.size,
+                                            key = { CalendarGrid.MONTH_KEYS[it] },
+                                        ) { index ->
+                                            val key = CalendarGrid.MONTH_KEYS[index]
+                                            CalendarSection(
+                                                args = monthArgsAt(key, withMorph = key == monthKey),
+                                            )
+                                            // 月与月之间空一行（用户要求的分隔）
+                                            Spacer(modifier = Modifier.height(cellH.dp))
+                                        }
+                                    }
                                 }
                             }
                             // 年层：与月层同一套"跟手 + 邻页"结构。

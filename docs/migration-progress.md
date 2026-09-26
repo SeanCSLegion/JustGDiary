@@ -1694,6 +1694,47 @@ LazyColumn(
 下一轮实施。**这是本轮的真实产出：确认了可行性 + 定下了删除清单与不变量**，
 不再在旧结构上继续打补丁。
 
+### R5 · 第十三轮：**月态改成连续无限滚动 —— 一次改动解决了磨了七轮的三个问题**
+
+按用户提议实施（`03-home.md` §8.7）：手写分页器整体删除，换成
+
+```kotlin
+LazyColumn(
+    state = monthListState,
+    flingBehavior = rememberSnapFlingBehavior(monthListState),
+    userScrollEnabled = !morphing,
+) {
+    items(CalendarGrid.MONTH_KEYS.size, key = { CalendarGrid.MONTH_KEYS[it] }) { index ->
+        val key = CalendarGrid.MONTH_KEYS[index]
+        CalendarSection(args = monthArgsAt(key, withMorph = key == monthKey))
+        Spacer(Modifier.height(cellH.dp))     // 月与月之间空一行
+    }
+}
+```
+
+外加两处同步：`monthKey` 变了就 `scrollToItem`；停稳后若 `firstVisibleItemScrollOffset != 0`
+就 `animateScrollToItem` 吸附到整月（慢拖没有 fling，框架不会自动吸附）。
+
+`neighborMonthArgs` 泛化成 `monthArgsAt(key, withMorph)` —— **只有当前月那一项**
+参与月↔周 morph，其余月份的 `weekProgress` 强制为 0。
+
+**真机实测（一次全通过）**：
+- 拖动中：九月的尾部与**十月紧接着**出现，**没有空白、没有错位、没有裁切**（r5-18）；
+- 慢拖松手：**吸附回整月**（r5-19 左）；
+- 点某一天：**照常进入周态**，周条与当日面板都对（r5-19 右）；
+- 点「2026年」进年历、返回键回月态：**都正常**。
+
+**这一改同时解决了**（全部是磨了很多轮的老问题）：
+1. 邻页只露出一部分 / 盒子与内容错位 —— 结构上不再存在"我自己摆两页"；
+2. 拖动顿挫、不够跟手 —— 滚动走框架的优化路径（还顺带消掉了
+   `graphicsLayer` 块属布局阶段读取带来的每帧 layout）；
+3. 两页之间空洞、页高不一致 —— 连续列表里没有"页高"这回事。
+
+**并且天然适配不同高度的屏幕**（用户指出的额外好处）：内容自己有多高就多高，
+不需要按屏幕反推"一页应该是多少 dp"。
+
+验证：clean assembleDebug + 401 条 JVM 单测（--rerun-tasks，0 失败）+ SQL 校验。
+
 ### 已知遗留
 
 - 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见
