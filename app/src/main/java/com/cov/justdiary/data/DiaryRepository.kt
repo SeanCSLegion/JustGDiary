@@ -469,60 +469,51 @@ class DiaryRepository(
     // ------------------------------------------------------------------ 日期重算
 
     /**
+     * 改「新一天的开始时间」会改动归属日的日记篇数（**只算不写**）。
+     *
+     * 设计规范 `05-search-footprint-settings.md` §3.4：Android **先问再改** ——
+     * 先算出会改变归属日的篇数，非零时先弹确认，用户点了"继续"才真正写库。
+     * iOS 是先改后提示，用户没有反悔的机会。
+     */
+    internal suspend fun previewDayKeyChanges(dayStartHour: Int): DayKeyPlan = withContext(singleThread) {
+        planDayKeys(readDetachedDayKeyRows(), dayStartHour)
+    }
+
+    /**
      * 改了"新一天的开始时间"之后重算全部 `day_key`，返回无法迁移的冲突天数。
      *
      * 用 `tmp#<id>` 两阶段写绕开 `day_key UNIQUE`；目标键被另一条**也在移动**的记录占用时
      * 计为冲突并跳过（与 iOS `recomputeDayKeys` 一致，返回值供设置页提示）。
      */
     suspend fun recomputeDayKeys(dayStartHour: Int): Int = write { db ->
-        data class Row(val id: Long, val oldKey: String, val firstUtc: Long)
-
-        val rows = db.rawQuery(JustDiarySchema.DIARY_DAY_KEYS_WITH_FIRST_BLOCK, null).use { c ->
-            buildList {
-                while (c.moveToNext()) {
-                    add(Row(c.getLong(0), c.getString(1) ?: "", c.getLong(3)))
-                }
-            }
-        }
-
-        val newKeys = HashMap<Long, String>(rows.size)
-        val holderOf = HashMap<String, Long>(rows.size)
-        for (row in rows) {
-            val key = if (row.firstUtc > 0) {
-                DateUtil.dayKeyForUtc(row.firstUtc, dayStartHour)
-            } else {
-                row.oldKey
-            }
-            newKeys[row.id] = key
-            holderOf[key] = row.id
-        }
-
-        var conflicts = 0
-        val movers = mutableListOf<Long>()
-        val finalKeys = HashMap<Long, String>()
-        for (row in rows) {
-            val newKey = newKeys[row.id] ?: row.oldKey
-            if (newKey == row.oldKey) continue
-            val currentHolder = holderOf[row.oldKey]
-            if (currentHolder != null && currentHolder != row.id) {
-                if (newKeys[currentHolder] != row.oldKey) {
-                    conflicts += 1
-                    continue
-                }
-            }
-            movers.add(row.id)
-            finalKeys[row.id] = newKey
-        }
-
-        for (id in movers) {
+        val plan = planDayKeys(readDayKeyRows(db), dayStartHour)
+        for (id in plan.movers) {
             db.execSQL(JustDiarySchema.UPDATE_DIARY_DAY_KEY, arrayOf<Any?>(JustDiarySchema.temporaryDayKey(id), id))
         }
-        for ((id, key) in finalKeys) {
+        for ((id, key) in plan.finalKeys) {
             db.execSQL(JustDiarySchema.UPDATE_DIARY_DAY_KEY, arrayOf<Any?>(key, id))
         }
-        db.execSQL(JustDiarySchema.CLEAR_DIARY_FLAGS)
-        db.execSQL(JustDiarySchema.REBUILD_DIARY_FLAGS)
-        conflicts
+        if (plan.movers.isNotEmpty()) {
+            db.execSQL(JustDiarySchema.CLEAR_DIARY_FLAGS)
+            db.execSQL(JustDiarySchema.REBUILD_DIARY_FLAGS)
+        }
+        plan.conflicts
+    }
+
+    private fun readDayKeyRows(db: android.database.sqlite.SQLiteDatabase): List<DayKeyRow> =
+        db.rawQuery(JustDiarySchema.DIARY_DAY_KEYS_WITH_FIRST_BLOCK, null).use { it.toDayKeyRows() }
+
+    /** 走只读连接读一次（预览用；与写事务里的那份是同一张表）。 */
+    private suspend fun readDetachedDayKeyRows(): List<DayKeyRow> = withContext(singleThread) {
+        helper.readableDatabase
+            .rawQuery(JustDiarySchema.DIARY_DAY_KEYS_WITH_FIRST_BLOCK, null)
+            .use { it.toDayKeyRows() }
+    }
+
+    private fun android.database.Cursor.toDayKeyRows(): List<DayKeyRow> = buildList {
+        while (moveToNext()) {
+            add(DayKeyRow(getLong(0), getString(1) ?: "", getLong(3)))
+        }
     }
 
     // ------------------------------------------------------------------ 地区回填

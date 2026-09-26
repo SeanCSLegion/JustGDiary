@@ -36,6 +36,9 @@
     <string name="settings_section_rules">日记规则</string>
     <string name="settings_day_start">新一天的开始时间</string>
     <string name="settings_day_start_sub">在此时间之前写的内容，归入前一天</string>
+    <string name="settings_day_start_confirm_title">改变归属日？</string>
+    <string name="settings_day_start_confirm_msg">有 %1$d 篇日记会因为规则变化改变归属日，是否继续？</string>
+    <string name="settings_day_start_confirm_ok">继续</string>
     <string name="settings_day_recalc_title">日期重算</string>
     <string name="settings_day_recalc_msg">有 %1$d 篇日记因规则变化保留了原归属日。</string>
     <string name="settings_week_start">一周从哪一天开始</string>

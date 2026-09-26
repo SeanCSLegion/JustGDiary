@@ -332,23 +332,23 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * 图标徽章：38dp 圆角方块 + 品牌色底 + 图标。
+ * 图标徽标：**40dp 圆** + `secondaryContainer` 底 + 20dp 图标（设计规范 `05-…` §3.1）。
  *
  * ⚠️ 必须保持正方形：放进 `Row` 时只用 `size()`，**不要**用 `fillMaxHeight()`，
- * 否则会被行高拉成长条（iOS 侧踩过这个坑，见 `docs/design-system.md` §6）。
+ * 否则会被行高拉成长条（iOS 侧踩过这个坑）。
  */
 @Composable
 fun IconBadge(
     icon: ImageVector,
     modifier: Modifier = Modifier,
     contentDescription: String? = null,
-    tint: Color = MaterialTheme.colorScheme.onPrimaryContainer,
-    background: Color = MaterialTheme.colorScheme.primaryContainer,
-    size: androidx.compose.ui.unit.Dp = 38.dp,
+    tint: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+    background: Color = MaterialTheme.colorScheme.secondaryContainer,
+    size: androidx.compose.ui.unit.Dp = 40.dp,
 ) {
     Surface(
         modifier = modifier.size(size),
-        shape = RoundedCornerShape(Radius.badge),
+        shape = CircleShape,
         color = background,
         contentColor = tint,
     ) {
@@ -356,7 +356,7 @@ fun IconBadge(
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(size * 0.55f),
+                modifier = Modifier.size(size * 0.5f),
             )
         }
     }

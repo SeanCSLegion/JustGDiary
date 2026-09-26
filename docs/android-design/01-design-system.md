@@ -83,7 +83,7 @@
 | 语义 | 设计字号 | M3 角色 | 行高 | 动态字体上限档 |
 | --- | --- | --- | --- | --- |
 | 页面大标题（`九月` / `2026年`） | 32 | 自绘 | — | Title1 → 1.40 |
-| 页面标题（`搜索` / `足迹` / `设置`） | 24 | `headlineSmall` | 32 | Title3 → 1.45 |
+| 页面标题（`搜索` / `足迹` / `设置`） | 28 | `headlineMedium` | 36 | Title3 → 1.45 |
 | 编辑器 · 大标题 | 28 | `headlineMedium` | 36 | Title1 → 1.40 |
 | 编辑器 · 小标题 | 22 | `titleLarge` | 28 | Title2 → 1.45 |
 | 编辑器 · 正文 | 16 | `bodyLarge` | 24 | Body → 1.50 |
@@ -92,7 +92,7 @@
 | 紧凑头部胶囊标题 | 18 | `titleMedium` | 24 | Body → 1.50 |
 | 统计数字 | 18 | `titleMedium` | 24 | Body → 1.50 |
 | 列表行主文本 | 16 | `bodyLarge` | 24 | Body → 1.50 |
-| 列表行副文本 | 13 | `bodyMedium` | 20 | Footnote → 1.65 |
+| 列表行副文本 | 14 | `bodyMedium` | 20 | Footnote → 1.65 |
 | 章节标题 | 13 | `titleSmall` | 20 | Footnote → 1.65 |
 | 芯片 / 胶囊标签 | 14 | `labelLarge` | 20 | Subheadline → 1.60 |
 | 元信息（时间 / 地点） | 13 | `bodyMedium` | 20 | Footnote → 1.65 |

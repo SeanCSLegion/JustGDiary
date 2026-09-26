@@ -8,6 +8,7 @@ import android.text.format.DateFormat as AndroidDateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -40,6 +42,8 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -63,6 +67,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -76,6 +83,7 @@ import com.cov.justdiary.data.ImportMode
 import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.IconBadge
 import com.cov.justdiary.ui.components.PageHeader
@@ -180,6 +188,33 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         SettingsAlertDialog(alert = alert, onDismiss = viewModel::consumeAlert)
     }
 
+    // 「新一天的开始时间」的二次确认（规范 §3.4）：非空 = 有待确认的改动。
+    // Android **先问再改** —— iOS 是先改完、有冲突才提示，用户没有反悔的机会。
+    state.pendingDayStartHour?.let { hour ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelDayStartHour,
+            title = { Text(stringResource(R.string.settings_day_start_confirm_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.settings_day_start_confirm_msg,
+                        state.pendingDayStartMovedBlocks,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDayStartHour) {
+                    Text(stringResource(R.string.settings_day_start_confirm_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelDayStartHour) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     if (state.importModePromptVisible) {
         ImportModeDialog(
             onSkip = { viewModel.runImport(ImportMode.SKIP) },
@@ -212,8 +247,9 @@ private fun SettingsBody(
             start = Spacing.page,
             end = Spacing.page,
             top = 12.dp,
-            // 底部留出导航条的高度（对应 iOS 的 TabBarClearance）
-            bottom = Spacing.page + 72.dp,
+            // 底栏在 RootScreen 的 Scaffold 里、**参与布局**（不是 iOS 那种浮条），
+            // 内容已经被 innerPadding 抬到它之上，这里只需要一点呼吸空间（规范 §4）。
+            bottom = 24.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(Spacing.card),
         horizontalArrangement = Arrangement.spacedBy(Spacing.card),
@@ -406,7 +442,7 @@ private fun SettingsBody(
                     title = stringResource(R.string.settings_version),
                     sub = null,
                     value = state.appVersion,
-                    onClick = {},
+                    enabled = false,
                 )
             }
         }
@@ -419,7 +455,8 @@ private fun SettingsBody(
             onDismiss = { dayStartPickerVisible = false },
             onConfirm = { hour ->
                 dayStartPickerVisible = false
-                viewModel.applyDayStartHour(hour)
+                // 真正写库之前先算一遍影响面（规范 §3.4），有影响会弹确认框
+                viewModel.requestDayStartHour(hour)
             },
         )
     }
@@ -450,37 +487,53 @@ private fun SettingsCard(content: @Composable () -> Unit) {
 }
 
 /**
- * 行之间的分隔线，左侧让开图标徽章（对应 iOS `RowDivider(horizontalPadding: textInset)`）。
+ * 行之间的分隔线（规范 §3.1）：左缩进 **72dp**，与行的**文字**左对齐（不是与图标对齐）。
+ *
+ * 72 = 16(行内边距) + 40(图标徽标) + 16(间距)。
  */
 @Composable
 private fun RowDivider() {
     HorizontalDivider(
-        modifier = Modifier.padding(start = 62.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        modifier = Modifier.padding(start = 72.dp),
+        color = MaterialTheme.colorScheme.outlineVariant,
     )
 }
 
-/** 右侧的取值 + 尖角。 */
-@Composable
-private fun ValueTrailing(value: String) {
-    Text(
-        text = value,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        textAlign = TextAlign.End,
-        modifier = Modifier.valueWidth(),
-    )
-    Icon(
-        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-        contentDescription = null,
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
+/** 行高的两条档位（规范 §3.1）：带副标题 64dp、不带 56dp。 */
+private fun rowMinHeight(sub: String?): androidx.compose.ui.unit.Dp =
+    if (sub != null) 64.dp else 56.dp
 
+/**
+ * 右侧的取值 [+ 尖角]。
+ *
+ * 取值**限宽但不写死**：原来是固定 96dp + 省略号，放大系统字号后长取值（「凌晨 4:00」）
+ * 会被截成「凌晨 4…」。现在给到 150dp，配合 `maxLines = 1`；文案列本身 `weight(1f)`，
+ * 因此再长也只会挤压自己、不会把尖角挤出屏幕（iOS 侧为这条专门加过 `minimumScaleFactor`）。
+ *
+ * `showChevron = false` 用于**不可点**的行（「版本」）—— iOS 那一行画了箭头却点了没反应，
+ * 视觉上像能点，这里直接不画。
+ */
 @Composable
-private fun Modifier.valueWidth(): Modifier = this.width(96.dp)
+private fun ValueTrailing(value: String, showChevron: Boolean = true) {
+    if (value.isNotEmpty()) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.widthIn(max = 150.dp),
+        )
+    }
+    if (showChevron) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 /** 点一下打开菜单的行。 */
 @Composable
@@ -497,7 +550,7 @@ private fun MenuRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { expanded = true }
-                .heightIn(min = 56.dp)
+                .heightIn(min = rowMinHeight(sub))
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -507,11 +560,11 @@ private fun MenuRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                 if (sub != null) {
                     Text(
                         text = sub,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -546,13 +599,15 @@ private fun ValueRow(
     title: String,
     sub: String?,
     value: String,
-    onClick: () -> Unit,
+    onClick: () -> Unit = {},
+    /** 「版本」这类行不可点，也不画箭头（规范 §3.5）。 */
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .heightIn(min = 56.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .heightIn(min = rowMinHeight(sub))
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -573,7 +628,7 @@ private fun ValueRow(
                 )
             }
         }
-        ValueTrailing(value)
+        ValueTrailing(value, showChevron = enabled)
     }
 }
 
@@ -589,8 +644,17 @@ private fun SwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .padding(horizontal = 12.dp),
+            // 整行可点（规范 §3.2）：只让开关本体可点是硬性体验问题，v2 已列为缺陷
+            .toggleable(
+                value = checked,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = ripple(),
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .heightIn(min = rowMinHeight(sub))
+            .padding(horizontal = 12.dp)
+            .semantics { contentDescription = title },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -712,52 +776,38 @@ private fun ImportModeDialog(onSkip: () -> Unit, onOverwrite: () -> Unit, onDism
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onOverwrite) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+                // 覆盖 = 破坏性动作：用 error 色与「跳过」在视觉上分开（规范 §3.6）
+                TextButton(
+                    onClick = onOverwrite,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) {
                     Text(stringResource(R.string.settings_import_overwrite))
                 }
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
             }
         },
     )
 }
 
-/** 导出/导入期间的进度遮罩（对应 iOS 的 `busyText` 遮罩）。 */
+/**
+ * 导出 / 导入期间的进度遮罩。
+ *
+ * 用共享的 [com.cov.justdiary.ui.components.BusyOverlay]：带 scrim、**不可取消**
+ * （导入中途取消会留下半写状态），文案按动作区分。
+ */
 @Composable
 private fun BusyOverlay(kind: BusyKind) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) {},
-        contentAlignment = Alignment.Center,
-    ) {
-        Surface(
-            shape = RoundedCornerShape(Radius.card),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 3.dp,
-            shadowElevation = 6.dp,
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 32.dp, vertical = 26.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                CircularProgressIndicator()
-                Text(
-                    text = stringResource(
-                        when (kind) {
-                            BusyKind.EXPORT -> R.string.settings_export_busy
-                            BusyKind.IMPORT -> R.string.settings_import_busy
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-    }
+    com.cov.justdiary.ui.components.BusyOverlay(
+        text = stringResource(
+            when (kind) {
+                BusyKind.EXPORT -> R.string.settings_export_busy
+                BusyKind.IMPORT -> R.string.settings_import_busy
+            },
+        ),
+        visible = true,
+    )
 }
 
 /** 结果提示（对应 iOS 的 `appAlert(item:)`）。 */
@@ -836,22 +886,28 @@ private fun locationPermissionLabel(permission: LocationPermissionState): String
  * 同一张卡片内不重复，避免视觉上难以区分。扩展包 `material-icons-extended` 有 35 MB，
  * 为几个图标把整包打进 APK 不划算（`isMinifyEnabled = false`）。
  */
+/**
+ * 设置行的图标（设计规范 `05-search-footprint-settings.md` §3.3–§3.6 的逐行表）。
+ *
+ * 全部走 [AppIcons] 的 Material Symbols 内联 path —— M0 那批临时图标（语言用定位针、
+ * 主题用星星、动态取色用爱心）与语义完全对不上，看起来像占位符。
+ */
 private object SettingsIcons {
-    val language: ImageVector = Icons.Filled.Place
-    val theme: ImageVector = Icons.Filled.Star
-    val dynamicColor: ImageVector = Icons.Filled.Favorite
-    val dayStart: ImageVector = Icons.Filled.Refresh
-    val weekStart: ImageVector = Icons.Filled.DateRange
-    val autoTime: ImageVector = Icons.Filled.Check
-    val autoLoc: ImageVector = Icons.Filled.LocationOn
-    val locationPermission: ImageVector = Icons.Filled.Lock
-    val historyEdit: ImageVector = Icons.Filled.Edit
-    val reminder: ImageVector = Icons.Filled.Notifications
-    val remindTime: ImageVector = Icons.Filled.Refresh
-    val notificationPermission: ImageVector = Icons.Filled.Lock
-    val export: ImageVector = Icons.Filled.Share
-    val import: ImageVector = Icons.AutoMirrored.Filled.ExitToApp
-    val about: ImageVector = Icons.Filled.Info
+    val language: ImageVector = AppIcons.Language
+    val theme: ImageVector = AppIcons.DarkMode
+    val dynamicColor: ImageVector = AppIcons.Palette
+    val dayStart: ImageVector = AppIcons.Schedule
+    val weekStart: ImageVector = AppIcons.CalendarMonth
+    val autoTime: ImageVector = AppIcons.Schedule
+    val autoLoc: ImageVector = AppIcons.Place
+    val locationPermission: ImageVector = AppIcons.MyLocation
+    val historyEdit: ImageVector = AppIcons.Edit
+    val reminder: ImageVector = AppIcons.Notifications
+    val remindTime: ImageVector = AppIcons.Schedule
+    val notificationPermission: ImageVector = AppIcons.Notifications
+    val export: ImageVector = AppIcons.Upload
+    val import: ImageVector = AppIcons.Download
+    val about: ImageVector = AppIcons.Info
 }
 
 /** SAF 用的 MIME：`.jdiary` 没有注册类型，用 octet-stream 才能保住扩展名。 */

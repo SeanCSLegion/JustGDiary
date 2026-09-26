@@ -40,6 +40,14 @@ data class SettingsUiState(
     val importModePromptVisible: Boolean = false,
     /** 已选好、等待用户选导入方式的备份文件。 */
     val pendingImport: File? = null,
+    /**
+     * 已选定、等待用户确认的「新一天的开始时间」小时。
+     *
+     * 规范 §3.4：Android **先问再改** —— 非空时界面弹确认框，用户点「继续」才写库。
+     */
+    val pendingDayStartHour: Int? = null,
+    /** 上面那个待确认改动会影响的日记篇数。 */
+    val pendingDayStartMovedBlocks: Int = 0,
     /** 版本号（"关于"卡片）。 */
     val appVersion: String = "",
 )
@@ -165,10 +173,46 @@ class SettingsViewModel(
     fun setAutoLoc(value: Boolean) = update(transform = { it.copy(autoLoc = value) })
 
     /**
-     * "新一天的开始时间"。与其它项不同：改完要重算 `day_key`，冲突数要提示用户，
-     * 所以这里显式处理结果（对应 iOS 的 `applyDayStart()`）。
+     * 「新一天的开始时间」（规范 §3.4）。
+     *
+     * **先算再问再改**：先只算不写地求出"会改变归属日的日记篇数"；
+     *  - 0 篇 → 直接应用（对用户没有可见影响，不该多问一句）；
+     *  - N 篇 → 记下待确认的小时与篇数，由界面弹确认框；用户点「继续」才走 [confirmDayStartHour]。
+     *
+     * iOS 的对应路径是"先改完、有冲突才提示"，用户没有反悔的机会。
      */
-    fun applyDayStartHour(hour: Int) = update(
+    fun requestDayStartHour(hour: Int) {
+        val clamped = hour.coerceIn(0, 23)
+        if (clamped == _state.value.settings.dayStartHour) return
+        viewModelScope.launch {
+            val plan = runCatching { repository.previewDayKeyChanges(clamped) }.getOrNull()
+            if (plan == null || plan.movedBlocks == 0) {
+                applyDayStartHour(clamped)
+                return@launch
+            }
+            _state.value = _state.value.copy(
+                pendingDayStartHour = clamped,
+                pendingDayStartMovedBlocks = plan.movedBlocks,
+            )
+        }
+    }
+
+    /** 用户在确认框里点了「继续」。 */
+    fun confirmDayStartHour() {
+        val hour = _state.value.pendingDayStartHour ?: return
+        _state.value = _state.value.copy(pendingDayStartHour = null, pendingDayStartMovedBlocks = 0)
+        applyDayStartHour(hour)
+    }
+
+    /** 用户在确认框里点了「取消」。 */
+    fun cancelDayStartHour() {
+        _state.value = _state.value.copy(pendingDayStartHour = null, pendingDayStartMovedBlocks = 0)
+    }
+
+    /**
+     * 真正应用：写设置 → 重算 `day_key` → 冲突数非零时补一条说明。
+     */
+    private fun applyDayStartHour(hour: Int) = update(
         transform = { it.copy(dayStartHour = hour.coerceIn(0, 23)) },
         onOutcome = { outcome ->
             if (outcome.dayKeyConflicts > 0) {

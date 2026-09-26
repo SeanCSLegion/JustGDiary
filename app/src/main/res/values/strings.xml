@@ -45,6 +45,9 @@
     <string name="settings_section_rules">Diary rules</string>
     <string name="settings_day_start">Start of a new day</string>
     <string name="settings_day_start_sub">Entries before this time belong to the previous day</string>
+    <string name="settings_day_start_confirm_title">Change the day boundary?</string>
+    <string name="settings_day_start_confirm_msg">%1$d entries will change the day they belong to. Continue?</string>
+    <string name="settings_day_start_confirm_ok">Continue</string>
     <string name="settings_day_recalc_title">Recompute dates</string>
     <string name="settings_day_recalc_msg">%1$d entries kept their original date due to the rule change.</string>
     <string name="settings_week_start">Start of the week</string>
