@@ -717,6 +717,14 @@ fun HomeScreen(
             return calendarArgs.copy(
                 displayed = weeks,
                 monthFirst = first,
+                // ⚠️ **标题必须一起换**。
+                //
+                // `calendarArgs.copy(...)` 会把当前月的 `monthTitleLabel`（那颗 32sp 的
+                // 「九月」大标题）原样带过来 —— 于是翻页时滑进来的那一页**顶着当前月的标题**，
+                // 看起来"下一个月其实是当前月的内容"（用户实测反馈）。
+                // 其它字段（metrics / cellHeight / selectedKey / todayKey / flags）与月份无关，
+                // 沿用是对的；只有标题是**跟着月份走**的。
+                monthTitleLabel = monthTitleText(first, dateFormats, context),
                 rowOffsets = FloatArray(weeks.size),
                 rowAlphas = FloatArray(weeks.size) { 1f },
                 rowMetrics = null,
