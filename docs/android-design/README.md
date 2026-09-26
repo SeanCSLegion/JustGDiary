@@ -56,6 +56,7 @@
 | [`06-components-and-overlays.md`](06-components-and-overlays.md) | 组件库清单（含函数签名）、弹层规范、空态 / 加载态 / 错误态的统一样式 | 新增任何 UI 之前必读 |
 | [`07-ios-map-and-plan.md`](07-ios-map-and-plan.md) | iOS 文件/常量 → Android 文件/常量的**逐条映射表**、实施批次、验收清单、已知缺陷处置 | 排期与验收 |
 | [`08-diary-implementation-plan.md`](08-diary-implementation-plan.md) | **日记页施工图**：三条断链的精确位置、6 步实施顺序、10 条不变量、最容易做错的 10 条 | 动日记页之前必读 |
+| [`09-test-checklist.md`](09-test-checklist.md) | **前四屏验收清单**：逐条写清应该看到什么，照着走一遍即可判断有没有大问题 | 交给用户测试 |
 | [`mockups/`](mockups) | 7 块设计板（HTML 源 + PNG 稿），逐屏竖屏 / 横屏 / 深色 + 交互与动效分解 | 对齐视觉时看这里 |
 
 **iOS 侧的逐条证据**（含 `file:line`）在 `docs/ios-reference/`：

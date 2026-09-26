@@ -429,13 +429,19 @@ fun HomeScreen(
             }
         }
         val showLunarHere = density.showLunar
+        // 分栏下**真的降级为周条**：可用高低于 `NO_LUNAR_ROW_HEIGHT × 行数` 时，
+        // 6 行月格每行只剩不到 38dp —— 日号与选中圆会挤在一起。
+        // 原来 `resolveDensity` 算出了 `WeekStrip` 却只读 `.showLunar`，等于没降级（规范 §5.3）。
+        val weekStripOnly = split && density.kind == CalendarLayout.DensityKind.WeekStrip
+        val shownRows = if (weekStripOnly) 1 else rows
         val cellH = if (split) {
             // 分栏要**铺满**（不封顶也不留白）：均分是唯一不出错的做法
-            CalendarLayout.fitCellHeight(monthAreaH - splitHeaderH, rows)
+            CalendarLayout.fitCellHeight(monthAreaH - splitHeaderH, shownRows)
+                .let { if (weekStripOnly) it.coerceAtMost(CalendarLayout.WEEK_STRIP_H) else it }
         } else {
             CalendarLayout.cellHeightFor(monthAreaH)
         }
-        val gridH = CalendarLayout.monthGridHeight(rows, cellH)
+        val gridH = CalendarLayout.monthGridHeight(shownRows, cellH)
         val metrics = remember(calendarW, cellH, showLunarHere) {
             CalendarLayout.monthPaneMetrics(
                 cellW = CalendarLayout.monthCellW(calendarW),
@@ -452,6 +458,8 @@ fun HomeScreen(
             displayed.indexOfFirst { row -> row.any { DateUtil.dayKeyOf(it) == selectedKey } }
                 .coerceAtLeast(0)
         }
+        // 降级为周条时只保留选中日所在那一行（规范 §5.3：「只画选中日所在的那一行」）
+        val visibleRows = if (weekStripOnly) listOf(displayed[selectedWeekIndex]) else displayed
         val p = weekProgress.value
         val morphed = remember(p, weekMetrics, metrics, rows, selectedWeekIndex) {
             CalendarLayout.monthWeekMorph(
@@ -641,7 +649,12 @@ fun HomeScreen(
                 }
             }
             val calendarArgs = CalendarSectionArgs(
-                displayed = displayed,
+                // 降级为周条时只画选中日那一行（行位移/度量数组也要跟着切，否则长度对不上）
+                displayed = visibleRows,
+                // 降级时不需要逐行位移（只有一行，没有 morph 的余地）
+                rowOffsetsOverride = if (weekStripOnly) FloatArray(1) else null,
+                rowAlphasOverride = if (weekStripOnly) floatArrayOf(1f) else null,
+                rowMetricsOverride = if (weekStripOnly) arrayOf(metrics) else null,
                 monthFirst = monthFirst,
                 metrics = metrics,
                 cellHeight = cellH,
@@ -958,6 +971,10 @@ private data class CalendarSectionArgs(
     val weekProgress: Float,
     val rowOffsets: FloatArray,
     val rowAlphas: FloatArray,
+    /** 非空时覆盖 [rowOffsets]（周条降级下只有一行）。 */
+    val rowOffsetsOverride: FloatArray? = null,
+    val rowAlphasOverride: FloatArray? = null,
+    val rowMetricsOverride: Array<CalendarLayout.DayMetrics>? = null,
     /** 月↔周 morph：每一行的度量（选中行在 morph 中缩到周条尺寸）。 */
     val rowMetrics: Array<CalendarLayout.DayMetrics>?,
     val selectedWeekIndex: Int,
@@ -1161,13 +1178,14 @@ private fun CalendarSection(args: CalendarSectionArgs) {
                     showAdjacent = false,
                     showLunar = args.showLunar,
                     showDividers = true,
-                    rowOffsets = args.rowOffsets.takeIf { p > 0.01f },
+                    rowOffsets = (args.rowOffsetsOverride ?: args.rowOffsets).takeIf { p > 0.01f },
                     rowAlphas = if (p > 0.01f) {
-                        FloatArray(args.rowAlphas.size) { args.rowAlphas[it] * (1f - p) }
+                        val base = args.rowAlphasOverride ?: args.rowAlphas
+                        FloatArray(base.size) { base[it] * (1f - p) }
                     } else {
                         null
                     },
-                    rowMetrics = args.rowMetrics,
+                    rowMetrics = args.rowMetricsOverride ?: args.rowMetrics,
                 )
             }
         }

@@ -239,6 +239,29 @@ class CalendarLayoutTest {
         assertEquals(CalendarLayout.DensityKind.WeekStrip, CalendarLayout.resolveDensity(59.9f, 6, true).kind)
     }
 
+    /**
+     * 分栏下"降级为周条"的判定必须真的被消费。
+     *
+     * `resolveDensity` 一直能算出 `WeekStrip`，但界面只读了 `.showLunar` ——
+     * 于是可用高不足时仍然画 6 行，每行不到 38dp，日号与选中圆挤在一起。
+     * 这里钉住判定本身；界面侧在 `HomeScreen` 里按 `weekStripOnly` 只画一行。
+     */
+    @Test
+    fun `week strip downgrade kicks in when rows cannot fit`() {
+        // 分栏可用高（已扣紧凑标题+星期栏）÷ 6 行
+        val tooShort = CalendarLayout.resolveDensity(200f, 6, true)
+        assertEquals(CalendarLayout.DensityKind.WeekStrip, tooShort.kind)
+        // 降级后只画一行 → 那一行的高度就是整个可用高，必然够
+        val oneRow = CalendarLayout.fitCellHeight(200f, 1)
+        assertTrue("降级后单行高度应当充裕", oneRow >= CalendarLayout.WEEK_STRIP_H)
+        assertEquals(200f, oneRow, 1e-3f)
+        // 刚好不再降级的边界：6 × 38
+        assertEquals(
+            CalendarLayout.DensityKind.Month,
+            CalendarLayout.resolveDensity(38f * 6, 6, true).kind,
+        )
+    }
+
     @Test
     fun `year grid geometry matches the formulas`() {
         val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)
