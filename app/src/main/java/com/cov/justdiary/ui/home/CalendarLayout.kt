@@ -88,7 +88,17 @@ object CalendarLayout {
     const val COMPACT_WEEKDAY_HEADER_H = 26f
 
     /** 周条行高与周态日期标题行。 */
-    const val WEEK_STRIP_H = 68f
+    /**
+     * 周条高度。
+     *
+     * ⚠️ 68 是**不够**的：周条里要放「选中圆的直径 + 农历一行」，而
+     * `circleDiameter = min(cellW-3, contentH+14, cellH-3)`、`contentH = dayFont+4+lunarLineH`
+     * —— 在 392dp 宽的手机上算出来约 48.5 + 15 ≈ 64dp，再加"有日记"的短横线就贴着 68 了。
+     * 实测（真机 1080×2340@440dpi）：**中文的农历被下沿裁掉一截**（用户反馈的"遮挡"）。
+     *
+     * 80 = 内容所需 + 明确的余量，同时把 `circleDiameter` 的上限让开，不再被 `cellH-3` 夹住。
+     */
+    const val WEEK_STRIP_H = 80f
     const val DAY_TITLE_H = 40f
 
     /**
