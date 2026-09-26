@@ -146,17 +146,21 @@ fun YearCanvas(
                 val isCurrentMonth = month == selectedMonth
                 val titleColor = if (isCurrentMonth) primary else onSurfaceVariant
 
-                // 卡片底（规范 §5.2）：普通月 = surfaceContainerLow，选中日所在的月 = 一层更亮的
-                // surfaceContainerHigh。**不用 primaryContainer** —— 卡片里已经有主色的"今天"实心圆
-                // 与主色的"有日记"短横线，再铺一层主色容器会互相打架。
-                drawRoundRect(
-                    color = if (isCurrentMonth) cardBgSelected else cardBg,
-                    topLeft = Offset(card.x.dp.toPx(), card.y.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(card.w.dp.toPx(), card.h.dp.toPx()),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                        Radius.card.toPx(),
-                    ),
-                )
+                // ⚠️ **不画卡片底**（用户 2026-09-26："年视图的每个月底部的背景其实没必要，
+                // 干脆去掉算了"）。迷你网格本来就没填满卡片高度，那块空底色既没信息量，
+                // 又会让"卡片矩形"成为视觉主体 —— 年份列表滚动时任何位置偏差都会被它放大。
+                // 选中月仍然可辨：标题用 `primary`（见上面的 `titleColor`）。
+                // 只保留选中月的一层**很淡**的底，用于"我在哪个月"的快速定位。
+                if (isCurrentMonth) {
+                    drawRoundRect(
+                        color = cardBgSelected.copy(alpha = 0.55f),
+                        topLeft = Offset(card.x.dp.toPx(), card.y.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(card.w.dp.toPx(), card.h.dp.toPx()),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                            Radius.card.toPx(),
+                        ),
+                    )
+                }
 
                 val titleText = measurer.measure(
                     monthLabel(monthFirst),
