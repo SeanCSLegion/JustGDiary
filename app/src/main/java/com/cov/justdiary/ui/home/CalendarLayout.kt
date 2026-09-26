@@ -581,6 +581,15 @@ object CalendarLayout {
         val sourceMiniTitleOpacity: Float,
     )
 
+    /**
+     * 年层在月↔年 morph 中的不透明度（**唯一来源**）。
+     *
+     * 月层用 `1 - 它` 作为自己的不透明度 —— 两条曲线在整段区间内**和为 1**，
+     * 不会出现"前 25% 都没出现"或"双重曝光"的错位。
+     * （用户："月视图到年视图的动画速率还需调一下，动画没有对齐。"）
+     */
+    fun yearLayerOpacity(progress: Float): Float = clamp01((clamp01(progress) - 0.25f) / 0.75f)
+
     fun yearMonthMorph(
         progress: Float,
         miniGrid: Rect,
@@ -618,7 +627,7 @@ object CalendarLayout {
             dividerAlpha = dividerAlpha,
             // 从 p=0.25 就开始淡入（原来 0.45）：月层的淡出是 1-p，两者必须在整段区间里
             // 至少有一层可见，否则 morph 前段会露出空白
-            yearOpacity = clamp01((p - 0.25f) / 0.75f),
+            yearOpacity = yearLayerOpacity(p),
             yearScale = 1f + (1f - p) * 0.6f,
             sourceMiniTitleOpacity = clamp01((p - 0.7f) / 0.3f),
         )

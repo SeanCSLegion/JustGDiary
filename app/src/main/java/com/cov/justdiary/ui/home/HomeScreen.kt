@@ -947,7 +947,15 @@ fun HomeScreen(
                                         .height(bandH.dp)
                                         .clipToBounds()
                                         .graphicsLayer {
-                                            alpha = 1f - yp
+                                            // ⚠️ **与年层的淡入互补**，不能各用各的曲线。
+                                            //
+                                            // 原来月层是 `1 - yp`（全程线性），而年层是
+                                            // `clamp01((yp - 0.25) / 0.75)`（前 25% 完全不出现）——
+                                            // 两者不同步，中间出现"双重曝光"，观感就是"没对齐"
+                                            // （用户："月视图到年视图的动画速率还需调一下，动画没有对齐"）。
+                                            // 取同一个 `yearOpacity` 的补，两条曲线在整段区间内**和为 1**。
+                                            // 唯一来源在 CalendarLayout.yearLayerOpacity（年层也用同一条）
+                                            alpha = 1f - CalendarLayout.yearLayerOpacity(yp)
                                             // 1 → 0.28：接近迷你月卡片相对月网格的尺度
                                             val k = CalendarLayout.lerp(1f, 0.28f, yp)
                                             scaleX = k
@@ -1042,6 +1050,15 @@ fun HomeScreen(
                                         Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
+                                                // ⚠️ 这个系数必须加在**整层**上（大标题 + 星期栏），
+                                                // 不能只加大标题 —— 只加标题时，返回过程中星期栏
+                                                // 从 yp=1 就跟着整层淡入，而标题要等 yp<0.25 才出现，
+                                                // 两者对不上（用户实测："年视图切换月视图的时候，
+                                                // 顶栏的星期直接就出现了，应该和大月份一起出现才对"）。
+                                                .graphicsLayer {
+                                                    alpha = 1f -
+                                                        CalendarLayout.clamp01(yp * 4f)
+                                                }
                                                 .background(MaterialTheme.colorScheme.surface)
                                                 .align(Alignment.TopCenter),
                                         ) {
@@ -1078,13 +1095,8 @@ fun HomeScreen(
                                                         .padding(horizontal = 20.dp)
                                                         // 与高度折叠同步淡出（连续）
                                                         .graphicsLayer {
-                                                            // 周 morph：按 p 淡出（与标题折叠同步）
-                                                            // 年 morph：**快速退场** —— 用户："月视图的顶栏消失太慢了，
-                                                            // 快点消失，甚至顶栏固定栏可以直接消失。"
-                                                            // 用 4x 斜率：yp 到 0.25 就基本看不见了。
-                                                            // 不做成"硬切"，因为硬切本身又是一次跳变。
-                                                            alpha = (1f - 2f * p) *
-                                                                (1f - CalendarLayout.clamp01(yp * 4f))
+                                                            // 周 morph：标题按 p 淡出（与高度折叠同步）
+                                                            alpha = 1f - 2f * p
                                                         },
                                                 )
                                             }
