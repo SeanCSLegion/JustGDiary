@@ -636,6 +636,21 @@ val compact = !(withMorph && p > 0.01f)      // p 只看了 weekProgress
 **已修**：判据同时看 `weekProgress` 与 `yearProgress`（年 morph 期间恢复完整几何，
 即回到重构前那套能工作的几何）。这是一处**实现错误**，不是取舍。
 
+### 已用逐帧录屏**拍到**这个突跳（2026-09-26）
+
+真机 `screenrecord`（30fps）+ `ffmpeg` 抽帧，月→周过程（第 62~73 帧）：
+
+| 帧 | 画面 |
+| --- | --- |
+| 62–65 | 月态：大标题「九月」+ 星期栏 + 整月网格 |
+| **66** | **大标题消失、网格整体上跳，首行 1-6 紧贴星期栏** ← 这就是突跳 |
+| 67–71 | 网格各行再移动到周条的落点 |
+| 72–73 | 周态：周条 + 当日面板 |
+
+第 66 帧正是 `p` 刚跨过 0.01 的那一帧：块从"完整形态"（72 + 30）瞬切成"紧凑形态"（34），
+**大标题消失、网格上移 68dp**。用户说的"跳变 / 月视图消失"就是它。
+证据：`docs/ui-audit/r5-32-morph-frame-by-frame.png`。
+
 ### 仍未解决：周 ↔ 月自身的 68dp 突跳
 
 只要"紧凑块"与"完整块"高度不同，且切换点由 `p` 决定，就一定会突跳 ——
@@ -650,9 +665,19 @@ val compact = !(withMorph && p > 0.01f)      // p 只看了 weekProgress
    让选中行落到钉住星期栏之下；
 4. `LazyColumn` 需要 `contentPadding(top = 钉住层高度)`，否则首行会被钉住层盖住。
 
-**验证方式（本轮被卡住的点）**：动画必须逐帧看，而这台机器当时
-`screencap` 一直返回黑帧（后来查明是**通知栏拉着** + 屏幕已休眠）。
-下一轮先 `cmd statusbar collapse` / 确认 `mWakefulness`，再抓帧。
+### 验证方式（**已打通**，这是本轮最有价值的产出）
+
+这台机器 `screencap` 会返回**黑帧**（应用正常渲染：`uiautomator dump` 有 145 个节点、
+`mCurrentFocus` 就是本应用、无 FLAG_SECURE）。改用：
+
+```bash
+adb -s <serial> shell screenrecord --time-limit 6 --size 540x1170 /sdcard/m.mp4
+adb -s <serial> pull /sdcard/m.mp4 /tmp/m.mp4
+/opt/homebrew/bin/ffmpeg -y -i /tmp/m.mp4 -vf fps=30 /tmp/frames/f%03d.png   # 本机有 ffmpeg
+```
+
+**动画类问题必须这样逐帧看** —— 6fps 会整段错过（第一次抽 15 帧就漏掉了过渡），
+30fps 才抓得到那一帧。
 
 ## 9. 数值速查表
 
