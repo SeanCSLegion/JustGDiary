@@ -105,6 +105,14 @@ object CalendarLayout {
     const val MINI_TITLE_H = 17f
     const val MINI_LUNAR_FONT = 6f
 
+    /**
+     * 竖屏 / 平板竖屏的日历最大宽度（dp）。
+     *
+     * 700dp 的可用宽下 7 列每格 100dp，日号缩在中间、年份卡片会被拉成 224dp 的空盒子。
+     * 640dp 对应每格 ~91dp，与 iPhone 的观感接近；分栏时改走 `masterWidth` 公式。
+     */
+    const val CALENDAR_MAX_WIDTH = 640f
+
     /** 每行最小高度（低于它就要降级为周条）。 */
     const val MINIMUM_ROW_HEIGHT = 44f
 

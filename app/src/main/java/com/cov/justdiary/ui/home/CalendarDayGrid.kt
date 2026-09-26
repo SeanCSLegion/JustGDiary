@@ -329,7 +329,7 @@ fun CalendarWeekdayHeader(
 ) {
     val fontScale = LocalDensity.current.fontScale
     val labels = remember(weekStart) {
-        DateFormats.weekdayNames(Locale.getDefault(), weekStart)
+        DateFormats.weekdayInitials(Locale.getDefault(), weekStart)
     }
     val height =
         if (compact) CalendarLayout.COMPACT_WEEKDAY_HEADER_H else CalendarLayout.WEEKDAY_HEADER_H

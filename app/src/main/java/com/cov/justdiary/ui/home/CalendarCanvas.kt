@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.cov.justdiary.R
 import com.cov.justdiary.model.DateUtil
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
+import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.TypeSize
 import java.time.LocalDate
 
@@ -74,8 +75,11 @@ fun YearCanvas(
 
     // Canvas 的绘制 lambda 不是 @Composable 上下文，主题色必须在这里先取出
     val primary = MaterialTheme.colorScheme.primary
+    val onPrimary = MaterialTheme.colorScheme.onPrimary
     val onSurface = MaterialTheme.colorScheme.onSurface
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val cardBg = MaterialTheme.colorScheme.surfaceContainerLow
+    val cardBgSelected = MaterialTheme.colorScheme.surfaceContainerHigh
     val hasDiaryLabel = stringResource(R.string.index_has_diary)
     val noDiaryLabel = stringResource(R.string.index_no_diary)
     // 哪几个月有日记：只算一次（12 张卡片共用一个集合）
@@ -140,6 +144,18 @@ fun YearCanvas(
                 val isCurrentMonth = month == selectedMonth
                 val titleColor = if (isCurrentMonth) primary else onSurfaceVariant
 
+                // 卡片底（规范 §5.2）：普通月 = surfaceContainerLow，选中日所在的月 = 一层更亮的
+                // surfaceContainerHigh。**不用 primaryContainer** —— 卡片里已经有主色的"今天"实心圆
+                // 与主色的"有日记"短横线，再铺一层主色容器会互相打架。
+                drawRoundRect(
+                    color = if (isCurrentMonth) cardBgSelected else cardBg,
+                    topLeft = Offset(card.x.dp.toPx(), card.y.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(card.w.dp.toPx(), card.h.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                        Radius.card.toPx(),
+                    ),
+                )
+
                 val titleText = measurer.measure(
                     monthLabel(monthFirst),
                     monthTitleStyle.copy(color = titleColor),
@@ -152,7 +168,7 @@ fun YearCanvas(
                     ),
                 )
 
-                // ---- 迷你月：6 行 × 7 列的**日号**（规范 §5.4）----
+                // ---- 迷你月：6 行 × 7 列的**日号**（规范 §5.2）----
                 //
                 // 首轮这里画的是"有记录的日期一个圆点"，理由是"卡片只有 ~50dp 高"。
                 // 实测卡片是 128 × 168dp（383 × 503px），这个前提早就不成立 ——
@@ -165,6 +181,8 @@ fun YearCanvas(
                     fontSize = DynamicTypeMetrics.calendarSp(dayFont.dp, density.fontScale),
                 )
                 val rows = CalendarGrid.displayedWeeks(monthFirst, weekStart)
+                // 「今天」的实心圆：半径按格子的短边取，封顶保证不碰到上下两行
+                val todayRadius = minOf(cellW, cellH) * 0.42f
 
                 rows.forEachIndexed { row, week ->
                     week.forEachIndexed { col, date ->
@@ -173,13 +191,20 @@ fun YearCanvas(
                         val isToday = key == todayKey
                         val hasDiary = flags.contains(key)
 
+                        // 规范 §5.2 / 裁决 #8：**今天与有日记可以共存**（不是 when 二选一）。
+                        // 今天 = 实心圆 + onPrimary 字；有日记 = 加粗 + 主色（今天时用 onPrimary，
+                        // 否则与圆底的对比度不够）。
                         val style = dayStyle.copy(
-                            color = if (isToday) primary else onSurface,
-                            fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isToday) onPrimary else onSurface,
+                            fontWeight = if (isToday || hasDiary) FontWeight.Bold else FontWeight.Normal,
                         )
                         val layout = measurer.measure(date.dayOfMonth.toString(), style)
                         val cx = grid.x.dp.toPx() + (col + 0.5f) * cellW
                         val cy = grid.y.dp.toPx() + (row + 0.5f) * cellH
+
+                        if (isToday) {
+                            drawCircle(color = primary, radius = todayRadius, center = Offset(cx, cy))
+                        }
                         drawText(
                             textLayoutResult = layout,
                             topLeft = Offset(
@@ -187,20 +212,15 @@ fun YearCanvas(
                                 cy - layout.size.height / 2f,
                             ),
                         )
-                        // 有日记：日号下方 2dp 短横线；今天：同位置的实心小圆点
-                        val markW = minOf(9f, cellW * 0.5f).dp.toPx()
-                        val markY = cy + layout.size.height / 2f + 1.dp.toPx()
-                        when {
-                            hasDiary -> drawRoundRect(
-                                color = primary,
+                        // 有日记：日号下方 2dp 短横线（宽 = min(20, cellW × 0.5)，与月格同一条尺子）
+                        if (hasDiary) {
+                            val markW = minOf(20f, cellW * 0.5f)
+                            val markY = cy + todayRadius * 0.86f
+                            drawRoundRect(
+                                color = if (isToday) onPrimary else primary,
                                 topLeft = Offset(cx - markW / 2f, markY),
-                                size = androidx.compose.ui.geometry.Size(markW, 1.4f.dp.toPx()),
-                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(0.7f.dp.toPx()),
-                            )
-                            isToday -> drawCircle(
-                                color = primary,
-                                radius = 1.6f.dp.toPx(),
-                                center = Offset(cx, markY + 0.7f.dp.toPx()),
+                                size = androidx.compose.ui.geometry.Size(markW, 2f.dp.toPx()),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f.dp.toPx()),
                             )
                         }
                     }

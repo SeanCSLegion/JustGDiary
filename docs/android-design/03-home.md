@@ -221,12 +221,13 @@ Android 保留"翻月不改选中日"这个行为（它保证翻月纯粹是浏�
 | **今天** | **1.5dp 主色圆环**（不是实心） | 圆环 `primary`；日号与农历 `primary` | 2 |
 | **选中** | **主色实心圆** | 底 `primary`；日号与农历 `onPrimary` | 1（最高） |
 | **有日记** | 日号下方 **2dp 主色短横线**，宽 `min(20, cellW × 0.5)` | `primary` | 3 |
-| **未来日期** | **整格 `alpha × 0.35`**（圆、日号、农历、短横线一起压） | — | 4 |
+| **未来日期** | 日号与农历一律 `onSurfaceVariant`（**不用 alpha**：0.35 的对比度只有 2.19:1，违反 WCAG AA） | `onSurfaceVariant` | 4 |
 
 - 圆直径 `circleD = min(cellW − 3, 内容高 + 14, cellH − 3)`。
 - **今天与有日记可以共存**（裁决 #8）：今天画圆环，同时画短横线。
   但**选中时不再画短横线**（实心圆上的横线看不清）。
-- **未来日期整格压暗，不是只压文字色**。只改文字色会和"周末列"混淆，也会掉到 2.19:1 对比度（R3 实测），违反无障碍。
+- **未来日期用语义色 `onSurfaceVariant`**（iOS 是整格 `alpha × 0.35`，那样对比度只有 2.19:1，R3 实测后已改）。
+  我们也不画周末列的配色，所以"和周末混淆"的顾虑不存在。
 - **相邻月的日期一律不画**（`showAdjacent = false`）：格子留空、不可点、不进无障碍树。
   画相邻月日期会让"这个月"的边界消失（v2 的 D4）。
 
@@ -279,6 +280,7 @@ Android 保留"翻月不改选中日"这个行为（它保证翻月纯粹是浏�
 | 项 | 值 |
 | --- | --- |
 | 列数 × 行数 | **3 × 4** |
+| 日历/年历最大宽度 | **640dp**（竖屏与平板竖屏；分栏时改走 `masterWidth`） |
 | 卡片宽 | `(宽 − YEAR_PAD×2 − YEAR_SPACING×2) / 3` |
 | 卡片高 | `(区高 − YEAR_TITLE_H − 8 − YEAR_SPACING×3) / 4` |
 | 卡内 | `MINI_PAD 6` 内缩；月份标题 `MINI_TITLE_H 17`；下方 6 行 × 7 列迷你格 |
@@ -430,7 +432,7 @@ morph 的每一个端点**必须取自真实排版用的同一个矩形、同一
 | `miniDayFont` | `min(14, max(9, min(cellW×0.95, cellH×0.5)))` | iOS `CalendarLayout.miniDayFont` |
 | 今天圆环 / 选中圆 | 1.5dp / 实心，`circleD = min(cellW−3, 内容高+14, cellH−3)` | iOS `CalendarGrids` |
 | 有日记短横线 | `min(20, cellW×0.5)` × 2dp，日号下方 2dp | iOS `CalendarGrids` |
-| 未来日期 | 整格 `alpha × 0.35` | iOS `CalendarGrids` |
+| 未来日期 | `onSurfaceVariant`（语义色，不用 alpha） | R3 修正；iOS 原为整格 alpha 0.35 |
 | 密度阈值 | ≥60 显示农历 / ≥38 不显示 / 否则周条 | iOS `CalendarDensity` |
 | 分栏阈值 | 内容宽 ≥ 548.5dp 且 宽 > 高 | iOS `AdaptiveLayout` |
 | 主栏宽 | `clamp(内容宽 × 0.46, 260, 440)` | iOS `splitColumns` |

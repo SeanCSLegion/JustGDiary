@@ -261,6 +261,28 @@ class DateFormats(
         }
 
         /**
+         * 日历星期栏的**极短**文案（设计规范 §4.4）：中文 `一 二 三 四 五 六 日`。
+         *
+         * 中文的 `TextStyle.SHORT` 是「周一 / 周二」，七个两字词把 7 列挤满、视觉噪音也大；
+         * iOS 侧用的就是极短形式（`一 二 三 …`）。
+         *
+         * 英文**不走 NARROW**：那会得到 `M T W T F S S`，单字母里 T/T、S/S 有歧义，
+         * 仍用 `Mon / Tue`。
+         */
+        fun weekdayInitials(locale: Locale, weekStart: String): List<String> {
+            val style = if (locale.language == Locale.CHINESE.language) {
+                TextStyle.NARROW
+            } else {
+                TextStyle.SHORT
+            }
+            val anchor = LocalDate.of(2026, 9, 14) // 周一
+            val first = DateUtil.weekFirst(anchor, weekStart)
+            return (0..6).map { offset ->
+                first.plusDays(offset.toLong()).dayOfWeek.getDisplayName(style, locale)
+            }
+        }
+
+        /**
          * 日历日格的无障碍文案（月+日+星期）：zh `9月15日 周二` / en `Tue, Sep 15`。
          *
          * 这里**不复用** [DateFormats.dayTitle] 的模板资源，原因有两个：

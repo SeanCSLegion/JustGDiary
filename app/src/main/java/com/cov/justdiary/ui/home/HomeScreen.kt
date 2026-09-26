@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,12 +33,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -86,7 +88,10 @@ import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.Log
 import com.cov.justdiary.service.Lunar
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.AssistPill
+import com.cov.justdiary.ui.components.PillVariant
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
+import com.cov.justdiary.ui.theme.LocalReduceMotion
 import com.cov.justdiary.ui.theme.Spacing
 import com.cov.justdiary.ui.theme.TypeSize
 import kotlinx.coroutines.launch
@@ -102,26 +107,29 @@ import java.time.LocalDate
 enum class HomeViewMode { MONTH, WEEK, YEAR }
 
 /**
- * 首页日历。对应 iOS `Views/Home/HomeView.swift`，版面与交互按
- * [`docs/design-spec.md`](../../../../../docs/design-spec.md) §5 重新设计。
+ * 首页日历。对应 iOS `Views/Home/HomeView.swift`，规范见
+ * [`docs/android-design/03-home.md`](../../../../../docs/android-design/03-home.md)。
  *
- * ## 与 iOS 的关系
+ * ## 三态状态机（规范 §1）
  *
- * | 维度 | iOS | 这里 |
+ * | 迁移 | 触发 | 动画 |
  * | --- | --- | --- |
- * | 竖屏结构 | 整屏日历 + 三态 morph | **月历 + 选中日面板**两段（M3 单屏信息架构） |
- * | 点日期 | 整屏 morph 进周态 | 选中该日 + 下方面板换内容（**不换屏**） |
- * | 打开日记 | 周态里再点一次 | 点面板按钮，或再点一次已选中的日期 |
- * | 月 ↔ 年 | 缩放 morph | 保留（几何与月历同源，收尾不跳变） |
- * | 上下滑翻月 | 有 | 保留（同阈值、同橡皮筋） |
+ * | 月 → 周 | **点任意日期** | 滑动（`weekProgress 0→1`） |
+ * | 周 → 月 | 点顶栏左胶囊 `‹ 九月` | 滑动（`weekProgress 1→0`） |
+ * | 月 → 年 | 点顶栏左胶囊 `‹ 2026年` | 缩放（`yearProgress 0→1`） |
+ * | 年 → 月 | 点任意迷你月 | 缩放（`yearProgress 1→0`） |
  *
- * ## 上机实测修掉的两个 v1 缺陷（见规范 §1）
+ * 三条必须守住的规则（规范 §1）：
+ *  1. **可见性由 `mode` 决定，不由动画值决定** —— 两个 `Animatable` 从恢复出来的 `mode`
+ *     初始化，等价于"恢复时直接贴到终值"，否则"年态下旋转 + 切深色"会让年历整屏消失（缺陷 D2）。
+ *  2. **morph 进行中禁止一切输入** —— 分页手势整条撤下，返回 / 点日期 / 今天三者都 guard。
+ *  3. **状态不持久化语义**：冷启动恒为「今天 + 月态」；进入分栏时无动画收回月态。
  *
- * 1. **月格被拉散**：`portraitAreaHeight` 原先照搬 iOS 的 `max(320, screenH - 64)`，
- *    在 952dp 高的屏上算出 126dp 的行高，而格子内容只有 40dp。现在行高固定 56dp，
- *    区高由行数派生（[CalendarLayout.portraitAreaHeight]）。
- * 2. **日历在无障碍树里不存在**：月格从 `Canvas` 手绘改为真实组件
- *    （[CalendarDayGrid]），每一天都是一个可聚焦节点。
+ * ## 平板分栏（规范 §2.3 / §4.2）
+ *
+ * `splitsMasterDetail`（内容宽 ≥ 548.5dp 且宽 > 高）时左右分栏：
+ * 左栏月历（仅上下滑翻月 + 点日期）、右栏选中日。**分栏下没有顶栏、没有周态、没有年态**
+ * —— 与 iOS 的 `settleToMonth()` 一致。
  */
 @Composable
 fun HomeScreen(
@@ -171,8 +179,16 @@ fun HomeScreen(
     val weekProgress = remember { Animatable(if (mode == HomeViewMode.WEEK) 1f else 0f) }
     val scope = rememberCoroutineScope()
     val morphing = yearProgress.value > 0.01f || weekProgress.value > 0.01f
-    val animatorsEnabled = remember {
-        runCatching { ValueAnimator.areAnimatorsEnabled() }.getOrDefault(true)
+    // 「减弱动态效果」：系统关掉动画时两条 morph 退化为 180ms 纯交叉淡入（规范 §6.1）。
+    // 判据同时认 `LocalReduceMotion`（设置里的"移除动画"）与
+    // `ValueAnimator.areAnimatorsEnabled()`（开发者选项 / 无障碍），任一为真即降级。
+    val systemReduceMotion = LocalReduceMotion.current
+    val animatorsEnabled = remember(systemReduceMotion) {
+        if (systemReduceMotion) {
+            false
+        } else {
+            runCatching { ValueAnimator.areAnimatorsEnabled() }.getOrDefault(true)
+        }
     }
     // morph 的动画规格 —— **Material 3 的官方令牌**：
     //   时长 `medium4 = 400ms`、缓动 `easing.emphasized = cubic-bezier(0.2, 0, 0, 1)`。
@@ -226,14 +242,27 @@ fun HomeScreen(
     }
 
     val context = LocalContext.current
+    // 未来日期用 Snackbar 反馈（规范 §6.3）。iOS 侧的同类提示是"声明了却从未调用"的死代码，
+    // 而且挂在底部 overlay 上只留 24dp —— 真触发会压住浮条。这里用 M3 的 SnackbarHost。
+    val snackbarHostState = remember { SnackbarHostState() }
+    val futureToastText = stringResource(R.string.index_future_toast)
 
-    /** 翻月：选中日跟到新月份的同一天，月末按当月天数夹住（与 iOS 一致）。 */
-    fun pageMonth(delta: Int) {
+    /**
+     * 翻月（规范 §6.2）。
+     *
+     * **竖屏不动选中日**：月态里选中日本来就不可见，翻月是纯浏览动作，
+     * 不该悄悄改变"我要写哪一天"的目标（副作用由顶栏胶囊的文案规则兜住，见 §3.3）。
+     *
+     * **分栏（平板横屏）要把选中日带到新月份的同一天**：右栏常驻显示选中日的内容，
+     * 不带走的话右栏会显示"另一个月的某天"，与左栏脱节。月末按当月天数夹住。
+     */
+    fun pageMonth(delta: Int, carrySelection: Boolean = false) {
         val keys = CalendarGrid.MONTH_KEYS
         val index = keys.indexOf(monthKey)
         val target = index + delta
         if (target !in keys.indices) return
         monthKey = keys[target]
+        if (!carrySelection) return
         val first = CalendarGrid.monthFirstOfMonthKey(keys[target])
         val day = (DateUtil.parseDayKey(selectedKey) ?: today).dayOfMonth
         val clamped = if (day < first.lengthOfMonth()) day else first.lengthOfMonth()
@@ -305,6 +334,13 @@ fun HomeScreen(
         }
     }
 
+    // 预测性返回（规范 §6 / 设计规范 Q4）：
+    //   年态 / 周态 → 回月态（**不退出应用**）；月态 → 交还系统。
+    // iOS 的年态只有"点迷你月"一条退路，Android 用户会先按系统返回键。
+    PredictiveBackHandler(enabled = mode != HomeViewMode.MONTH) {
+        backToMonth()
+    }
+
     // 无障碍动作的标签要在组合期取好（`semantics` 的 lambda 不是 @Composable）
     val a11yPrevMonth = stringResource(R.string.a11y_prev_month)
     val a11yNextMonth = stringResource(R.string.a11y_next_month)
@@ -316,7 +352,13 @@ fun HomeScreen(
         val availableW = maxWidth.value
         val adaptive = LocalAdaptiveLayout.current
         val split = adaptive.splitsMasterDetail
-        val calendarW = if (split) adaptive.masterWidth else availableW
+        // 竖屏 / 平板竖屏：日历限宽 640dp 居中（规范 §2.2）。不限宽时平板竖屏一格会有 100dp 宽，
+        // 日号缩在中间、年份卡片更是被拉成 224dp 的空盒子。分栏时用主栏宽度公式。
+        val calendarW = if (split) {
+            adaptive.masterWidth
+        } else {
+            minOf(availableW, CalendarLayout.CALENDAR_MAX_WIDTH)
+        }
         val densityScale = LocalDensity.current.density
 
         // 当月**实际**行数（4…6）：`displayedWeeks` 从尾部删掉"整行都不属于本月"的行。
@@ -418,12 +460,15 @@ fun HomeScreen(
             }
         }
 
-        // 上下滑翻月 / 翻年（规范 §5.6）：阈值与橡皮筋复用 `DragPagerMath`。
-        val pagerModifier = Modifier
+        // 上下滑翻月 / 翻年（规范 §6）：阈值与橡皮筋复用 `DragPagerMath`。
+        //
+        // **morph 进行中整条手势撤下**（规范 §1 规则 2）。放在 `then` 里而不是在
+        // 回调里 guard：撤下之后系统会把进行中的拖动当作取消，不会留下半截位移。
+        val swipeModifier = Modifier
             .fillMaxWidth()
             .height(bandH.dp)
             .clipToBounds()
-            .pointerInput(mode, rows, cellH) {
+            .pointerInput(mode, rows, cellH, split) {
                 var accumulated = 0f
                 val tracker = VelocityTracker()
                 detectVerticalDragGestures(
@@ -437,8 +482,11 @@ fun HomeScreen(
                         val predictedEnd =
                             accumulated + velocity * CalendarLayout.DragPagerMath.PROJECTION_SECONDS
                         when (CalendarLayout.DragPagerMath.decide(accumulated, predictedEnd, true, true)) {
-                            CalendarLayout.PageTarget.Next -> if (mode == HomeViewMode.YEAR) jumpYear(1) else pageMonth(1)
-                            CalendarLayout.PageTarget.Previous -> if (mode == HomeViewMode.YEAR) jumpYear(-1) else pageMonth(-1)
+                            // 分栏翻月带走选中日（右栏跟着走），竖屏不带走
+                            CalendarLayout.PageTarget.Next ->
+                                if (mode == HomeViewMode.YEAR) jumpYear(1) else pageMonth(1, split)
+                            CalendarLayout.PageTarget.Previous ->
+                                if (mode == HomeViewMode.YEAR) jumpYear(-1) else pageMonth(-1, split)
                             CalendarLayout.PageTarget.Stay -> Unit
                         }
                         accumulated = 0f
@@ -453,15 +501,26 @@ fun HomeScreen(
                     },
                 )
             }
+        val pagerModifier = if (morphing) {
+            Modifier
+                .fillMaxWidth()
+                .height(bandH.dp)
+                .clipToBounds()
+        } else {
+            swipeModifier
+        }
 
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 分栏（横屏/宽窗口）时头部隐藏：可用高只有 ~400dp，头部会吃掉日历（与 iOS 一致）
             if (!split) {
                 HomeTopBar(
-                    title = homeTitle(mode, year, monthFirst, dateFormats, context),
-                    mode = mode,
-                    onTitleClick = {
-                        // 月态 → 年历；周态 / 年态 → 回月态（规范 §5.7）
+                    // 月态只放年份（月份由下面 72dp 的 32sp 大标题承担）；周态放月份名 = 回月历
+                    leftLabel = homeTitle(mode, year, monthFirst, dateFormats, context),
+                    showLeft = mode != HomeViewMode.YEAR,
+                    todayLabel = todayPillLabel(selectedDate, today, monthFirst, dateFormats, context),
+                    onLeftClick = {
+                        // 月态 → 年历；周态 → 回月态；年态不可点（整枚隐藏）
                         if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
                     },
                     onToday = ::goToday,
@@ -471,14 +530,15 @@ fun HomeScreen(
             val onDayClick: (LocalDate) -> Unit = { date ->
                 val key = DateUtil.dayKeyOf(date)
                 when {
-                    // 月态：点日期 = **整屏 morph 进周态**并选中（与 iOS `openDay` 一致）。
-                    // 首轮这里是"只换下方面板、不换屏"，morph 只能靠顶栏那个图标触发（缺陷 D6/D7）。
+                    // 月态：点日期 = **整屏 morph 进周态**并选中（与 iOS `openDay` 一致）
                     !weekMode -> {
                         selectedKey = key
                         setWeekMode(true)
                     }
-                    // 周态：点另一天 = 换选中；点已选中的那天 = 打开日记
+                    // 周态：点另一天 = 换选中
                     key != selectedKey -> selectedKey = key
+                    // 未来日期：只给一条 Snackbar，不打开日记（规范 §6.3）
+                    key > todayKey -> scope.launch { snackbarHostState.showSnackbar(futureToastText) }
                     else -> onOpenDay(date)
                 }
             }
@@ -502,30 +562,36 @@ fun HomeScreen(
                 selectedWeekIndex = selectedWeekIndex,
                 fadeForYear = yearProgress.value,
                 onDayClick = onDayClick,
-                onPageMonth = ::pageMonth,
+                onPageMonth = { delta -> pageMonth(delta) },
                 onPageWeek = ::pageWeek,
                 a11yPrevMonth = a11yPrevMonth,
                 a11yNextMonth = a11yNextMonth,
                 a11yPrevYear = a11yPrevYear,
                 a11yNextYear = a11yNextYear,
-                pageMonth = ::pageMonth,
+                pageMonth = { delta -> pageMonth(delta) },
                 jumpYear = ::jumpYear,
                 // 大标题槽只在竖屏存在；分栏时高度太紧（规范 §5.8）
                 showBigTitle = !split,
                 monthTitleLabel = monthTitle,
             )
             if (split) {
-                // 横屏 / 宽窗口：左右双栏。左栏只有月态（横屏不提供年历入口，也没有周态）。
-                // ⚠️ 三块必须在 **Row** 里（规范 §5.8）：放进 Column 会被按高度分配，
+                // 横屏 / 宽窗口：左右双栏。左栏只有月态（分栏下没有年份入口，也没有周态）。
+                // ⚠️ 三块必须在 **Row** 里（规范 §2.3）：放进 Column 会被按高度分配，
                 // 表现为"日历占满左半边、右栏整块消失"。
                 Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                // 左栏：上下滑翻月（翻月时把选中日带到新月份的同一天，右栏才跟着走）
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .then(pagerModifier),
+                ) {
                     CalendarSection(args = calendarArgs)
                 }
                 VerticalDivider(
                     modifier = Modifier.fillMaxHeight(),
                     thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.outlineVariant,
                 )
                 DayPanel(
                     blocks = dayBlocks,
@@ -546,9 +612,15 @@ fun HomeScreen(
                 }
             } else {
                 when (mode) {
-                    // 周态：周条 + 下方日记内容（内容只在周态出现）
+                    // 周态：周条 / 分隔线 / 日期标题行 / 分隔线 / 当日内容（规范 §5.1）
                     HomeViewMode.WEEK -> Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        Box(modifier = pagerModifier) { CalendarSection(args = calendarArgs) }
+                        Box(
+                            modifier = pagerModifier,
+                            contentAlignment = Alignment.TopCenter,
+                        ) { CalendarSection(args = calendarArgs) }
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
                         DayPanel(
                             blocks = dayBlocks,
                             selectedDate = selectedDate,
@@ -567,13 +639,19 @@ fun HomeScreen(
                         )
                     }
 
-                    // 月态：整屏
-                    HomeViewMode.MONTH -> Box(modifier = pagerModifier) {
+                    // 月态：整屏（宽窗口里限宽居中）
+                    HomeViewMode.MONTH -> Box(
+                        modifier = pagerModifier,
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
                         CalendarSection(args = calendarArgs)
                     }
 
                     // 年态：整屏（12 张迷你月 + 页内大标题）
-                    HomeViewMode.YEAR -> Box(modifier = pagerModifier) {
+                    HomeViewMode.YEAR -> Box(
+                        modifier = pagerModifier,
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
                         YearLayer(
                             args = calendarArgs,
                             year = year,
@@ -589,6 +667,14 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+            // Snackbar 落在内容之上、底栏之上（底栏由 RootScreen 的 Scaffold 占位，不重叠）
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+            )
         }
     }
 }
@@ -955,23 +1041,25 @@ private fun weekDescription(week: List<LocalDate>): String {
 // ---------------------------------------------------------------------- 顶栏
 
 /**
- * 首页顶栏。M3 规格（规范 §5.7）：`titleLarge` + 尾部 `TextButton`，高度 `minHeight`。
+ * 首页顶栏（规范 §3）：两枚 M3 **assist chip**。
  *
- * | 形态 | 左 | 右 |
- * | --- | --- | --- |
- * | 月态 | `▾ 2026年`（整块可点 → 年历） | `今天` |
- * | 周态 | `‹ 九月`（整块可点 → **回月态**） | `今天` |
- * | 年态 | `‹ 2026年`（整块可点 → 回月态） | `今天` |
+ * | 位置 | 变体 | 月态 | 周态 | 年态 |
+ * | --- | --- | --- | --- | --- |
+ * | 左 | `Outlined` + 前导 `chevron_left` | `2026年`（→ 年历） | `九月`（→ 回月态） | **整枚隐藏** |
+ * | 右 | `Elevated` + 前导 `calendar_today` | 相对日 / 具体日期（→ 回到今天） | 同左 | 同左 |
  *
  * **这里没有"月↔周"按钮**：iOS 没有那个入口，而且它的图标在月/周两态下完全一样，
- * 摆在「今天」旁边只会被读成第二个日历入口（实测缺陷 D7）。回月态的入口就是周态
- * 顶栏左侧的 `‹ 九月`，与 iOS 一致。
+ * 摆在「今天」旁边只会被读成第二个日历入口（缺陷 D7）。
+ *
+ * 年态隐藏左胶囊时必须另留退路：**系统返回键**（`PredictiveBackHandler`）与**点迷你月**
+ * —— iOS 只有后者，Android 用户满屏找不到返回会先按系统返回键。
  */
 @Composable
 private fun HomeTopBar(
-    title: String,
-    mode: HomeViewMode,
-    onTitleClick: () -> Unit,
+    leftLabel: String,
+    showLeft: Boolean,
+    todayLabel: String,
+    onLeftClick: () -> Unit,
     onToday: () -> Unit,
 ) {
     val backLabel = stringResource(R.string.a11y_back_to_month)
@@ -979,48 +1067,74 @@ private fun HomeTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = CalendarLayout.HEADER_H.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            // 8dp + 48dp 胶囊 + 8dp = 64dp = HEADER_H。
+            // M3 的 chip 布局高是 48dp（`minimumInteractiveComponentSize`，触控目标硬要求），
+            // 所以这里不能再按"视觉 40dp"去配 12dp 上边距，否则整条会超到 72dp。
+            .padding(horizontal = Spacing.page, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .clickable(onClick = onTitleClick)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
-                .semantics {
-                    if (mode != HomeViewMode.MONTH) contentDescription = backLabel
+        if (showLeft) {
+            AssistPill(
+                text = leftLabel,
+                onClick = onLeftClick,
+                leading = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                variant = PillVariant.Outlined,
+                modifier = Modifier.semantics {
+                    if (leftLabel.isNotEmpty()) contentDescription = backLabel
                 },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(
-                imageVector = if (mode == HomeViewMode.MONTH) {
-                    Icons.Filled.ArrowDropDown
-                } else {
-                    Icons.AutoMirrored.Filled.KeyboardArrowLeft
-                },
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        TextButton(onClick = onToday) {
-            Text(stringResource(R.string.index_today))
-        }
+        AssistPill(
+            text = todayLabel,
+            onClick = onToday,
+            leading = Icons.Filled.DateRange,
+            variant = PillVariant.Elevated,
+        )
     }
 }
 
 /**
- * 顶栏标题。
+ * 右胶囊的文案（规范 §3.3，**Android 的一处改进**）。
  *
- * 月态只放**年份**（规范 §5.7）：月份由下面 72dp 的 32sp 大标题承担 —— 首轮把
- * "2026年 九月"整串塞进顶栏，结果既没有大标题、顶栏又比 iOS 重（实测缺陷 D5 的一部分）。
+ * ```
+ * 选中日属于当前显示的月  → 相对日（今天 / 昨天 / 明天 / 3 天前 …）
+ * 否则                    → 具体日期（9月26日）
+ * ```
+ *
+ * iOS 竖屏翻月不改选中日，于是可能出现"屏幕上是 12 月、胶囊却写着『今天』"的误导。
+ * Android 保留"翻月不改选中日"（翻月是纯浏览，不该改变写入目标），但让胶囊在两者
+ * 脱节时说实话。
+ */
+@Composable
+private fun todayPillLabel(
+    selectedDate: LocalDate,
+    today: LocalDate,
+    monthFirst: LocalDate,
+    formats: DateFormats?,
+    context: android.content.Context,
+): String {
+    val sameMonth = selectedDate.year == monthFirst.year &&
+        selectedDate.monthValue == monthFirst.monthValue
+    if (!sameMonth) {
+        return formats?.dateOnly(selectedDate)
+            ?: context.getString(R.string.date_day_only, selectedDate.monthValue, selectedDate.dayOfMonth)
+    }
+    val days = java.time.temporal.ChronoUnit.DAYS.between(today, selectedDate).toInt()
+    return when {
+        days == 0 -> stringResource(R.string.index_today)
+        days == -1 -> stringResource(R.string.index_yesterday)
+        days == 1 -> stringResource(R.string.index_tomorrow)
+        days < -1 -> stringResource(R.string.index_days_ago, -days)
+        else -> stringResource(R.string.index_days_later, days)
+    }
+}
+
+/**
+ * 顶栏左侧胶囊的文案。
+ *
+ * 月态只放**年份**（规范 §3）：月份由下面 72dp 的 32sp 大标题承担 —— 首轮把
+ * "2026年 九月"整串塞进顶栏，结果既没有大标题、顶栏又比 iOS 重（缺陷 D5 的一部分）。
  */
 private fun homeTitle(
     mode: HomeViewMode,
@@ -1088,8 +1202,11 @@ private fun DayPanel(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = CalendarLayout.DAY_TITLE_H.dp)
-                    .padding(horizontal = Spacing.page, vertical = 4.dp),
+                    // 设计值 40dp（分栏 44dp），但分栏右栏标题行要放一枚「今天」胶囊，
+                    // M3 chip 的布局高是 48dp —— 取 min 48 让行高由它决定（规范 §2.3 的 44dp
+                    // 是 iOS 的 44pt 触控目标，Android 的平台要求是 48dp）。
+                    .heightIn(min = Spacing.hitTarget)
+                    .padding(horizontal = Spacing.page),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -1112,13 +1229,17 @@ private fun DayPanel(
                 // iOS 的当日标题行只有「日期 + 农历」，"今天"是横屏右栏标题行里那枚**按钮**。
                 // 首轮两处都画，于是横屏标题行出现两个"今天"（实测缺陷 D9）。
                 Spacer(modifier = Modifier.weight(1f))
+                // 分栏时「今天」只在这一处（右栏标题行），竖屏周态不重复画（规范 §3.4）
                 if (onToday != null) {
-                    TextButton(onClick = onToday) {
-                        Text(stringResource(R.string.index_today))
-                    }
+                    AssistPill(
+                        text = stringResource(R.string.index_today),
+                        onClick = onToday,
+                        leading = Icons.Filled.DateRange,
+                        variant = PillVariant.Elevated,
+                    )
                 }
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
 
         Box(
