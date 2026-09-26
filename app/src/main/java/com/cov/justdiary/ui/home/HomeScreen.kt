@@ -800,7 +800,11 @@ fun HomeScreen(
             // 原来"是否紧凑"看 `p > 0.01`、而"标签用简写还是全写"看 `withMorph` ——
             // 两者不一致时，当前月会以**紧凑行高**显示**全写**的「九月」（实测 dump 到
             // 「九月」出现两次）。这类"同一件事两处判断"正是前面踩过的坑。
-            val compact = !(withMorph && p > 0.01f)
+            // ⚠️ **两个 morph 都要看**：只判 `weekProgress` 时，年 morph 期间它恒为 0，
+            // 于是当前块保持紧凑形态 —— 而年 morph 的源几何是按"大标题 72 + 星期栏 30"
+            // 算的，两者不符，表现为"月→年切换跳变、月视图在错误的位置消失"
+            // （用户实测反馈："月视图到年视图的切换也存在跳变，是月视图消失的问题"）。
+            val compact = !(withMorph && (p > 0.01f || yearProgress.value > 0.01f))
             return calendarArgs.copy(
                 displayed = weeks,
                 monthFirst = first,
