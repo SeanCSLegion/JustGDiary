@@ -2065,6 +2065,27 @@ iOS `MonthWeekMorphView` 是 `content().offset(y: contentOffset)`，其中
 与 iOS 逐字一致。**验证**：月→周尾帧 vs 周态静止 **0 个像素差异**；
 周→月起手帧 vs 周态静止 **0**、尾帧 vs 月视图 **0**。
 
+## R9 · 年→月"最后闪一下"的真凶：`graphicsLayer { alpha = 0f }` 那一层被整层跳过
+
+用户第三次报同一条："年视图切换到月视图还是在最后会闪一下。"
+这次用 **`screenrecord` 录屏 + 逐帧分析**（不再靠 `screencap` 抓单帧，那抓不到 16ms 的
+问题帧），在 600ms 的真实速度下抓到了：交班后有 **2~4 帧**，大标题与星期栏都在、
+**整个日期区是空的**（既不是 morph 画的、也不是真实图层画的），随后日期又冒出来 —— 
+这就是"闪一下"。
+
+**判定性实验**：临时把连续流的 `contentAlpha` 固定成 `1f`（永不透明）→ 空白帧 **0**。
+于是根因确定：`graphicsLayer { alpha = 0f }` 会让这一层**被整层跳过**（不再录制显示
+列表），morph 结束把 alpha 翻回 1 时，重新录制要花几帧 —— 那几帧日期区就是空的。
+
+**修法**：把"隐藏"从 `0f` 换成 `HIDDEN_ALPHA = 0.004f`（对比度约 1/255，
+四舍五入后最多差 1 个灰阶，肉眼不可见），这一层始终在画，翻回 1 时是即时的。
+验证（录屏逐帧统计日期区墨迹量）：**月→年 0 帧骤降、年→月 0 帧骤降**。
+
+顺带按 iOS 对齐一处小标题差异：iOS 的 `MonthFlowLabel` **自己按日期算 `isCurrent`**
+（今天所在月 = 加粗 + 主色），morph 与流用的是同一个视图；Android 的 `isCurrent` 是入参，
+morph 里漏传 → 小标题在交班时会突然由灰变蓝。现在 `MonthFlowMorphSource.Label` 带上
+`key`，morph 里按 `todayMonthKey` 传 `isCurrent`。
+
 ### 单测抓到的两个真 bug（都已修）
 
 1. **矩形插值方向反了**：`lerpRect(source, target, t)` 在 `t = 1`（月侧）给的是**目标** ——

@@ -366,6 +366,8 @@ data class MonthFlowMorphSource(
     /** 冻结时的一个月份小标题。 */
     data class Label(
         val monthFirst: LocalDate,
+        /** 月份键（`CalendarGrid.monthKey`）—— morph 里判 `isCurrent` 用。 */
+        val key: Int,
         /** 冻结时小标题**底边**在日历区坐标里的 y（紧贴日期数字上方）。 */
         val bottom: Float,
     )
@@ -380,6 +382,19 @@ data class MonthFlowMorphSource(
 class FlowOffsetProbe {
     var value: Float = 0f
 }
+
+/**
+ * "隐藏"用的不透明度。
+ *
+ * ⚠️ **不能写 `0f`**：`graphicsLayer` 的 alpha 归零后这一层会被整层跳过（不再录制显示
+ * 列表），等 morph 结束把 alpha 翻回 1 时，重新录**要花几帧** —— 那几帧里日期区是
+ * **空的**（大标题与星期栏还在，日期整片消失再冒出来）。
+ * 用户报的"年视图切换到月视图还是在最后会闪一下"就是它；录屏逐帧能看到空白持续 2~4 帧。
+ *
+ * `0.004` 的对比度约等于 1/255（四舍五入后最多差 1 个灰阶），肉眼不可见，
+ * 但这一层始终在画，翻回 1 时是即时的。
+ */
+private const val HIDDEN_ALPHA = 0.004f
 
 // --------------------------------------------------------------------------- 滚动状态
 
@@ -502,11 +517,11 @@ fun MonthFlow(
             .collect { i -> layout.blocks.getOrNull(i)?.let { onTopMonthChange(it.key) } }
     }
 
-    val contentAlpha: () -> Float = remember(visible) { { if (visible) 1f else 0f } }
+    val contentAlpha: () -> Float = remember(visible) { { if (visible) 1f else HIDDEN_ALPHA } }
     // 钉住层的透明度 = 可见性。
     // ⚠️ 必须单独判：周态 / 年态下整条流的不透明度是 0（它必须常驻以保住滚动位置），
     // 但钉住层是**另一个** Box，会照旧画在顶上 —— 实测周态里那颗大标题穿在周条后面。
-    val headerAlpha: () -> Float = remember(visible) { { if (visible) 1f else 0f } }
+    val headerAlpha: () -> Float = remember(visible) { { if (visible) 1f else HIDDEN_ALPHA } }
 
     Box(
         modifier = modifier
@@ -971,6 +986,7 @@ private fun morphSource(
         labels.add(
             MonthFlowMorphSource.Label(
                 monthFirst = block.monthFirst,
+                key = block.key,
                 bottom = block.top - offsetDp + titleHeight + weekdayHeight - LABEL_TIGHT_GAP,
             ),
         )
@@ -1107,12 +1123,20 @@ fun MonthWeekMorph(
                     .fillMaxSize()
                     .clipToBounds(),
             ) {
+                // 小标题的强调色（今天所在月 = 加粗 + 主色）**必须与连续流一致**：
+                // iOS 的 `MonthFlowLabel` 自己按日期算 `isCurrent`，morph 与流用的是同一个
+                // 视图；Android 这边 `isCurrent` 是入参，morph 里漏传 → 交班那一帧小标题
+                // 会突然由灰变蓝（用户："月视图下月份小标题你没有做动画"）。
+                val todayMonthKey = remember(todayKey) {
+                    DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
+                }
                 source.labels.forEach { label ->
                     MonthFlowLabel(
                         cellW = cellW,
                         column = DateUtil.weekdayIndex(label.monthFirst, weekStart),
                         bandH = source.labelBandH,
                         text = labelText(label.monthFirst),
+                        isCurrent = label.key == todayMonthKey,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .graphicsLayer {
