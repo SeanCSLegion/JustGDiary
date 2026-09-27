@@ -10,9 +10,14 @@ data class EditorSelection(
     val lineIndex: Int,
     val start: Int,
     val end: Int,
+    /** 跨行选区时的**结束行**；与 [lineIndex] 相同表示单行选区。 */
+    val endLineIndex: Int = lineIndex,
 ) {
     /** 是否是一个空选区（光标）。 */
-    val isCollapsed: Boolean get() = start == end
+    val isCollapsed: Boolean get() = lineIndex == endLineIndex && start == end
+
+    /** 选区覆盖的**整段**范围（段落级操作用：规范 §3.2「选中的每一整段」）。 */
+    val lineRange: IntRange get() = lineIndex..maxOf(lineIndex, endLineIndex)
 
     companion object {
         val NONE = EditorSelection(0, 0, 0)
@@ -88,14 +93,33 @@ object EditorSelectionMap {
     /** 把选区规范化到合法范围（起点不大于终点、行号夹住）。 */
     fun normalize(selection: EditorSelection, lines: List<EditorLine>): EditorSelection {
         if (lines.isEmpty()) return EditorSelection.NONE
-        val index = selection.lineIndex.coerceIn(0, lines.size - 1)
-        val max = lines[index].text.length
-        val a = selection.start.coerceIn(0, max)
-        val b = selection.end.coerceIn(0, max)
-        return if (a <= b) {
-            EditorSelection(index, a, b)
+        val first = selection.lineIndex.coerceIn(0, lines.size - 1)
+        val last = selection.endLineIndex.coerceIn(first, lines.size - 1)
+        val firstMax = lines[first].text.length
+        val lastMax = lines[last].text.length
+        val a = selection.start.coerceIn(0, firstMax)
+        val b = selection.end.coerceIn(0, lastMax)
+        // 同一行内反着选（2→1）要交换；跨行选区按"从前往后"理解
+        // （EditText 给的两端已经排好序，行与行之间不做交换）
+        return if (first == last && a > b) {
+            EditorSelection(first, b, a, last)
         } else {
-            EditorSelection(index, b, a)
+            EditorSelection(first, a, b, last)
+        }
+    }
+
+    /**
+     * 选区在每一行上覆盖的字符区间（跨行选区的行内样式用）。
+     *
+     * 首行从 `start` 到行尾、末行从行首到 `end`、中间行整行。
+     */
+    fun coveredRanges(selection: EditorSelection, lines: List<EditorLine>): List<Pair<Int, IntRange>> {
+        val normalized = normalize(selection, lines)
+        return (normalized.lineIndex..normalized.endLineIndex).mapNotNull { index ->
+            val line = lines.getOrNull(index) ?: return@mapNotNull null
+            val from = if (index == normalized.lineIndex) normalized.start else 0
+            val to = if (index == normalized.endLineIndex) normalized.end else line.text.length
+            index to (from.coerceIn(0, line.text.length)..to.coerceIn(0, line.text.length))
         }
     }
 
@@ -111,19 +135,6 @@ object EditorSelectionMap {
         return index..index
     }
 
-    /** 工具栏高亮用的行内选区（空选区时取光标处的单字符区间）。 */
-    fun effectiveInlineRange(selection: EditorSelection, lines: List<EditorLine>): Pair<Int, Int> {
-        val normalized = normalize(selection, lines)
-        val line = lines.getOrNull(normalized.lineIndex) ?: return 0 to 0
-        return if (normalized.start < normalized.end) {
-            normalized.start to normalized.end
-        } else {
-            // 空选区：取光标前一个字符，便于"光标处的样式"查询
-            val at = normalized.start.coerceAtMost(line.text.length)
-            val from = (at - 1).coerceAtLeast(0)
-            from to at
-        }
-    }
 
     private fun markerLength(line: EditorLine): Int = displayLength(line) - line.text.length
 

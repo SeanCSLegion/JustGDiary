@@ -37,6 +37,90 @@ object SpannableBridge {
     class BlockStyleSpan(val style: String) : android.text.style.ParagraphStyle
 
     /**
+     * 一个段落样式在**编辑器里的排版**（字号 / 行高 / 段后距），单位 px。
+     *
+     * 由界面层从 M3 排版角色解析（`EditorTypography.textStyleFor` + 密度），
+     * 这样编辑器与阅读态用的是**同一套**字号与行高 —— 规范 §2 的第一条：
+     * 同一段文字在两种模式下逐像素一致。
+     */
+    data class BlockMetrics(
+        val textSizePx: Int,
+        val lineHeightPx: Int,
+        val paragraphSpacingPx: Int,
+    )
+
+    /**
+     * 段落排版 span：字号（`MetricAffectingSpan`）+ 行高 + 段后距（`LineHeightSpan`）。
+     *
+     * ## 为什么不是直接给块样式一个字号
+     *
+     * `BlockStyleSpan` 只承载**语义样式名**（跨端契约里存的就是它，不存字号）；
+     * 真正画出来的字号由这一层按平台规范给。分开的好处：系统字号一变，
+     * 只需要重算这一层，模型与落库内容一个字节都不动。
+     *
+     * 段后距只加在**段落的最后一行**（`text[end]` 是换行或已到文末）——
+     * 一个 `EditorLine` 就是一段，软换行出来的行不会多出间距。
+     */
+    class BlockMetricsSpan(
+        private val textSizePx: Int,
+        private val lineHeightPx: Int,
+        private val paragraphSpacingPx: Int,
+    ) : android.text.style.MetricAffectingSpan(),
+        android.text.style.LineHeightSpan.WithDensity {
+
+        override fun updateMeasureState(paint: android.text.TextPaint) {
+            paint.textSize = textSizePx.toFloat()
+        }
+
+        override fun updateDrawState(paint: android.text.TextPaint) {
+            paint.textSize = textSizePx.toFloat()
+        }
+
+        /** `LineHeightSpan` 的入口（无密度版）。 */
+        override fun chooseHeight(
+            text: CharSequence,
+            start: Int,
+            end: Int,
+            spanstartv: Int,
+            lineHeight: Int,
+            fm: android.graphics.Paint.FontMetricsInt,
+        ) = applyHeight(text, end, fm)
+
+        /** `WithDensity` 的入口（新版平台走这一条）。字号已经按 px 给好，这里不再乘密度。 */
+        override fun chooseHeight(
+            text: CharSequence,
+            start: Int,
+            end: Int,
+            spanstartv: Int,
+            lineHeight: Int,
+            fm: android.graphics.Paint.FontMetricsInt,
+            paint: android.text.TextPaint,
+        ) = applyHeight(text, end, fm)
+
+        private fun applyHeight(
+            text: CharSequence,
+            end: Int,
+            fm: android.graphics.Paint.FontMetricsInt,
+        ) {
+            val natural = fm.descent - fm.ascent
+            if (natural <= 0) return
+            // 行高：按比例拉开 ascent/descent（保持基线位置的比例），得到 M3 角色的行高
+            if (lineHeightPx > natural) {
+                val scale = lineHeightPx.toFloat() / natural
+                fm.ascent = (fm.ascent * scale).toInt()
+                fm.descent = (fm.descent * scale).toInt()
+            }
+            // 段后距：只加在段落最后一行（行尾是换行，或已到文末）
+            val lastOfParagraph = end >= text.length || text[end] == '\n'
+            if (lastOfParagraph && paragraphSpacingPx > 0) {
+                fm.descent += paragraphSpacingPx
+            }
+            fm.top = fm.ascent
+            fm.bottom = fm.descent
+        }
+    }
+
+    /**
      * 承载图片来源的图片 span（对应 iOS 的 `PayloadAttachment`）。
      *
      * `src` 与宽高挂在 span 上，因此图片信息**能穿过 EditText 往返**；
@@ -60,6 +144,8 @@ object SpannableBridge {
         imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
         /** 可用宽度（像素）：图片按"自然宽度但不超宽"显示，见 [ImageDisplaySize]。 */
         containerWidthPx: Int = 0,
+        /** 段落样式 → 编辑器排版；null 表示不设字号（纯文本模式，测试用）。 */
+        metricsFor: ((String) -> BlockMetrics?)? = null,
     ): SpannableStringBuilder {
         val builder = SpannableStringBuilder()
         val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
@@ -101,23 +187,43 @@ object SpannableBridge {
             builder.append(text)
             val end = builder.length
             lineStarts.add(start to end)
+            // 先把终止换行补上，段落级 span 才能覆盖到它（见下）
+            val hasTerminator = index < lines.size - 1
+            if (hasTerminator) builder.append('\n')
 
-            if (end > start) {
-                // 段落级：块样式与对齐
+            // 段落级 span 的右端**含本行的终止换行**（iOS 把块属性挂在终止换行上）：
+            // 空行因此也有承载（一个只有标记的空行、或"刚设了样式还没输入"的空行不会丢样式），
+            // 且在行尾继续输入时样式会延续（`SPAN_INCLUSIVE_INCLUSIVE`）。
+            val paragraphEnd = if (hasTerminator) end + 1 else end
+            if (paragraphEnd > start) {
                 builder.setSpan(
                     BlockStyleSpan(line.blockStyle),
                     start,
-                    end,
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    paragraphEnd,
+                    Spanned.SPAN_INCLUSIVE_INCLUSIVE,
                 )
                 if (line.align == EditorModel.ALIGN_CENTER) {
                     builder.setSpan(
                         android.text.style.AlignmentSpan.Standard(android.text.Layout.Alignment.ALIGN_CENTER),
                         start,
-                        end,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                        paragraphEnd,
+                        Spanned.SPAN_INCLUSIVE_INCLUSIVE,
                     )
                 }
+                metricsFor?.invoke(line.blockStyle)?.let { metrics ->
+                    builder.setSpan(
+                        BlockMetricsSpan(
+                            textSizePx = metrics.textSizePx,
+                            lineHeightPx = metrics.lineHeightPx,
+                            paragraphSpacingPx = metrics.paragraphSpacingPx,
+                        ),
+                        start,
+                        paragraphEnd,
+                        Spanned.SPAN_INCLUSIVE_INCLUSIVE,
+                    )
+                }
+            }
+            if (end > start) {
                 // 行内样式：按 run 的字符偏移挂 span
                 var cursor = start
                 for (run in EditorModel.materializeRuns(line)) {
@@ -126,8 +232,6 @@ object SpannableBridge {
                     cursor = runEnd
                 }
             }
-
-            if (index < lines.size - 1) builder.append('\n')
         }
         return builder
     }
@@ -160,23 +264,22 @@ object SpannableBridge {
 
         val lines = mutableListOf<EditorLine>()
         var lineStart = 0
-        var index = 0
         while (lineStart <= text.length) {
             var lineEnd = lineStart
             while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd++
-            val raw = text.subSequence(lineStart, lineEnd).toString()
-            if (raw.isNotBlank()) {
-                lines.add(parseLine(text, lineStart, lineEnd, raw))
-            }
+            // **空行必须保留**：它是"光标所在的那一段"。
+            // 以前这里丢掉空行，于是按回车后新行在模型里根本不存在 —— 工具栏会把操作
+            // 落到**上一行**（真机缺陷）。落库时空白行由 `linesToParts` 丢弃，两者不冲突。
+            lines.add(parseLine(text, lineStart, lineEnd))
             lineStart = lineEnd + 1
-            index++
             if (lineEnd >= text.length) break
         }
         if (lines.isEmpty()) lines.add(EditorModel.EMPTY_LINE)
         return lines
     }
 
-    private fun parseLine(text: Spanned, start: Int, end: Int, raw: String): EditorLine {
+    private fun parseLine(text: Spanned, start: Int, end: Int): EditorLine {
+        val raw = text.subSequence(start, end).toString()
         // 图片行：src 挂在 ImagePayloadSpan 上
         text.getSpans(start, end, ImagePayloadSpan::class.java).firstOrNull()?.let { span ->
             return EditorLine(
@@ -212,16 +315,18 @@ object SpannableBridge {
         val content = text.subSequence(contentStart, end).toString()
 
         // 块样式：读自定义 span；列表/待办行按正文处理（与 iOS 的 EditorBlockStyle 一致）
+        // 段落样式/对齐：认**起点正好落在本行行首**的那个 span。
+        // （段落 span 的右端含终止换行，相邻两行会互相"够到"彼此的边界，按起点认最稳。）
         val blockStyle = if (marker != null) {
             ContentPartStyle.body
         } else {
-            text.getSpans(start, end, BlockStyleSpan::class.java)
-                .firstOrNull()
+            text.getSpans(start, end.coerceAtLeast(start) + 1, BlockStyleSpan::class.java)
+                .firstOrNull { text.getSpanStart(it) == start }
                 ?.style
                 ?: ContentPartStyle.body
         }
 
-        val centered = text.getSpans(start, end, android.text.style.AlignmentSpan::class.java)
+        val centered = freeStartSpans(text, start, android.text.style.AlignmentSpan::class.java)
             .any { it.alignment == android.text.Layout.Alignment.ALIGN_CENTER }
 
         return EditorLine(
@@ -282,6 +387,11 @@ object SpannableBridge {
         }
         return EditorModel.mergeRuns(runs)
     }
+
+    /** 取"起点落在 [start]"的 span（段落级 span 的边界会互相够到，按起点认最稳）。 */
+    private fun <T : Any> freeStartSpans(text: Spanned, start: Int, kind: Class<T>): List<T> =
+        text.getSpans(start, (start + 1).coerceAtMost(text.length), kind)
+            .filter { text.getSpanStart(it) == start }
 
     private fun covers(span: Any, text: Spanned, from: Int, to: Int): Boolean {
         val spanStart = text.getSpanStart(span)

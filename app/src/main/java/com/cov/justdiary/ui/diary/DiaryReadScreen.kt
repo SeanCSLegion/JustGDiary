@@ -223,9 +223,9 @@ data class ReadBlock(
     val parts: List<ContentPart>,
 )
 
-/** 把一项内容放进居中的正文列（`min(660, 宽 − 32)`）。 */
+/** 把一项内容放进居中的正文列（`min(660, 宽 − 32)`）。阅读页与编辑页共用同一条公式。 */
 @Composable
-private fun DiaryColumn(width: Dp, content: @Composable ColumnScope.() -> Unit) {
+internal fun DiaryColumn(width: Dp, content: @Composable ColumnScope.() -> Unit) {
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Column(modifier = Modifier.width(width), content = content)
     }

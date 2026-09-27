@@ -1,6 +1,7 @@
 package com.cov.justdiary.ui.diary
 
 import android.text.Editable
+import android.text.Spannable
 import android.text.Spanned
 import android.text.TextWatcher
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,17 @@ fun EditorTextArea(
     bodyTextStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     /** 图片行的位图加载器；null 时用透明占位（`src` 仍会穿过往返，不会丢图）。 */
     imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
+    /** 段落样式 → 字号/行高/段距（px）；编辑器与阅读态共用同一把尺子。 */
+    metricsFor: ((String) -> SpannableBridge.BlockMetrics?)? = null,
+    /** 把内部的 `EditText` 交给宿主（点空白收键盘要用它）。 */
+    onViewReady: (AppCompatEditText) -> Unit = {},
+    /**
+     * 进入编辑时自动聚焦（规范 §3.1：0.25s 后 `becomeFirstResponder`）。
+     *
+     * 只在**视图创建时**做一次：工具栏改样式不会重建视图，所以用户手动收起的键盘
+     * 不会被"叫回来"（iOS 为此专门维护了 `autoFocusEditor` 标志位）。
+     */
+    autoFocus: Boolean = true,
 ) {
     val density = LocalDensity.current
 
@@ -73,45 +85,100 @@ fun EditorTextArea(
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = minHeight),
             factory = { context ->
-                AppCompatEditText(context).apply {
+                DiaryEditText(context).apply {
                     isSingleLine = false
                     background = null
                     setPadding(0, 0, 0, 0)
+                    // 编辑器自己滚（外层不再套 verticalScroll）：Android 会在视口变化
+                    // （键盘弹起 / 换行）时把光标滚进可见区，这正是"光标不被挡"的平台做法。
+                    setVerticalScrollBarEnabled(false)
                     inputType = android.text.InputType.TYPE_CLASS_TEXT or
                         android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                         android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                     // 平台撤销（API 23+）与 IME 的自动大小写都保留默认行为
-                    setText(SpannableBridge.toSpannable(state.lines, imageProvider, imageWidthPx))
+                    setText(
+                        SpannableBridge.toSpannable(
+                            state.lines,
+                            imageProvider,
+                            imageWidthPx,
+                            metricsFor,
+                        ),
+                    )
                     setSelection(text?.length ?: 0)
+                    // 光标移动（不改文字）也要更新工具栏：`onSelectionChanged` 是
+                    // `TextView` 的 protected 回调，只能靠子类转发。少了它，
+                    // 工具栏的高亮与"接下来输入的样式"会停留在上一个位置（真机缺陷）。
+                    onSelectionChangedListener = {
+                        if (!state.suppressWatcher) {
+                            val spanned = text
+                            if (spanned != null) {
+                                state.onSelectionChanged(currentSelection(spanned, selectionStart, selectionEnd))
+                            }
+                        }
+                    }
+                    onViewReady(this)
+                    if (autoFocus) {
+                        postDelayed(
+                            {
+                                requestFocus()
+                                val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                                    as? android.view.inputmethod.InputMethodManager
+                                imm?.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                            },
+                            250,
+                        )
+                    }
                     addTextChangedListener(
                         object : TextWatcher {
                             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                                // 插入区间：`count` 个字符从 `start` 开始（删除时 count = 0）
+                                state.onTextReplaced(
+                                    if (count > 0) start until (start + count) else IntRange.EMPTY,
+                                )
+                            }
+
                             override fun afterTextChanged(s: Editable?) {
                                 if (state.suppressWatcher) return
                                 val spanned = s ?: return
                                 state.onUserText(spanned)
                                 state.onSelectionChanged(currentSelection(spanned, selectionStart, selectionEnd))
                                 state.updateComposition(spanned)
+                                state.consumeInsertedRange()
                             }
                         },
                     )
                 }
             },
             update = { view ->
-                // 只有"模型被工具栏改过"时才回写文本，否则会打断用户正在进行的输入
-                if (view.tag != state.revision) {
-                    view.tag = state.revision
+                // 回写条件 = "模型被工具栏改过"（版本号变了）**或**整个状态对象换了
+                // （放弃修改 / 换了一个片段：`AndroidView` 的节点会被复用、`factory` 不会再跑，
+                //  只比版本号会在两边都是 0 时判成"不用回写"，内容就回不去了 —— 真机缺陷）。
+                val stamp = view.tag as? EditorViewStamp
+                val needsRewrite = stamp == null ||
+                    stamp.state !== state ||
+                    stamp.revision != state.revision
+                if (needsRewrite) {
+                    view.tag = EditorViewStamp(state, state.revision)
                     val caret = EditorSelectionMap.flatOffset(
                         state.lines,
                         state.selection.lineIndex,
                         state.selection.start,
                     )
                     state.suppressWatcher = true
-                    view.setText(SpannableBridge.toSpannable(state.lines, imageProvider, imageWidthPx))
+                    view.setText(
+                        SpannableBridge.toSpannable(
+                            state.lines,
+                            imageProvider,
+                            imageWidthPx,
+                            metricsFor,
+                        ),
+                    )
                     val safe = caret.coerceIn(0, view.text?.length ?: 0)
                     view.setSelection(safe)
                     state.suppressWatcher = false
+                    // 工具栏改完模型：顺带把光标带进可见区（比如列表续项之后）
+                    view.post { view.bringPointIntoView(view.selectionEnd) }
                 }
             },
         )
@@ -123,12 +190,35 @@ private fun currentSelection(text: Spanned, start: Int, end: Int): EditorSelecti
     val lines = SpannableBridge.fromSpannable(text)
     val a = EditorSelectionMap.locate(lines, start)
     val b = EditorSelectionMap.locate(lines, end)
+    // 跨行选区保留"到哪一行"：段落级操作要覆盖选中的**每一整段**（规范 §3.2）
     return if (a.lineIndex == b.lineIndex) {
         EditorSelection(a.lineIndex, a.offsetInLine, b.offsetInLine)
     } else {
-        // 跨行选区：模型只支持行内，取起点所在行到行尾
-        val line = lines.getOrNull(a.lineIndex)
-        EditorSelection(a.lineIndex, a.offsetInLine, line?.text?.length ?: a.offsetInLine)
+        EditorSelection(a.lineIndex, a.offsetInLine, b.offsetInLine, b.lineIndex)
+    }
+}
+
+/**
+ * `AndroidView` 上的回写标记：记住"上一次灌进去的是哪个状态对象、哪个版本"。
+ *
+ * 两个都要：同一状态内工具栏改模型是版本号变化；换状态对象（放弃修改 / 换片段）时
+ * 版本号可能**恰好相同**，只看版本号就会漏掉回写。
+ */
+private class EditorViewStamp(val state: EditorTextState, val revision: Int)
+
+/**
+ * 带选区回调的 `EditText`。
+ *
+ * `TextView` 把"光标/选区变了"这件事只发给 protected 的 `onSelectionChanged`，
+ * 没有公开监听器；而工具栏的高亮与"接下来输入的样式"都要跟着光标走，因此必须转发出来。
+ */
+private class DiaryEditText(context: android.content.Context) : AppCompatEditText(context) {
+
+    var onSelectionChangedListener: (() -> Unit)? = null
+
+    override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+        super.onSelectionChanged(selStart, selEnd)
+        onSelectionChangedListener?.invoke()
     }
 }
 
@@ -145,6 +235,27 @@ class EditorTextState(initialLines: List<EditorLine>) {
 
     var selection: EditorSelection by mutableStateOf(EditorSelection.NONE)
         private set
+
+    /**
+     * **待输入的行内样式**（对应 iOS 的 `typingAttributes`）。
+     *
+     * 规范 §3.2：光标（无选区）时点 B/I/S/U 只改"接下来输入的字符"，已输入的一个都不动；
+     * 光标落到加粗的字后面时，接下来输入的自然也是加粗的。落地点在 [onUserText]：
+     * 文本插入后对**插入区间**加 span。
+     */
+    var pendingFlags: InlineFlags by mutableStateOf(InlineFlags.NONE)
+        private set
+
+    /** 最近一次文本变更里被插入的区间（由 `TextWatcher.onTextChanged` 给出）。 */
+    private var insertedRange: IntRange = IntRange.EMPTY
+
+    internal fun onTextReplaced(range: IntRange) {
+        insertedRange = range
+    }
+
+    internal fun consumeInsertedRange() {
+        insertedRange = IntRange.EMPTY
+    }
 
     /** 是否正在 IME 组合中（组合期间禁用格式操作，见 [FormatGate]）。 */
     var composing: Boolean by mutableStateOf(false)
@@ -164,10 +275,99 @@ class EditorTextState(initialLines: List<EditorLine>) {
      * 于是列表会被拆成两条。这里用 [EditorModel.inheritMarkersForNewLines] 让新建的空行
      * 继承上一行的标记 —— 与 iOS 的标记附件在换行时被继承等价。
      */
-    fun onUserText(spanned: Spanned) {
+    fun onUserText(spanned: Spannable) {
+        // ① 待输入的行内样式：落在**插入的那几个字符**上（组合中不动 —— 改 span 会打断候选）
+        val range = insertedRange
+        if (!composing && !range.isEmpty() && pendingFlags != InlineFlags.NONE) {
+            applyPendingFlags(spanned, range)
+        }
+        // ② 解析 + 回车修补（列表续项 / 空项结束 / 空引用结束）+ 空行样式续上
         val parsed = SpannableBridge.fromSpannable(spanned)
-        lines = EditorModel.inheritMarkersForNewLines(parsed, previous = lines)
+        val repaired = EditorModel.carryOverStylesWhenTyping(
+            EditorModel.repairAfterEnter(parsed, previous = lines),
+            previous = lines,
+        )
+        lines = repaired
         selection = selection.coerceTo(lines)
+        // ③ 修补改了模型就必须**回写平台文本**：新行的 `• `/`☐ ` 前缀与段落样式都挂在
+        //    `Spannable` 上，不写回去用户看不到标记（真机缺陷：回车后续项没有项目符号）。
+        //    只在真的改了东西时递增版本号，普通打字不会触发重写。
+        if (repaired != parsed) revision += 1
+    }
+
+    /**
+     * 把待输入样式写进**平台文本**（直接对 Spannable 加 span，不改文本：
+     * 改文本会再触发一次 watcher，也会打断输入法）。
+     */
+    private fun applyPendingFlags(spanned: Spannable, range: IntRange) {
+        val start = range.first.coerceIn(0, spanned.length)
+        val end = (range.last + 1).coerceIn(start, spanned.length)
+        if (start >= end) return
+        val flag = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        if (pendingFlags.bold || pendingFlags.italic) {
+            val style = when {
+                pendingFlags.bold && pendingFlags.italic -> android.graphics.Typeface.BOLD_ITALIC
+                pendingFlags.bold -> android.graphics.Typeface.BOLD
+                else -> android.graphics.Typeface.ITALIC
+            }
+            spanned.setSpan(android.text.style.StyleSpan(style), start, end, flag)
+        }
+        if (pendingFlags.strike) {
+            spanned.setSpan(android.text.style.StrikethroughSpan(), start, end, flag)
+        }
+        if (pendingFlags.underline) {
+            spanned.setSpan(android.text.style.UnderlineSpan(), start, end, flag)
+        }
+    }
+
+    /**
+     * 工具条的 B/I/S/U：
+     * - **有选区** → 整个选区统一一个方向（全带 → 取消，否则 → 加上，规范 §3.2）；
+     * - **无选区** → 只改 [pendingFlags]，已输入的字一个都不动。
+     */
+    fun toggleInline(flag: InlineFlag) {
+        if (composing) return
+        if (selection.isCollapsed) {
+            // 无选区：只改"接下来输入的样式"，已输入的字一个都不动
+            pendingFlags = pendingFlags.toggle(flag)
+            return
+        }
+        // 有选区：整个选区统一一个方向（全带 → 取消，否则 → 加上）
+        val enable = !selectionFlags().has(flag)
+        val covered = EditorSelectionMap.coveredRanges(selection, lines)
+        apply { current ->
+            current.mapIndexed { index, item ->
+                val range = covered.firstOrNull { it.first == index }?.second
+                if (range == null || range.first >= range.last) {
+                    item
+                } else {
+                    EditorModel.toggleInline(item, range.first, range.last, flag)
+                }
+            }
+        }
+        pendingFlags = pendingFlags.with(flag, enable)
+    }
+
+    /** 整个选区是否**都带**某一项样式（混合选区按"未开启"处理，与 iOS `activeStyles()` 一致）。 */
+    fun selectionFlags(): InlineFlags {
+        if (selection.isCollapsed) return pendingFlags
+        var result: InlineFlags? = null
+        for ((index, range) in EditorSelectionMap.coveredRanges(selection, lines)) {
+            if (range.first >= range.last) continue
+            val line = lines.getOrNull(index) ?: continue
+            val flags = EditorModel.activeFlags(line, range.first, range.last)
+            result = if (result == null) {
+                flags
+            } else {
+                InlineFlags(
+                    bold = result.bold && flags.bold,
+                    italic = result.italic && flags.italic,
+                    strike = result.strike && flags.strike,
+                    underline = result.underline && flags.underline,
+                )
+            }
+        }
+        return result ?: InlineFlags.NONE
     }
 
     /** 工具栏操作：在模型上做变换，然后请 `EditText` 重建文本。 */
@@ -188,6 +388,15 @@ class EditorTextState(initialLines: List<EditorLine>) {
 
     internal fun onSelectionChanged(next: EditorSelection) {
         selection = next.coerceTo(lines)
+        // 光标落到哪里，"接下来输入的样式"就跟到哪里（iOS 的 typingAttributes 同义）
+        if (selection.isCollapsed) {
+            pendingFlags = EditorModel.caretFlags(currentLine, selection.start)
+        }
+    }
+
+    /** 测试用：直接指定"是否在组合中"（生产路径由 [updateComposition] 从 Spannable 读）。 */
+    internal fun setComposingForTest(value: Boolean) {
+        composing = value
     }
 
     internal fun updateComposition(spanned: Spanned) {
@@ -198,11 +407,15 @@ class EditorTextState(initialLines: List<EditorLine>) {
     /** 当前行。 */
     val currentLine: EditorLine get() = lines.getOrNull(selection.lineIndex) ?: EditorModel.EMPTY_LINE
 
-    /** 工具栏用的行内选区（空选区时取光标前一个字符）。 */
-    val inlineRange: Pair<Int, Int> get() = EditorSelectionMap.effectiveInlineRange(selection, lines)
+    /**
+     * 工具条高亮的"当前行内样式"：
+     * - 有选区 → 整个选区**都带**才算（混合选区不高亮）；
+     * - 无选区 → 用 [pendingFlags]（光标处的样式）。
+     */
+    val activeFlags: InlineFlags get() = selectionFlags()
 
-    /** 当前生效的行内样式。 */
-    val activeFlags: InlineFlags get() = activeFlagsOf(currentLine)
+    /** 工具条段落级操作覆盖的整段范围。 */
+    val lineRange: IntRange get() = selection.lineRange
 }
 
 /** 工具栏可用的 `remember` 包装。 */
@@ -212,16 +425,3 @@ fun rememberEditorTextState(initialLines: List<EditorLine>): EditorTextState =
 
 internal fun EditorSelection.coerceTo(lines: List<EditorLine>): EditorSelection =
     EditorSelectionMap.normalize(this, lines)
-
-internal fun activeFlagsOf(line: EditorLine): InlineFlags {
-    val flags = EditorModel.materializeRuns(line)
-    if (flags.isEmpty()) return InlineFlags.NONE
-    // 光标处（行首）取第一个 run 的样式；这与 iOS 的 `activeStyles()` 读 typingAttributes 等价
-    val run = flags.first()
-    return InlineFlags(
-        bold = run.bold == true,
-        italic = run.italic == true,
-        strike = run.strike == true,
-        underline = run.underline == true,
-    )
-}

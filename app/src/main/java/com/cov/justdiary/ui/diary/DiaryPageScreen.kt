@@ -97,6 +97,13 @@ fun DiaryPageScreen(
         viewModel.handleBack(editorHasContent = editorDirty)
     }
 
+    // 离开编辑态（保存 / 放弃 / 返回）要把键盘收掉：编辑器是被整个换掉的，
+    // `EditText` 一走，没人负责收 IME —— 真机上保存之后键盘还杵在阅读页上。
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    LaunchedEffect(state.isRead) {
+        if (state.isRead) keyboard?.hide()
+    }
+
     val formats = remember(state.settings.appLanguage, state.dayKey) {
         DateFormats.forContext(context, state.settings.appLanguage)
     }
@@ -125,34 +132,40 @@ fun DiaryPageScreen(
     ) {
         // 全屏路由没有外层 Scaffold，系统栏避让要自己做（对应 iOS 的 safeArea）
         Box(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            if (state.isRead || state.selectMode) {
-                // 阅读 / 多选：顶栏由宿主提供，**钉在页面顶部不进滚动区**
-                // （规范 §2.2；iOS 早期挂在 safeAreaInset 上，键盘一弹就被滚出屏幕）。
-                // 编辑态仍由 EditorScreen 自己画顶栏 —— 它要用编辑器内部的脏标记与保存载荷。
-                val topBarState = DiaryTopBarState.of(
-                    isRead = state.isRead,
-                    editingIndex = state.editingIndex,
-                    selectMode = state.selectMode,
-                    selectedIds = state.selectedIds,
-                    canEditToday = state.canEditToday,
-                    showSearch = state.showSearch,
-                )
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    containerColor = MaterialTheme.colorScheme.background,
-                    topBar = {
-                        DiaryTopBar(
-                            state = topBarState,
-                            onBack = { viewModel.handleBack(editorHasContent = false) },
-                            onToggleSearch = { viewModel.setSearchVisible(!state.showSearch) },
-                            onWrite = viewModel::enterWrite,
-                            onShare = { shareNow(state) },
-                            onExitSelect = { viewModel.handleBack(editorHasContent = false) },
-                            onDeleteSelected = viewModel::confirmDeleteSelected,
-                        )
-                    },
-                ) { innerPadding ->
-                  Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            // 顶栏由宿主提供，**钉在页面顶部不进滚动区**（规范 §2.2；iOS 早期挂在
+            // safeAreaInset 上，键盘一弹就被滚出屏幕）。三种形态共用一个 `DiaryTopBar`，
+            // 形态判断全交给纯函数 `DiaryTopBarState.of`。
+            val topBarState = DiaryTopBarState.of(
+                isRead = state.isRead,
+                editingIndex = state.editingIndex,
+                selectMode = state.selectMode,
+                selectedIds = state.selectedIds,
+                canEditToday = state.canEditToday,
+                showSearch = state.showSearch,
+            )
+            // 编辑器的把手：顶栏的插图/放弃/保存通过它转到编辑器内部（不必提升编辑器状态）
+            val editorActions = remember(state.loadToken) { EditorActions() }
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                containerColor = MaterialTheme.colorScheme.background,
+                topBar = {
+                    DiaryTopBar(
+                        state = topBarState,
+                        onBack = { viewModel.handleBack(editorHasContent = editorActions.dirty) },
+                        onToggleSearch = { viewModel.setSearchVisible(!state.showSearch) },
+                        onWrite = viewModel::enterWrite,
+                        onShare = { shareNow(state) },
+                        onExitSelect = { viewModel.handleBack(editorHasContent = false) },
+                        onDeleteSelected = viewModel::confirmDeleteSelected,
+                        onInsertImage = editorActions::insertImage,
+                        onDiscard = { viewModel.confirmDiscard(editorHasContent = editorActions.dirty) },
+                        onSave = editorActions::save,
+                        onTapBlank = editorActions::dismissKeyboard,
+                    )
+                },
+            ) { innerPadding ->
+              if (state.isRead || state.selectMode) {
+                Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
                     DiaryReadScreen(
                         dayTitle = formats.dayTitle(
                             com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey)
@@ -221,25 +234,21 @@ fun DiaryPageScreen(
                             modifier = Modifier.align(Alignment.TopCenter),
                         )
                     }
-                  }
                 }
-            } else {
+              } else {
                 EditorScreen(
-                    dayTitle = formats.dayTitle(
-                        com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
-                    ),
                     initialParts = state.loadParts,
+                    loadToken = state.loadToken,
                     isNewBlock = !state.isEditingExistingBlock,
-                    locText = state.locationText,
-                    locPrecision = state.location?.locPrecision.orEmpty(),
                     locationState = editorLocationState(state),
-                    autoTime = state.settings.autoTime,
                     startTimeUtc = state.startTimeUtc,
+                    actions = editorActions,
+                    contentPadding = innerPadding,
+                    autoTime = state.settings.autoTime,
                     startTimeLabel = formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
                     onRequestLocation = viewModel::beginLocate,
                     onPrecisionChange = viewModel::applyPrecision,
                     onSave = viewModel::save,
-                    onDiscard = viewModel::close,
                     onImportImage = { uri ->
                         viewModel.importImage(uri)?.let { src ->
                             val bitmap = container.mediaStore.image(src)
@@ -253,6 +262,7 @@ fun DiaryPageScreen(
                     loadImage = { src -> container.mediaStore.image(src) },
                     onDirtyChange = { editorDirty = it },
                 )
+              }
             }
         }
     }

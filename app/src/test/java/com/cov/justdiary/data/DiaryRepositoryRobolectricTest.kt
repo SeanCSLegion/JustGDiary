@@ -301,17 +301,22 @@ class DiaryRepositoryRobolectricTest {
     }
 
     @Test
-    fun `blank lines are dropped by design but the text survives`() {
-        // 段落里的换行会拆成多行；解析侧**刻意丢弃空白行**（编辑器自己会补一个可编辑位置），
-        // 这条规则与 iOS `PartsCodec.parts(from:)` 一致，因此这里断言的是"规则本身"。
+    fun `blank lines survive the spannable round trip but are dropped on save`() {
+        // 段落里的换行会拆成多行。**编辑模型必须保留空行**：它是"光标所在的那一段"，
+        // 丢掉它会让工具栏把操作落到上一行（真机缺陷）。落库时才丢弃（`linesToParts`），
+        // 与 iOS `PartsCodec.parts(from:)` 的存储规则一致。
         val lines = EditorModel.partsToLines(listOf(ContentPart(text = "第一行\n")))
         assertEquals(2, lines.size)
 
         val spannable = SpannableBridge.toSpannable(lines)
         val restored = SpannableBridge.fromSpannable(spannable)
 
-        assertEquals(1, restored.size)
+        assertEquals(2, restored.size)
         assertEquals("第一行", restored.first().text)
+        assertEquals("", restored.last().text)
+
+        // 落库：空行不入库
+        assertEquals(1, EditorModel.linesToParts(restored).size)
     }
 
     @Test

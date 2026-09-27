@@ -84,6 +84,14 @@ data class InlineFlags(
         InlineFlag.Underline -> underline
     }
 
+    /** 把某一项设成指定值（其余不动）。 */
+    fun with(flag: InlineFlag, value: Boolean): InlineFlags = when (flag) {
+        InlineFlag.Bold -> copy(bold = value)
+        InlineFlag.Italic -> copy(italic = value)
+        InlineFlag.Strike -> copy(strike = value)
+        InlineFlag.Underline -> copy(underline = value)
+    }
+
     fun toggle(flag: InlineFlag): InlineFlags = when (flag) {
         InlineFlag.Bold -> copy(bold = !bold)
         InlineFlag.Italic -> copy(italic = !italic)
@@ -243,6 +251,9 @@ object EditorModel {
     }
 
     private fun appendItem(parts: MutableList<ContentPart>, item: String, done: Boolean?) {
+        // **只有标记、后面没有文字的行不入库**（规范 §2.3 / iOS `parts(from:)`）：
+        // 那是"用户还在这一行上"（刚按了标记、或回车留下的空条目），不是一个条目。
+        if (item.isBlank()) return
         val last = parts.lastOrNull()
         if (done != null && last?.style == ContentPartStyle.todo) {
             parts[parts.size - 1] = last.copy(
@@ -276,11 +287,20 @@ object EditorModel {
      */
     fun setBlockStyle(lines: List<EditorLine>, indices: IntRange, style: String): List<EditorLine> {
         val range = normalize(indices, lines.size) ?: return lines
+        // 引用**永远左对齐**：切成引用时清掉居中（iOS `cancelCenter: true`，
+        // 规范 §2.5「引用对齐：切到 quote 时强制左对齐」）。居中按钮在引用行上也是禁用的。
+        val cancelCenter = style == ContentPartStyle.quote
         val middle = lines.subList(range.first, range.last + 1).flatMap { line ->
             when (line.marker) {
-                null -> listOf(line.copy(blockStyle = style))
+                null -> listOf(
+                    line.copy(
+                        blockStyle = style,
+                        align = if (cancelCenter) null else line.align,
+                    ),
+                )
+
                 else -> lineItems(line).map { item ->
-                    EditorLine(text = item.text, blockStyle = style, align = line.align)
+                    EditorLine(text = item.text, blockStyle = style, align = if (cancelCenter) null else line.align)
                 }
             }
         }
@@ -298,13 +318,17 @@ object EditorModel {
         lines: List<EditorLine>,
         indices: IntRange,
         kind: EditorLine.MarkerKind,
+        /**
+         * 光标所在行。**toggle 方向只看这一行**（规范 §3.2：选区只决定范围，不决定方向）——
+         * 否则"光标在正文行、选了几行列表"时方向会被那几行里的标记带偏。
+         */
+        cursorIndex: Int = indices.first,
     ): List<EditorLine> {
         val range = normalize(indices, lines.size) ?: return lines
         val gathered = lines.subList(range.first, range.last + 1).flatMap { lineItems(it) }
         if (gathered.isEmpty()) return lines
-        // 区间内全部已是同种标记 → 取消（摊平回正文段落）
-        val source = lines.subList(range.first, range.last + 1)
-        val allMarked = source.all { it.marker == kind }
+        // 方向 = 光标那一行是否已经是同种标记
+        val allMarked = lines.getOrNull(cursorIndex)?.marker == kind
         val middle = if (allMarked) {
             // 取消标记 → 摊平回正文段落
             gathered.map { EditorLine(text = it.text, blockStyle = ContentPartStyle.body) }
@@ -380,32 +404,120 @@ object EditorModel {
     }
 
     /**
-     * 让**新建的空行**继承上一行的标记。
+     * 回车之后的修补（规范 §3.4 的四种回车行为）。
      *
-     * `EditText` 在列表/待办行里按回车只插入 `\n`，新行没有标记前缀，列表会被拆成两条。
-     * iOS 用文本附件，换行时附件不会自动继承 —— 但它的标记检测是"行首附件"，
-     * 于是新行也不带标记；实际使用中用户按回车是想**继续加一项**，
-     * 所以这里显式继承（有意修正，记作 D9）。
+     * `EditText` 只会插入一个 `\n`，标记与段落样式都不会自己延续；这里按 iOS 的
+     * `shouldChangeTextIn` 规则把它补齐：
      *
-     * 只对"上一版里不存在、且内容为空"的行生效，因此不会影响正常的粘贴/删除。
+     * | 场景 | 结果 |
+     * | --- | --- |
+     * | 列表 / 待办项**有内容**时回车 | 新行继承同种标记（继续加一项），待办默认未勾选 |
+     * | 列表 / 待办项**空**时回车 | **结束列表**：上一行去掉标记，新行是普通空行 |
+     * | 空引用行回车 | 结束引用（新行按正文 —— 块样式不会自己延续，天然如此） |
+     * | 居中空行回车 | 不产生新的居中空行（新行不居中；居中落在段落的终止换行上，不越到下一行） |
+     *
+     * 与 iOS 的一处**有意差异**（记作 D8）：iOS 在"空段落 + 居中"时直接**吞掉**这次回车
+     * （`shouldBlockNewline`），用户会觉得按键坏了。这里允许换行，只是不让居中扩散到新行 ——
+     * 规范那句"不产生新的居中空行"的**结果**一致，但按键始终有响应。
+     *
+     * 只对"新出现、且内容为空"的行生效，因此粘贴 / 删除 / 普通输入都不受影响。
      */
-    fun inheritMarkersForNewLines(
+    fun repairAfterEnter(
         lines: List<EditorLine>,
         previous: List<EditorLine>,
     ): List<EditorLine> {
         if (lines.size <= previous.size) return lines
-        return lines.mapIndexed { index, line ->
-            if (line.text.isEmpty() && line.marker == null && index > 0) {
-                val above = lines[index - 1]
-                if (above.marker != null) {
-                    line.copy(marker = above.marker, done = false)
-                } else {
-                    line
-                }
-            } else {
-                line
+        val result = lines.toMutableList()
+        for (index in result.indices) {
+            val line = result[index]
+            if (line.text.isNotEmpty() || line.marker != null || index == 0) continue
+            val above = result[index - 1]
+            when {
+                // 空条目再回车 → 结束列表：上一行的标记去掉，这一行保持普通空行
+                above.marker != null && above.text.isEmpty() ->
+                    result[index - 1] = above.copy(marker = null, done = false)
+
+                // 有条目的列表 / 待办 → 继续加一项
+                above.marker != null ->
+                    result[index] = line.copy(marker = above.marker, done = false)
+
+                else -> Unit
             }
         }
+        return result
+    }
+
+    /** 兼容旧名字（D9 的继承规则已经并入 [repairAfterEnter]）。 */
+    fun inheritMarkersForNewLines(
+        lines: List<EditorLine>,
+        previous: List<EditorLine>,
+    ): List<EditorLine> = repairAfterEnter(lines, previous)
+
+    /**
+     * "在空行上开始输入"时，把**段落样式与对齐**续上（规范 §3.2 的空行规则）。
+     *
+     * 富文本里空行没有字符可以挂样式：末行的空段连终止换行都没有，于是从 `EditText`
+     * 解析回来的新行会退化成正文。这里按上一版的状态把它接过来 ——
+     * 用户在空行上点了「大标题」再输入，得到的必须是标题。
+     *
+     * 只在"上一版是空行、这一版有字、且解析结果没有任何段落样式"时生效，
+     * 因此不会覆盖用户粘贴进来的样式。
+     */
+    fun carryOverStylesWhenTyping(
+        lines: List<EditorLine>,
+        previous: List<EditorLine>,
+    ): List<EditorLine> = lines.mapIndexed { index, line ->
+        val before = previous.getOrNull(index)
+        val startedTyping = before != null && before.text.isEmpty() && line.text.isNotEmpty()
+        if (startedTyping && line.blockStyle == ContentPartStyle.body && line.align == null) {
+            line.copy(blockStyle = before.blockStyle, align = before.align)
+        } else {
+            line
+        }
+    }
+
+    /**
+     * 把一组行内样式**整体**应用到 `[start, end)`（不做取反）。
+     *
+     * 这是"待输入样式"（typing attributes）落地的动作：用户在有光标、无选区时点了 B，
+     * 之后输入的字符应当加粗 —— 由调用方在文本插入后对**插入区间**调用本函数。
+     */
+    fun applyInlineFlags(
+        line: EditorLine,
+        start: Int,
+        end: Int,
+        flags: InlineFlags,
+    ): EditorLine {
+        val text = line.text
+        val from = start.coerceIn(0, text.length)
+        val to = end.coerceIn(from, text.length)
+        if (from == to || text.isEmpty()) return line
+
+        val runs = materializeRuns(line)
+        val rebuilt = mutableListOf<TextRun>()
+        var cursor = 0
+        for (run in runs) {
+            val runStart = cursor
+            val runEnd = cursor + run.text.length
+            cursor = runEnd
+            if (runEnd <= from || runStart >= to) {
+                rebuilt.add(run)
+                continue
+            }
+            if (runStart < from) rebuilt.add(run.copy(text = run.text.substring(0, from - runStart)))
+            val covered = run.text.substring((from - runStart).coerceAtLeast(0), minOf(to, runEnd) - runStart)
+            rebuilt.add(
+                run.copy(
+                    text = covered,
+                    bold = flags.bold || run.bold == true,
+                    italic = flags.italic || run.italic == true,
+                    strike = flags.strike || run.strike == true,
+                    underline = flags.underline || run.underline == true,
+                ),
+            )
+            if (runEnd > to) rebuilt.add(run.copy(text = run.text.substring(to - runStart)))
+        }
+        return line.copy(spans = mergeRuns(rebuilt))
     }
 
     /** 勾选/取消待办项。 */
@@ -486,6 +598,20 @@ object EditorModel {
             )
         }
         return result
+    }
+
+    /**
+     * **光标处**的样式（按钮高亮与"接下来输入的样式"都用它）。
+     *
+     * 规则与 UIKit 的 `typingAttributes` 一致：取光标**前一个字符**的样式
+     * （在行首则取后一个）—— 于是"在加粗的字后面接着打字仍然是加粗的"。
+     */
+    fun caretFlags(line: EditorLine, offset: Int): InlineFlags {
+        val text = line.text
+        if (text.isEmpty()) return InlineFlags.NONE
+        val at = offset.coerceIn(0, text.length)
+        val probe = if (at == 0) 0 else at - 1
+        return flagsAt(line, probe)
     }
 
     /** 某个字符位置的行内样式。 */

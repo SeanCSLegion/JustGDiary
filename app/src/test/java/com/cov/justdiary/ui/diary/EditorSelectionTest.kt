@@ -94,13 +94,25 @@ class EditorSelectionTest {
     }
 
     @Test
-    fun `effective inline range uses the character before the caret when collapsed`() {
-        // 光标在第 1 行第 2 个字符前 → 取 [1,2)
-        assertEquals(1 to 2, EditorSelectionMap.effectiveInlineRange(EditorSelection(1, 2, 2), plain))
-        // 光标在行首 → 取 [0,0)，不会变成负数
-        assertEquals(0 to 0, EditorSelectionMap.effectiveInlineRange(EditorSelection(1, 0, 0), plain))
-        // 非空选区原样返回
-        assertEquals(0 to 3, EditorSelectionMap.effectiveInlineRange(EditorSelection(0, 0, 3), plain))
+    fun `line range covers every paragraph the selection touches`() {
+        // 规范 §3.2：段落级操作用"选中的每一整段"
+        assertEquals(1..1, EditorSelection(1, 2, 2).lineRange)
+        assertEquals(0..2, EditorSelection(0, 1, 3, endLineIndex = 2).lineRange)
+    }
+
+    @Test
+    fun `covered ranges split a multi line selection per line`() {
+        val lines = listOf(
+            EditorLine(text = "第一行"),
+            EditorLine(text = "第二行"),
+            EditorLine(text = "第三行"),
+        )
+        // 从第 0 行第 1 个字符 选到 第 2 行第 2 个字符
+        val selection = EditorSelection(0, 1, 2, endLineIndex = 2)
+        assertEquals(
+            listOf(0 to (1..3), 1 to (0..3), 2 to (0..2)),
+            EditorSelectionMap.coveredRanges(selection, lines),
+        )
     }
 
     @Test

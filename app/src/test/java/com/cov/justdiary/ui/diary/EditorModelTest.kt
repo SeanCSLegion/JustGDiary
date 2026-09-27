@@ -387,9 +387,9 @@ class EditorModelTest {
         assertEquals(2, result.size)
         assertEquals(EditorLine.MarkerKind.Bullet, result[1].marker)
         assertEquals("", result[1].text)
-        // 两条连续条目 → 落库仍是一条 list
+        // 两条连续条目 → 落库仍是一条 list；空的那条还不算条目，不入库
         assertEquals(1, EditorModel.linesToParts(result).size)
-        assertEquals(listOf("甲", ""), EditorModel.linesToParts(result).single().items)
+        assertEquals(listOf("甲"), EditorModel.linesToParts(result).single().items)
     }
 
     @Test
@@ -522,10 +522,15 @@ class EditorModelTest {
         )
         val fixed = EditorModel.inheritMarkersForNewLines(parsed, previous = before)
         assertEquals(EditorLine.MarkerKind.Bullet, fixed[1].marker)
-        // 落库仍是一条 list，且多了一个空条目
+        // 落库仍是一条 list；**空条目不入库**（规范 §2.3：只有标记、后面没有文字的行
+        // 是"用户还在这一行上"，不是一个条目 —— 与 iOS `parts(from:)` 一致）
         val parts = EditorModel.linesToParts(fixed)
         assertEquals(1, parts.size)
-        assertEquals(listOf("甲", ""), parts[0].items)
+        assertEquals(listOf("甲"), parts[0].items)
+
+        // 用户接着在新行里输入 → 才成为一个真正的条目
+        val typed = fixed.toMutableList().also { it[1] = it[1].copy(text = "乙") }
+        assertEquals(listOf("甲", "乙"), EditorModel.linesToParts(typed)[0].items)
     }
 
     @Test
@@ -559,5 +564,88 @@ class EditorModelTest {
             fewer,
             EditorModel.inheritMarkersForNewLines(fewer, previous = listOf(EditorLine(text = "甲"), EditorLine(text = "乙"))),
         )
+    }
+
+    // ------------------------------------------------------------------ 规范 §3.2 / §3.4 的规则
+
+    @Test
+    fun `switching to quote forces left alignment`() {
+        // 规范 §2.5：切到引用时强制左对齐（iOS 的 cancelCenter）
+        val lines = listOf(
+            EditorLine(text = "居中标题", blockStyle = ContentPartStyle.title, align = EditorModel.ALIGN_CENTER),
+        )
+        val quoted = EditorModel.setBlockStyle(lines, 0..0, ContentPartStyle.quote)
+        assertEquals(ContentPartStyle.quote, quoted.single().blockStyle)
+        assertEquals("引用必须左对齐", null, quoted.single().align)
+    }
+
+    @Test
+    fun `marker toggle direction follows the cursor line not the whole range`() {
+        // 规范 §3.2：选区只决定范围，方向由**光标所在行**决定
+        val lines = listOf(
+            EditorLine(text = "甲"),
+            EditorLine(text = "乙"),
+            EditorLine(text = "丙", marker = EditorLine.MarkerKind.Bullet),
+        )
+        // 光标在第 0 行（正文）→ 方向是"开启"，整个选区一起变成列表
+        val on = EditorModel.setMarkerOnRange(lines, 0..2, EditorLine.MarkerKind.Bullet, cursorIndex = 0)
+        assertTrue(on.all { it.marker == EditorLine.MarkerKind.Bullet })
+
+        // 光标在第 2 行（已是列表）→ 方向是"取消"
+        val off = EditorModel.setMarkerOnRange(on, 0..2, EditorLine.MarkerKind.Bullet, cursorIndex = 2)
+        assertTrue(off.all { it.marker == null })
+    }
+
+    @Test
+    fun `pressing enter on an empty list item ends the list`() {
+        // 规范 §3.4：空条目再回车 = 结束列表（上一行去掉标记，新行是普通空行）
+        val before = listOf(
+            EditorLine(text = "甲", marker = EditorLine.MarkerKind.Bullet),
+            EditorLine(text = "", marker = EditorLine.MarkerKind.Bullet),
+        )
+        val parsed = before + EditorLine(text = "")
+        val fixed = EditorModel.repairAfterEnter(parsed, previous = before)
+
+        assertEquals(null, fixed[1].marker)
+        assertEquals(null, fixed[2].marker)
+        // 落库：只有"甲"这一条
+        assertEquals(listOf("甲"), EditorModel.linesToParts(fixed).single().items)
+    }
+
+    @Test
+    fun `an empty quote line does not extend the quote to the next line`() {
+        val before = listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote))
+        val parsed = before + EditorLine(text = "")
+        val fixed = EditorModel.repairAfterEnter(parsed, previous = before)
+        assertEquals(ContentPartStyle.body, fixed[1].blockStyle)
+    }
+
+    @Test
+    fun `an empty centered line does not produce another centered line`() {
+        // 规范 §3.4 的"不产生新的居中空行"：iOS 直接吞掉回车，这里允许换行但不让居中扩散
+        val before = listOf(EditorLine(text = "", align = EditorModel.ALIGN_CENTER))
+        val parsed = before + EditorLine(text = "")
+        val fixed = EditorModel.repairAfterEnter(parsed, previous = before)
+        assertEquals(null, fixed[1].align)
+    }
+
+    @Test
+    fun `starting to type on an empty line keeps its paragraph style`() {
+        // 空行的样式在富文本里没有字符可挂，由这一条在"开始输入"时接上
+        val previous = listOf(EditorLine(text = "", blockStyle = ContentPartStyle.heading))
+        val typed = listOf(EditorLine(text = "刚写的"))
+        val fixed = EditorModel.carryOverStylesWhenTyping(typed, previous)
+        assertEquals(ContentPartStyle.heading, fixed.single().blockStyle)
+    }
+
+    @Test
+    fun `pending inline flags apply to the inserted range only`() {
+        val line = EditorLine(text = "前中后")
+        val applied = EditorModel.applyInlineFlags(line, start = 1, end = 2, flags = InlineFlags(bold = true))
+        val runs = applied.spans
+        assertEquals(3, runs.size)
+        assertEquals(false, runs[0].bold == true)
+        assertEquals(true, runs[1].bold == true)
+        assertEquals(false, runs[2].bold == true)
     }
 }

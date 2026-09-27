@@ -1,110 +1,150 @@
 package com.cov.justdiary.ui.diary
 
+import android.net.Uri
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.widget.AppCompatEditText
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.res.stringResource
-import com.cov.justdiary.R
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.cov.justdiary.R
 import com.cov.justdiary.model.ContentPart
+import com.cov.justdiary.model.ContentPartStyle
 import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.service.LocationRules
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.AppIcons
+import com.cov.justdiary.ui.components.DiaryCard
+import com.cov.justdiary.ui.theme.DynamicTypeMetrics
+import com.cov.justdiary.ui.theme.EditorTypography
+import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
+import com.cov.justdiary.ui.theme.TypeSize
+import kotlinx.coroutines.launch
 
 /**
- * 编辑页。
+ * 编辑页（规范 `docs/android-design/04-diary.md` §3）。
  *
- * 对应 iOS `Views/Diary/DiaryPageView.swift` 的编辑态。已实现：
+ * ```
+ * ┌──────────────────────────────────────┐
+ * │ ←(拦截)        [插图] [放弃] [保存]    │  ← 顶栏在 DiaryPageScreen 的 Scaffold 里
+ * ├──────────────────────────────────────┤
+ * │ ┌────────────────────────────────┐   │
+ * │ │ ( 🕐 21:40 )                    │   │  ← 时间胶囊（auto_time 开才显示）
+ * │ │ 📍 浦东新区 · 上海市 · 中国  显示精度│   │  ← 地点行：左状态 / 右动作
+ * │ │                                 │   │
+ * │ │ 字体样式自检|                    │   │  ← 输入区（最小高 160dp × 正文系数）
+ * │ └────────────────────────────────┘   │
+ * │        [格式栏 9 键：悬浮面板]          │  ← 贴键盘上方 8dp
+ * └──────────────────────────────────────┘
+ * ```
  *
- * - **放弃修改**：进入编辑时的快照 + 二次确认（与 iOS 同样"回到进入编辑时的内容"，
- *   而不是撤销栈 —— 撤销栈是额外的能力，见 [EditorHistory]）；
- * - **保存**：`linesToParts` 落库；新建片段还没有位置时**二次确认**，
- *   确认后按无位置保存，此后不能再补（[LocationRules]）；
- * - **位置规则**：只在新建时获取一次；编辑已有片段只显示已记录位置并允许调精度；
- *   无位置的历史片段显示只读的"未记录地点"，不给获取入口；
- * - **自动时间**：新建片段时写入开始时间（让 `auto_time` 设置真正生效 —— iOS 侧是死设置）；
- * - **插入图片**：Photo Picker → 由调用方导入到应用目录后回传 `src`，
- *   作为独立一行插入（落库为 `image` 段落）。
+ * ## 与阅读态共用同一把尺子
  *
- * @param onSave 交给调用方落库（`parts` 已归一为 `content_json` 的段落）。
- * @param onImportImage 用系统的 Photo Picker 选一张图；返回 `images/xxx.jpg` 键，取消或失败返回 null。
+ * 段落样式 → M3 角色（[EditorTypography]）→ 字号/行高/段距都以 px 传给 `Spannable`
+ * （[SpannableBridge.BlockMetrics]），因此**编辑时看到的排版就是阅读时看到的排版**。
+ *
+ * ## 键盘与光标
+ *
+ * 页面的系统栏避让（含 IME）在 `DiaryPageScreen` 统一做，这里只负责把内容排成
+ * 「卡片（占满剩余高度）+ 格式栏」，因此格式栏**不可能盖住光标**；
+ * `EditText` 自己会在视口变化时把光标滚进可见区。
+ *
+ * ## 宿主怎么驱动它
+ *
+ * 顶栏的「插入图片 / 放弃修改 / 保存」属于宿主（`Scaffold` 的 `topBar`），
+ * 由 [EditorActions] 这个把手转发进来 —— 编辑器不需要把自己的状态提升出去。
  */
 @Composable
 fun EditorScreen(
-    dayTitle: String,
     initialParts: List<ContentPart>,
-    isNewBlock: Boolean,
-    locText: String,
-    locPrecision: String,
-    locationState: LocationRules.EditorLocationState,
-    modifier: Modifier = Modifier,
     /**
-     * `auto_time` 设置：控制**是否显示**这条记录的开始时间。
+     * 载入令牌：**变化就重建编辑器状态**（换片段、以及「放弃修改」回滚到原文都会 +1）。
      *
-     * 关闭时不显示时间胶囊（阅读页 / 首页面板 / 分享长图也一并不显示），
-     * 但 `start_time_utc` **照旧记录** —— `day_key` / `created_utc` / 排序都依赖它，
-     * 这是跨端契约，不允许写成 0。与 iOS 的 `vm.showsTime` 同一语义。
+     * 不能只用 `initialParts` 当 key：放弃修改时 `loadParts` 是同一个实例，
+     * `remember(initialParts)` 不会重建 —— 实测表现为"点了放弃，内容一个字都没回去"。
      */
+    loadToken: Int,
+    isNewBlock: Boolean,
+    locationState: LocationRules.EditorLocationState,
+    startTimeUtc: Long,
+    actions: EditorActions,
+    contentPadding: PaddingValues = PaddingValues(),
+    modifier: Modifier = Modifier,
     autoTime: Boolean = true,
-    startTimeUtc: Long = System.currentTimeMillis(),
     /** 时间胶囊的文案（由宿主用 `DateFormats` 备好，跟随语言与 12/24 小时制）。 */
     startTimeLabel: String = "",
     onRequestLocation: () -> Unit = {},
     onPrecisionChange: (String) -> Unit = {},
     onSave: (EditorSavePayload) -> Unit = {},
-    onDiscard: () -> Unit = {},
-    onImportImage: suspend (android.net.Uri) -> ImportedImage? = { null },
+    onImportImage: suspend (Uri) -> ImportedImage? = { null },
     /** 图片行的位图加载器（由调用方接 `MediaStore`）。 */
     loadImage: (String) -> android.graphics.Bitmap? = { null },
-    /**
-     * 是否有未保存内容（宿主用它决定返回键是否要二次确认）。
-     *
-     * iOS 的 `DiaryViewModel.handleBack` 直接问 `controller.isEmpty()`；Android 侧编辑内容
-     * 是纯模型，宿主看不到，因此由编辑器**上报**（内容或历史与进入时不同即为脏）。
-     */
+    /** 是否有未保存内容（宿主用它决定返回键是否要二次确认）。 */
     onDirtyChange: (Boolean) -> Unit = {},
 ) {
-    val initialLines = remember(initialParts) { EditorModel.partsToLines(initialParts) }
-    val state = rememberEditorTextState(initialLines)
-    val history = remember { EditorHistory(initial = initialLines) }
+    val initialLines = remember(loadToken) { EditorModel.partsToLines(initialParts) }
+    val state = remember(loadToken) { EditorTextState(initialLines) }
+    val history = remember(loadToken) { EditorHistory(initial = initialLines) }
     val dirty = hasChanges(state, initialLines, history)
-    LaunchedEffect(dirty) { onDirtyChange(dirty) }
-    var showDiscardConfirm by remember { mutableStateOf(false) }
+    // 用 SideEffect（每次成功组合后都跑）而不是 LaunchedEffect(脏标记)：
+    // 放弃修改会换一个 [EditorActions] 实例，而脏标记本身没变，LaunchedEffect 不会重跑，
+    // 新实例就会停在 dirty = false（实测：返回键因此不再拦截）。
+    SideEffect {
+        actions.dirty = dirty
+        onDirtyChange(dirty)
+    }
+
     var showLocationConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    var editText by remember { mutableStateOf<AppCompatEditText?>(null) }
 
     // 图片选择：Photo Picker（无需存储权限）
     val pickImage = rememberLauncherForActivityResult(
@@ -127,147 +167,145 @@ fun EditorScreen(
         }
     }
 
+    // 顶栏（宿主）驱动的三个动作：保存 / 放弃 / 插图
+    SideEffect {
+        actions.onInsertImage = {
+            pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+        actions.onSave = {
+            if (
+                LocationRules.needsSaveConfirmation(
+                    isNewBlock = isNewBlock,
+                    autoLoc = locationState !is LocationRules.EditorLocationState.Hidden,
+                    hasLocation = locationState is LocationRules.EditorLocationState.Recorded,
+                )
+            ) {
+                // 新建片段 + auto_loc 开 + 还没有位置：先问一句（保存后不能再补）
+                showLocationConfirm = true
+            } else {
+                onSave(buildPayload(state.lines, locationState, startTimeUtc))
+            }
+        }
+        actions.onDismissKeyboard = { dismissKeyboard(context, editText, focusManager) }
+    }
+
     val currentLine = state.currentLine
-    val inlineRange = state.inlineRange
-    val flags = EditorModel.activeFlags(currentLine, inlineRange.first, inlineRange.second)
+    val flags = state.activeFlags
+    val fontScale = LocalDensity.current.fontScale
+    val metricsFor = rememberBlockMetrics()
+    // 正文列宽与阅读态同一条公式（规范 §2.6：阅读 = 编辑）
+    val columnWidth: Dp = LocalAdaptiveLayout.current
+        .contentColumn(EditorLayout.CONTENT_MAX_WIDTH).dp
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .imePadding(),
+            .padding(contentPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // 顶栏：返回 / 标题 / 放弃 / 保存
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { if (hasChanges(state, initialLines, history)) showDiscardConfirm else onDiscard() }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = BACK_LABEL)
-            }
-            Text(
-                text = dayTitle,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            TextButton(onClick = { if (hasChanges(state, initialLines, history)) showDiscardConfirm else onDiscard() }) {
-                Text(DISCARD_LABEL)
-            }
-            TextButton(
-                onClick = {
-                    if (LocationRules.needsSaveConfirmation(
-                            isNewBlock = isNewBlock,
-                            autoLoc = locationState !is LocationRules.EditorLocationState.Hidden,
-                            hasLocation = locationState is LocationRules.EditorLocationState.Recorded,
-                        )
-                    ) {
-                        showLocationConfirm = true
-                    } else {
-                        onSave(buildPayload(state.lines, locationState, startTimeUtc))
-                    }
-                },
-            ) {
-                Text(SAVE_LABEL)
-            }
-        }
-
-        // 时间胶囊（规范 §7.3）：`auto_time` 关闭时不显示。
-        // iOS 侧的编辑器也是"打开即记录并显示开始时间"，这里与它对齐。
-        if (autoTime && startTimeLabel.isNotEmpty()) {
-            Text(
-                text = startTimeLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+        // 编辑卡占满剩余高度（weight 挂在有界高度的外层 Column 上），格式栏钉在底部：
+        // 两者不重叠，所以格式栏**不可能**盖住光标（规范 §3.5 的 caret-not-hidden 结果）
+        Column(modifier = Modifier.weight(1f).width(columnWidth)) {
+            DiaryCard(
                 modifier = Modifier
-                    .padding(horizontal = Spacing.page, vertical = 4.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
-        }
-
-        // 位置行
-        LocationRow(
-            state = locationState,
-            isNewBlock = isNewBlock,
-            onRequestLocation = onRequestLocation,
-            onPrecisionChange = onPrecisionChange,
-        )
-
-        // 正文
-        EditorTextArea(
-            state = state,
-            placeholder = PLACEHOLDER,
-            imageProvider = loadImage,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = Spacing.page),
-        )
-
-        // 格式栏：IME 组合期间禁用（FormatGate）
-        FontToolbar(
-            activeBlock = EditorBlockStyle.fromPartStyle(currentLine.blockStyle),
-            flags = flags,
-            isQuote = currentLine.blockStyle == com.cov.justdiary.model.ContentPartStyle.quote,
-            isList = currentLine.isListItem,
-            isTodo = currentLine.isTodoItem,
-            // 居中与列表/引用/待办互斥（方案 §7.4），它们不会同时为真：
-            // 开启标记时 EditorModel 会清掉 align，因此这里的值总是当前段落的真实状态。
-            isCentered = currentLine.align == EditorModel.ALIGN_CENTER,
-            enabled = !state.composing,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.page, vertical = 8.dp),
-            onBlockStyle = { style -> state.apply { EditorModel.setBlockStyle(it, state.selection.lineIndex..state.selection.lineIndex, style.partStyle) } },
-            onToggleQuote = { state.apply { EditorModel.toggleQuote(it, state.selection.lineIndex..state.selection.lineIndex) } },
-            onToggleList = { state.apply { EditorModel.toggleMarker(it, state.selection.lineIndex, EditorLine.MarkerKind.Bullet) } },
-            onToggleTodo = { state.apply { EditorModel.toggleMarker(it, state.selection.lineIndex, EditorLine.MarkerKind.Todo) } },
-            // 居中作用于当前行：`setAlignment` 落库为 `content_json` 的 `align`（只写 center）。
-            onToggleAlign = {
-                state.apply { lines ->
-                    val index = state.selection.lineIndex
-                    EditorModel.setAlignment(
-                        lines,
-                        index..index,
-                        center = lines.getOrNull(index)?.align != EditorModel.ALIGN_CENTER,
+                    .fillMaxSize()
+                    // 点卡片内的空白收键盘（规范 §3.8 路径 1）
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { dismissKeyboard(context, editText, focusManager) },
+                contentPadding = PaddingValues(Spacing.card),
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // 时间胶囊：auto_time 关闭时不显示（`start_time_utc` 照常入库）
+                    if (autoTime && startTimeLabel.isNotEmpty()) {
+                        TimeCapsule(startTimeLabel)
+                    }
+                    LocationRow(
+                        state = locationState,
+                        isNewBlock = isNewBlock,
+                        onRequestLocation = onRequestLocation,
+                        onPrecisionChange = onPrecisionChange,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    EditorTextArea(
+                        state = state,
+                        placeholder = if (isNewBlock) PLACEHOLDER_NEW else PLACEHOLDER_EDIT,
+                        onViewReady = { editText = it },
+                        imageProvider = loadImage,
+                        metricsFor = metricsFor,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        minHeight = EditorLayout.minInputHeight(fontScale),
                     )
                 }
-            },
-            onToggleInline = { flag ->
-                val (from, to) = state.inlineRange
-                state.apply { lines ->
-                    lines.mapIndexed { index, line ->
-                        if (index == state.selection.lineIndex) EditorModel.toggleInline(line, from, to, flag) else line
+            }
+        }
+
+        // 格式栏：悬浮面板（28dp 圆角 + shadow-2），贴键盘上方 8dp / 手势条上方 8dp。
+        // 宽度按规范 §3.3 的预算走**页面宽 − 2×8**（不是正文列宽）：那一行 384dp 要在
+        // 412dp 手机上放得下，靠的就是这 8dp 的外边距；宽屏再被 660 卡住。
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(modifier = Modifier.widthIn(max = 660.dp).fillMaxWidth()) {
+            DiaryFormatBar(
+                activeBlock = EditorBlockStyle.fromPartStyle(currentLine.blockStyle),
+                flags = flags,
+                isQuote = currentLine.blockStyle == ContentPartStyle.quote,
+                isList = currentLine.isListItem,
+                isTodo = currentLine.isTodoItem,
+                isCentered = currentLine.align == EditorModel.ALIGN_CENTER,
+                // IME 组合期间禁用整栏（[FormatGate]：组合区里改 span 会被输入法覆盖）
+                enabled = !state.composing,
+                onBlockStyle = { style ->
+                    state.apply { EditorModel.setBlockStyle(it, state.lineRange, style.partStyle) }
+                },
+                onToggleCenter = {
+                    state.apply { lines ->
+                        val index = state.selection.lineIndex
+                        EditorModel.setAlignment(
+                            lines,
+                            state.lineRange,
+                            center = lines.getOrNull(index)?.align != EditorModel.ALIGN_CENTER,
+                        )
                     }
-                }
-            },
-            onInsertImage = { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-        )
+                },
+                onToggleList = {
+                    state.apply {
+                        EditorModel.setMarkerOnRange(
+                            it,
+                            state.lineRange,
+                            EditorLine.MarkerKind.Bullet,
+                            cursorIndex = state.selection.lineIndex,
+                        )
+                    }
+                },
+                onToggleQuote = { state.apply { EditorModel.toggleQuote(it, state.lineRange) } },
+                onToggleTodo = {
+                    state.apply {
+                        EditorModel.setMarkerOnRange(
+                            it,
+                            state.lineRange,
+                            EditorLine.MarkerKind.Todo,
+                            cursorIndex = state.selection.lineIndex,
+                        )
+                    }
+                },
+                    onToggleInline = { flag -> state.toggleInline(flag) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
     }
 
-    // 放弃修改的二次确认
-    if (showDiscardConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDiscardConfirm = false },
-            title = { Text(DISCARD_TITLE) },
-            text = { Text(DISCARD_MESSAGE) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDiscardConfirm = false
-                    onDiscard()
-                }) { Text(DISCARD_CONFIRM) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardConfirm = false }) { Text(CANCEL_LABEL) }
-            },
-        )
-    }
-
-    // 保存时还没有位置的二次确认
+    // 保存时还没有位置的二次确认（规范 §3.6 D3）
     if (showLocationConfirm) {
         AlertDialog(
             onDismissRequest = { showLocationConfirm = false },
@@ -286,21 +324,66 @@ fun EditorScreen(
     }
 }
 
-/** 一张已导入应用目录的图片（`MediaStore.importImage` 的结果）。 */
-data class ImportedImage(val src: String, val width: Double?, val height: Double?)
+/**
+ * 顶栏驱动编辑器的把手（宿主 `remember` 一个，编辑器在组合时把动作挂上来）。
+ *
+ * 这样顶栏的「插图 / 放弃 / 保存」不必把编辑器的状态提升到宿主：
+ * 编辑器仍是一个自洽的组件，`DiaryPageScreen` 只拿到 [dirty] 与三个动作。
+ */
+class EditorActions {
+    internal var onInsertImage: () -> Unit = {}
+    internal var onSave: () -> Unit = {}
+    internal var onDiscard: () -> Unit = {}
+    internal var onDismissKeyboard: () -> Unit = {}
 
-/** 保存载荷：调用方据此调用 `addBlock` / `updateBlockContent`。 */
-data class EditorSavePayload(
-    val parts: List<ContentPart>,
-    /**
-     * 新建片段时写库用（无位置时为空串）；编辑时由调用方改走
-     * `updateBlockContent(..., locText, locPrecision)` 只改这两列。
-     */
-    val locText: String?,
-    val locPrecision: String?,
-    val startTimeUtc: Long,
-)
+    /** 有未保存内容（顶栏据此决定返回是否拦截）。 */
+    var dirty: Boolean by mutableStateOf(false)
 
+    fun insertImage() = onInsertImage()
+    fun save() = onSave()
+    fun discard() = onDiscard()
+
+    /** 点顶栏空白 / 内容空白时收键盘（规范 §3.8）。 */
+    fun dismissKeyboard() = onDismissKeyboard()
+}
+
+/** 编辑页的版面常量。 */
+object EditorLayout {
+    /** 正文列宽上限（与阅读态同一条公式：`min(660, 宽 − 32)`）。 */
+    const val CONTENT_MAX_WIDTH = 660f
+
+    /** 输入区最小高度：160dp × 正文字号系数（规范 §3.1，AX5 约 240dp）。 */
+    @Composable
+    fun minInputHeight(fontScale: Float) =
+        EditorTypography.minimumInputHeight * DynamicTypeMetrics.effectiveMultiplier(16f, fontScale)
+}
+
+/** 时间胶囊：`primaryContainer` 底 + `primary` 字（规范 §3.1）。 */
+@Composable
+private fun TimeCapsule(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(bottom = 6.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+/**
+ * 地点行（规范 §3.2 / iOS §3.5）：**左边只显示状态、右边只放动作，两者不重复**。
+ *
+ * | 情形 | 左（状态） | 右（动作） |
+ * | --- | --- | --- |
+ * | 新建 + 定位中 | `位置获取中…`（primary） | — |
+ * | 新建 + 无位置/失败 | `未记录地点` | `重新获取位置` |
+ * | 有位置 | 该位置文本 | `显示精度`（菜单） |
+ * | 编辑已有片段且无位置 | `未记录地点`（只读） | — （保存后不能再补位置） |
+ * | `auto_loc` 关且无位置 | 整行不显示 | — |
+ */
 @Composable
 private fun LocationRow(
     state: LocationRules.EditorLocationState,
@@ -310,53 +393,88 @@ private fun LocationRow(
 ) {
     if (state is LocationRules.EditorLocationState.Hidden) return
 
-    // 规范 §7.3 / 缺陷 D10：左侧只显示**状态**，动作只放右侧，两者不许同文案。
-    // "获取失败"与"历史片段没有位置"都是同一种状态（未记录地点）——
-    // 能不能重试由 isNewBlock 决定，不由文案暗示。
+    val locating = state is LocationRules.EditorLocationState.Locating
     val status = when (state) {
-        is LocationRules.EditorLocationState.Locating -> LOCATING_LABEL
-        is LocationRules.EditorLocationState.LocateFailed -> NOT_RECORDED_LABEL
-        is LocationRules.EditorLocationState.NotRecorded -> NOT_RECORDED_LABEL
+        is LocationRules.EditorLocationState.Locating -> stringResource(R.string.editor_location_fetching)
         is LocationRules.EditorLocationState.Recorded -> state.snapshot.locText
-        LocationRules.EditorLocationState.Hidden -> ""
+        else -> stringResource(R.string.search_loc_no_loc)
     }
-    // 定位中是"进行中"的状态，用 primary 强调；其余状态用 onSurfaceVariant（方案 §7.3）。
-    val statusColor = if (state is LocationRules.EditorLocationState.Locating) {
+    val statusColor = if (locating) {
         MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     val canRefetch = LocationRules.canRefetchLocation(isNewBlock, state)
+    val recorded = state as? LocationRules.EditorLocationState.Recorded
+    var precisionMenu by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.page, vertical = 4.dp),
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(Icons.Filled.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            imageVector = AppIcons.Place,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text(
             text = status,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodySmall,
+            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.rowSub, LocalDensity.current.fontScale),
             color = statusColor,
         )
-        if (canRefetch) {
-            AssistChip(onClick = onRequestLocation, label = { Text(REFETCH_LABEL) })
-        }
-        if (state is LocationRules.EditorLocationState.Recorded) {
-            // 已有位置：只允许调整显示精度（精度只改 loc_text / loc_precision）
-            val options = LocationRules.precisionOptions(state.snapshot)
+        // 右动作：定位中不给"重新获取"（避免重复请求）；已有位置的片段只允许调精度
+        if (canRefetch && !locating) {
             Text(
-                text = precisionLabel(state.snapshot.locPrecision),
-                style = MaterialTheme.typography.labelMedium,
+                text = stringResource(R.string.editor_location_retry_action),
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.End,
-                modifier = Modifier.padding(end = 4.dp),
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClickLabel = stringResource(R.string.editor_location_retry_action)) {
+                        onRequestLocation()
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
             )
-            options.firstOrNull { it != state.snapshot.locPrecision }?.let { next ->
-                TextButton(onClick = { onPrecisionChange(next) }) { Text(PRECISION_LABEL) }
+        }
+        if (recorded != null) {
+            Box {
+                Text(
+                    text = stringResource(R.string.editor_location_precision),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(onClickLabel = stringResource(R.string.editor_location_precision)) {
+                            precisionMenu = true
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+                DropdownMenu(expanded = precisionMenu, onDismissRequest = { precisionMenu = false }) {
+                    LocationRules.precisionOptions(recorded.snapshot).forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(precisionLabel(option)) },
+                            trailingIcon = {
+                                if (option == recorded.snapshot.locPrecision) {
+                                    Icon(
+                                        Icons.Filled.LocationOn,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                precisionMenu = false
+                                onPrecisionChange(option)
+                            },
+                        )
+                    }
+                }
             }
         }
     }
@@ -372,12 +490,73 @@ private fun precisionLabel(precision: String): String = when (precision) {
     else -> stringResource(R.string.loc_precision_none)
 }
 
+/**
+ * 段落样式 → 编辑器排版（px）。字号/行高来自 M3 角色，段后距 8dp（规范 §2.5）。
+ *
+ * 这四个值随主题与系统字号变化，所以在这里解析一次、以纯数据传进桥接层。
+ */
+@Composable
+private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
+    val density = LocalDensity.current
+    val styles: Map<String, TextStyle> = mapOf(
+        ContentPartStyle.title to EditorTypography.textStyleFor(ContentPartStyle.title),
+        ContentPartStyle.heading to EditorTypography.textStyleFor(ContentPartStyle.heading),
+        ContentPartStyle.quote to EditorTypography.textStyleFor(ContentPartStyle.quote),
+        ContentPartStyle.body to EditorTypography.textStyleFor(ContentPartStyle.body),
+    )
+    val paragraphSpacingPx = with(density) { 8.dp.toPx() }.toInt()
+    return remember(density, styles) {
+        { style ->
+            val textStyle = styles[style] ?: styles.getValue(ContentPartStyle.body)
+            val sizePx = with(density) { textStyle.fontSize.toPx() }.toInt()
+            val lineHeight = if (textStyle.lineHeight == TextUnit.Unspecified) {
+                textStyle.fontSize * 1.35f
+            } else {
+                textStyle.lineHeight
+            }
+            SpannableBridge.BlockMetrics(
+                textSizePx = sizePx,
+                lineHeightPx = with(density) { lineHeight.toPx() }.toInt(),
+                paragraphSpacingPx = paragraphSpacingPx,
+            )
+        }
+    }
+}
+
+/** 收键盘：清焦点 + 主动收起 IME（Android 的 `clearFocus` 不保证收起）。 */
+private fun dismissKeyboard(
+    context: android.content.Context,
+    editText: AppCompatEditText?,
+    focusManager: FocusManager,
+) {
+    focusManager.clearFocus()
+    val view = editText ?: return
+    view.clearFocus()
+    val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+    imm?.hideSoftInputFromWindow(view.windowToken, 0)
+}
+
 /** 与进入编辑时的快照比较，判断是否有改动（决定"放弃修改"是否需要确认）。 */
 private fun hasChanges(
     state: EditorTextState,
     initialLines: List<EditorLine>,
     history: EditorHistory,
 ): Boolean = state.lines != initialLines || history.canUndo
+
+/** 保存载荷：调用方据此调用 `addBlock` / `updateBlockContent`。 */
+data class EditorSavePayload(
+    val parts: List<ContentPart>,
+    /**
+     * 新建片段时写库用（无位置时为空串）；编辑时由调用方改走
+     * `updateBlockContent(..., locText, locPrecision)` 只改这两列。
+     */
+    val locText: String?,
+    val locPrecision: String?,
+    val startTimeUtc: Long,
+)
+
+/** 一张已导入应用目录的图片（`MediaStore.importImage` 的结果）。 */
+data class ImportedImage(val src: String, val width: Double?, val height: Double?)
 
 private fun buildPayload(
     lines: List<EditorLine>,
@@ -390,40 +569,21 @@ private fun buildPayload(
         // 编辑态不写位置（精度调整由 onPrecisionChange 单独走 updateBlockContent）
         locText = recorded?.snapshot?.locText,
         locPrecision = recorded?.snapshot?.locPrecision,
-        // 开始时间**永远**记录编辑器打开的时刻，与 `auto_time` 无关：
+        // 开始时间**永远**记录，与 `auto_time` 无关：
         // `day_key` / `created_utc` / 排序都依赖它，写 0 或改写都会破坏跨端契约。
-        // `auto_time` 只决定"要不要把它显示出来"（见 EditorScreen 的注释与方案 §7.3）。
         startTimeUtc = startTimeUtc,
     )
 }
 
-private val BACK_LABEL: String
-    @Composable get() = stringResource(R.string.a11y_back)
-private val DISCARD_LABEL: String
-    @Composable get() = stringResource(R.string.editor_discard)
-private val SAVE_LABEL: String
-    @Composable get() = stringResource(R.string.save)
-private val CANCEL_LABEL: String
-    @Composable get() = stringResource(R.string.cancel)
-private val DISCARD_TITLE: String
-    @Composable get() = stringResource(R.string.editor_discard_title)
-private val DISCARD_MESSAGE: String
-    @Composable get() = stringResource(R.string.editor_discard_revert_msg)
-private val DISCARD_CONFIRM: String
-    @Composable get() = stringResource(R.string.discard)
+private val PLACEHOLDER_NEW: String
+    @Composable get() = stringResource(R.string.editor_placeholder_new)
+private val PLACEHOLDER_EDIT: String
+    @Composable get() = stringResource(R.string.editor_placeholder_existing)
 private val LOCATION_TITLE: String
     @Composable get() = stringResource(R.string.editor_location_retry)
 private val LOCATION_MESSAGE: String
     @Composable get() = stringResource(R.string.editor_location_missing_msg)
 private val SAVE_ANYWAY_LABEL: String
     @Composable get() = stringResource(R.string.editor_save_anyway)
-private val LOCATING_LABEL: String
-    @Composable get() = stringResource(R.string.editor_location_fetching)
-private val REFETCH_LABEL: String
-    @Composable get() = stringResource(R.string.editor_location_retry_action)
-private val NOT_RECORDED_LABEL: String
-    @Composable get() = stringResource(R.string.search_loc_no_loc)
-private val PRECISION_LABEL: String
-    @Composable get() = stringResource(R.string.editor_location_precision)
-private val PLACEHOLDER: String
-    @Composable get() = stringResource(R.string.editor_placeholder_new)
+private val CANCEL_LABEL: String
+    @Composable get() = stringResource(R.string.cancel)
