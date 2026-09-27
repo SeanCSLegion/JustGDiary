@@ -69,7 +69,7 @@ class MonthFlowLayoutTest {
         }
     }
 
-    /** 1) 行高一致：月内相邻两行的顶正好差一个 `rowH`；两块之间不留空隙。 */
+    /** 1) 行高一致：月内相邻两行的顶正好差一个 `rowH`；两块之间隔着 `MONTH_GAP`。 */
     @Test
     fun `rows inside a month are exactly one row apart`() {
         val l = layout()
@@ -88,30 +88,47 @@ class MonthFlowLayoutTest {
                 )
             }
             val next = l.blocks[block.index + 1]
-            assertEquals("$key 最后一行到底就是下个月的开始", l.rowH,
-                next.top - l.rowTop(block, block.rowCount - 1), FLOAT_EPS)
-            assertEquals("上一块的底 = 下一块的顶", next.top, block.bottom, 0.001f)
+            // 最后一行 → 下个月第一行 = 一个行高 **+ 两个月之间的距离**
+            assertEquals("$key 最后一行到下个月第一行 = 行高 + MONTH_GAP", l.rowH,
+                next.top - l.rowTop(block, block.rowCount - 1) - CalendarLayout.MONTH_GAP,
+                FLOAT_EPS)
+            assertEquals(
+                "下一块的顶 = 本块的底 + MONTH_GAP",
+                next.top,
+                block.bottom + CalendarLayout.MONTH_GAP,
+                0.001f,
+            )
         }
     }
 
     /**
-     * 2) 月份之间**不留空隙**，小标题在**分割线上方**、紧贴分割线。
+     * 2) 月份之间隔着 [CalendarLayout.MONTH_GAP]，小标题在**分割线上方**、留一点余量。
      *
-     * 从上到下的次序：上个月的日期 → 小标题 → 分割线（画在本月第一行的顶）→ 本月日期。
+     * 从上到下的次序：上个月的日期 → （间距）→ 小标题 → （余量）→ 分割线（画在本月第一行的顶）
+     * → 本月日期。用户 2026-09-27 拍板："你直接调整两个月之间的总距离不行吗？"，
+     * 以及"小标题也不要贴着分割线"。
      */
     @Test
-    fun `months are adjacent and the label sits above the divider`() {
+    fun `months are separated by the gap and the label sits above the divider`() {
         val l = layout()
         assertEquals("竖屏：15dp 字 → 21dp（就是这一行字）", 21f, labelH, 0.001f)
         val tightGap = CalendarLayout.LABEL_TIGHT_GAP
         l.blocks.take(24).forEach { block ->
             val next = l.blocks[block.index + 1]
-            assertEquals("${block.key} → ${next.key} 之间不留空隙", block.bottom, next.top, 0.001f)
+            assertEquals(
+                "${block.key} → ${next.key} 之间隔着 MONTH_GAP",
+                block.bottom + CalendarLayout.MONTH_GAP,
+                next.top,
+                0.001f,
+            )
             // 小标题：整块都在分割线（本月第一行的顶）上方，底边离它 3dp。
             val labelTop = next.top - tightGap - labelH
             assertTrue("小标题整个在分割线上方", labelTop + labelH <= next.top - tightGap + 0.001f)
-            // 而且它没有飘出上个月最后一行（仍在那一行的范围内）。
-            assertTrue("小标题落在上个月最后一行之内", labelTop >= block.bottom - rowH)
+            // 而且它落在"上一行 + 两个月之间的距离"这一段里（没有飘到上个月的行里去）。
+            assertTrue(
+                "小标题落在间距带里（不压上个月最后一行）",
+                labelTop >= block.bottom - rowH + CalendarLayout.MONTH_GAP,
+            )
         }
     }
 
@@ -178,10 +195,15 @@ class MonthFlowLayoutTest {
             val rowsH = block.rowCount * l.rowH
             val nextTop = l.blocks[i + 1].top
             assertEquals("本月的第一行顶在视口顶部", block.top, rest, 0.001f)
-            assertEquals("下个月紧接着本月最后一行（不留空隙）", rest + rowsH, nextTop, 0.001f)
+            assertEquals(
+                "下个月的第一行在本月最后一行下方 MONTH_GAP 处",
+                rest + rowsH + CalendarLayout.MONTH_GAP,
+                nextTop,
+                0.001f,
+            )
             if (block.rowCount == 6) {
                 assertEquals("六行正好铺满视口", viewportH, rowsH, 0.001f)
-                assertEquals("六行月的下一行正好在视口之外", rest + viewportH, nextTop, 0.001f)
+                assertEquals("六行月的下一行在视口之外（还多了 MONTH_GAP）", rest + viewportH, nextTop - CalendarLayout.MONTH_GAP, 0.001f)
             } else {
                 assertTrue("五行月底下会露出下个月的开头", rowsH < viewportH)
                 assertTrue("所以下一行确实露在视口里", nextTop < rest + viewportH)

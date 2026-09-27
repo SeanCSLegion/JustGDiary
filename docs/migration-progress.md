@@ -2105,36 +2105,41 @@ morph 里漏传 → 小标题在交班时会突然由灰变蓝。现在 `MonthFl
 （之前用"把 morph 停在 p=0"的办法验过 0 像素差，这条性质没有被破坏）。
 实测（慢放逐帧截图）：小标题在 morph **中段**就已经淡入并在落位，不再等到最后才冒出来。
 
-## R11 · 小标题：位置回到 iOS 行为；与上个月的间隔 6.7 → 16.3dp
+## R11 · 最终方案：**在两个月之间加真实距离**（`MONTH_GAP = 10dp`）
 
-用户："稍微调高一点前一个月到小标题之间的间隔，之前我说的紧贴在两个月连续的时候会感觉
-有些太近了。"
+用户先后提了三条：① "稍微调高一点前一个月到小标题之间的间隔"；② "还需要再加大一点" +
+"小标题也不要贴着分割线，你改了之后反而看着太挤了"；③ 最终给了正解：
 
-先量清楚（Pixel 10 Pro，行高 105dp，截图逐像素）：
+> "我的意思是，你直接调整两个月之间的总距离不行吗？"
 
-| | 改之前 | 改之后 |
+**对，前面两版都绕了**：把小标题往分割线挤（`LABEL_TUCK`，用户否掉）或把日期格内容整体
+上移（`DAY_CONTENT_RISE`，会连周条一起改）—— 两者**都已回退**，日期格与分割线几何回到原样。
+现在只在流的分块之间加一段真实距离：
+
+```kotlin
+cursor = bottom + CalendarLayout.MONTH_GAP   // MONTH_GAP = 10dp
+```
+
+小标题正好落在这段里，于是**上方和下方的空气同时成立**（实测，Pixel 10 Pro，截图逐像素）：
+
+| | 原始 | 最终 |
 | --- | --- | --- |
-| 上个月最后一行**农历墨迹底边 → 小标题墨迹顶边** | **6.7dp** | **10.3dp** |
-| 小标题墨迹底边 → 分割线（本月第一行顶） | 4.7dp | 1.0dp |
-| 小标题墨迹底边 → 本月第一行的日号墨迹 | 39dp | 35dp |
+| 上个月农历墨迹底 → 小标题墨迹顶 | 6.7dp | **16.7dp** |
+| 小标题墨迹底 → 分割线 | 4.7dp | **4.7dp**（没贴着） |
+| 两个月之间的真实距离 | 0 | **10dp** |
 
-问题是两边**反了**：小标题离上个月只有 6.7dp，离自己那个月却有 39dp。所以加了
-`CalendarLayout.LABEL_TUCK = 3.5dp` —— 把小标题往**自己那个月里坐**一点（上方的空档变大、
-下方收紧），与"小标题属于下面那个月"的语义一致。
+连续性不受影响：`block.bottom`（最后一行底）与下一块的 `top` 之间隔着这一段；
+可见块、静止偏移、`dominantBlockIndex` 全部按块顶算，自动带上间距。
 
-上限是**分割线**（画在本月第一行顶）：墨迹离它只剩 4.7dp，所以最多坐 ~4dp，取 3.5dp
-（留 1dp 余量）。
+测试跟着改语义（三条钉着"零间距"的老断言）：`rows inside a month are exactly one row apart`
+（块内行距仍是 `rowH`，块之间 = `rowH + MONTH_GAP`）、
+`the viewport at rest shows six rows or the next month's first row`、
+`months are separated by the gap and the label sits above the divider`（新名字，同时钉住
+"不贴分割线"）。
 
-用户复看后要求"还需要再加大一点" —— 小标题已经贴到分割线，只剩最后一个余量：
-**格子内容上方的留白**。于是再加 `CalendarLayout.DAY_CONTENT_RISE = 6dp`，把日期格里的
-内容（圆 + 日号 + 农历 + 标记）整体上移（`CalendarDayCell` 的居中 offset 与
-`YearMonthMorph.cellLayout` 同步改，否则 morph 两端会错开）。副作用是**正向**的：
-
-| | 原始 | +TUCK | +TUCK+RISE |
-| --- | --- | --- | --- |
-| 上个月农历墨迹底 → 小标题墨迹顶 | 6.7dp | 10.3dp | **16.3dp** |
-| 小标题墨迹底 → 分割线 | 4.7dp | 1.0dp | 1.0dp |
-| 格子内容墨迹：上方 / 下方留白 | 34 / 25dp（偏下） | 34 / 25dp | **28.3 / 30.7dp（基本居中）** |
+顺带修了一个**既有缓存缺陷**：`CalendarGrid.weeks` 的缓存写满是"满了就不再写入"，
+于是后面所有月份都不命中，"同一月份返回同一实例"的约定就断了（被 `MonthFlowLayoutTest`
+遍历大量月份后暴露）。改成满了先 `clear()` 再写。
 
 ### 小标题的位移动画：试了两版，最后按用户拍板回到 iOS
 
@@ -2145,9 +2150,7 @@ morph 里漏传 → 小标题在交班时会突然由灰变蓝。现在 `MonthFl
 `alpha = 1 - clamp01(progress * 2.2)`；`LABEL_RISE`、`morphRowY()`、
 `MonthFlowMorphSource.Label.firstRowIndex` 全部删掉（不留死代码）。
 
-单测 `the label keeps a gap above the previous month's last row` 现在同时钉住：
-上方空档 ≥ 11 + TUCK + RISE、整体仍放得进上一行的留白、**墨迹仍在分割线上方**。
-证据：`docs/ui-audit/r11-1-label-gap-before-after.png`（① 原始 ② 只加 TUCK ③ 再加 RISE）。
+证据：`docs/ui-audit/r11-1-label-gap-before-after.png`（上=原始 6.7dp，下=现在 16.7dp）。
 
 ### 单测抓到的两个真 bug（都已修）
 

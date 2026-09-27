@@ -134,7 +134,7 @@ class MonthFlowLayout private constructor(
         val top: Float,
         /** 要画的周行数（[CalendarGrid.displayedWeeks] 的行数，4…6）。 */
         val rowCount: Int,
-        /** 本块的底（= 下个月第一行的顶）。 */
+        /** 本块最后一行的底。下一块的 `top` = 它 + [CalendarLayout.MONTH_GAP]。 */
         val bottom: Float,
     )
 
@@ -254,7 +254,8 @@ class MonthFlowLayout private constructor(
                 val rows = CalendarGrid.displayedWeekCount(first, weekStart)
                 val bottom = cursor + rows * rowH
                 out.add(Block(i, key, first, cursor, rows, bottom))
-                cursor = bottom
+                // 月与月之间留一段**真实距离**（小标题就落在这段里）
+                cursor = bottom + CalendarLayout.MONTH_GAP
             }
             return out
         }
@@ -673,7 +674,7 @@ private fun MonthFlowBlock(
             compact = compact,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .offset(y = (-(labelBandH + CalendarLayout.LABEL_TIGHT_GAP - CalendarLayout.LABEL_TUCK)).dp),
+                .offset(y = (-(labelBandH + CalendarLayout.LABEL_TIGHT_GAP)).dp),
             isCurrent = block.key == todayMonthKey,
         )
     }
@@ -985,7 +986,7 @@ private fun morphSource(
                 monthFirst = block.monthFirst,
                 key = block.key,
                 bottom = block.top - offsetDp + titleHeight + weekdayHeight -
-                    CalendarLayout.LABEL_TIGHT_GAP + CalendarLayout.LABEL_TUCK,
+                    CalendarLayout.LABEL_TIGHT_GAP,
             ),
         )
         CalendarGrid.displayedWeeks(block.monthFirst, weekStart).forEachIndexed { i, week ->

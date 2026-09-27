@@ -55,7 +55,12 @@ object CalendarGrid {
             val rowStart = start.plusDays(row * 7L)
             rows.add((0 until 7).map { rowStart.plusDays(it.toLong()) })
         }
-        if (weeksCache.size < MAX_WEEKS_CACHE) weeksCache[cacheKey] = rows
+        // ⚠️ 缓存满了要**清空重来**，不能"满了就不再写入" —— 后者会让后续所有月份都
+        // 缓存不命中，`weeks()` 的"同一月份返回同一实例"这条约定就断了
+        // （单测 `weeks cache returns the same instance for the same month` 正是钉这条；
+        //   它是被 `MonthFlowLayoutTest` 遍历大量月份后才暴露出来的）。
+        if (weeksCache.size >= MAX_WEEKS_CACHE) weeksCache.clear()
+        weeksCache[cacheKey] = rows
         return rows
     }
 

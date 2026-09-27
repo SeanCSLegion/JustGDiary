@@ -103,7 +103,7 @@ fun YearMonthMorph(
     val prevBlock = layout.blocks.getOrNull(blockIndex - 1)
     val cellW = CalendarLayout.monthCellW(widthDp)
     val labelH = remember { CalendarLayout.flowLabelBandHeight(compact = false) }
-    val labelBlockH = labelH + CalendarLayout.LABEL_TIGHT_GAP - CalendarLayout.LABEL_TUCK
+    val labelBlockH = labelH + CalendarLayout.LABEL_TIGHT_GAP
 
     // 主题色在组合期取出（Canvas 的绘制 lambda 不是 @Composable）
     val primary = MaterialTheme.colorScheme.primary
@@ -627,8 +627,7 @@ private data class CellLayout(
 private fun cellLayout(rowY: Float, m: CalendarLayout.DayMetrics, lunarBoxHDp: Float): CellLayout {
     val markH = 3f                                   // 1dp padding + 2dp 短横线
     val columnH = m.circleDiameter + lunarBoxHDp + markH
-    val top = rowY + (m.cellH - columnH) / 2f +
-        CalendarLayout.LUNAR_TIGHTEN / 2f - CalendarLayout.DAY_CONTENT_RISE
+    val top = rowY + (m.cellH - columnH) / 2f + CalendarLayout.LUNAR_TIGHTEN / 2f
     return CellLayout(
         circleCenterY = top + m.circleDiameter / 2f,
         lunarCenterY = top + m.circleDiameter + lunarBoxHDp / 2f - CalendarLayout.LUNAR_TIGHTEN,
