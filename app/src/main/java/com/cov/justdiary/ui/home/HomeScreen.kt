@@ -912,7 +912,9 @@ fun HomeScreen(
                         // 重画那一行与当日内容；年 morph 由 `YearMonthMorph` 重画本月网格
                         // （后者画在年历**之上**，所以月流不能再自己画一遍）。
                         // 滚动位置不受影响 —— 隐藏 ≠ 卸载。
-                        visible = mode == HomeViewMode.MONTH && !morphing,
+                        // ⚠️ 按**进度**交班，不按 `morphing`（见真实周层那处的说明）。
+                        visible = mode == HomeViewMode.MONTH && !morphing &&
+                            !(weekMorphing && weekProgress.value > 0f),
                         onDayTap = onFlowDayTap,
                         onTopMonthChange = { key -> if (key != monthKey) monthKey = key },
                         onSettle = { key -> if (key != monthKey) monthKey = key },
@@ -923,7 +925,15 @@ fun HomeScreen(
                     )
 
                     // ② 周层（真实图层）：morph 收尾之后才出现，位置与 morph 的终点逐像素一致。
-                    if (mode == HomeViewMode.WEEK && !morphing) {
+                    // ⚠️ 交班判据必须是**进度**，不能是 `!morphing`。
+                    //
+                    // `weekMorphing` 要到协程收尾（`runMorph` 返回之后）才复位，而进度在那之前
+                    // 就已经到 1 了 —— 这一段时间里 **morph 层和真实周层同时可见**，两块都画
+                    // 那 7 个日号，只是位置上差几个像素，看起来就是"好多日号重叠起来了"
+                    //（用户 2026-09-27 截图实锤）。morph 层到终点即让位，两者永不同时在场上。
+                    val weekSettled = mode != HomeViewMode.WEEK ||
+                        (!morphing && weekProgress.value >= 1f)
+                    if (weekSettled) {
                         WeekLayer(
                             calendarW = calendarW,
                             weekStart = weekStart,
@@ -1050,7 +1060,8 @@ fun HomeScreen(
 
                     // ⑤ 月↔周 morph 层：用**冻结的源几何**重画，两个方向共用一个源。
                     val source = weekSource
-                    if (weekMorphing && source != null) {
+                    // 与上面那条互补：进度到终点就撤，把画面交给真实图层
+                    if (weekMorphing && source != null && weekProgress.value < 1f) {
                         MonthWeekMorph(
                             progress = weekProgressReader,
                             source = source,
