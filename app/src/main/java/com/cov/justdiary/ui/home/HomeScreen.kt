@@ -1488,6 +1488,8 @@ private fun WeekStrip(
                     rows = listOf(days),
                     anchorMonth = days.first(),
                     metrics = metrics,
+                    // 与月流同一条 Canvas 路径（逐格真实组件在 80dp 的条里字号会被压变形）
+                    canvasCells = true,
                     selectedKey = selectedKey,
                     todayKey = todayKey,
                     flags = flags,

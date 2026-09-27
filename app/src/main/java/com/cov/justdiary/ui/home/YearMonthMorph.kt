@@ -574,16 +574,28 @@ internal fun DrawScope.drawDayCell(
     //
     // 单位约定（与原实现一致）：`m.cellW / cellH / dayFont / lunarFont` 是 **dp**，
     // 而 `rowY / cellW / cellH` 这几个入参是 **px**；`layout.*` 一律是 **dp**。
-    val dayBox = if (dayBoxHDp > 0f) dayBoxHDp else metrics.dayFont
-    val dayTopDp = rowY / density + (metrics.cellH - dayBox) / 2f
-    val dayCenterDp = dayTopDp + dayBox / 2f
-    // 农历 + 记号 = 组的下半部分，整体下移 LUNAR_TIGHTEN（抵掉圆底的富余）
-    val groupBottomH = lunarBoxHDp + MARK_H
-    val lunarCenterDp = dayTopDp + dayBox + groupBottomH / 2f - CalendarLayout.LUNAR_TIGHTEN
-    val markTopDp = dayTopDp + dayBox + groupBottomH - MARK_H + 1f
+    // ⚠️ **排版完全由字号驱动，不再用 `Text` 的盒子高度**。
+    //
+    // 用户 2026-09-27："月视图下圆里日号和农历似乎分的太开了，保留有日记标记的余量即可"。
+    // 根因：`Text` 的盒子高 = 字号 × 主题行高（日号 27dp / 农历 24dp），而字形本身只有
+    // 字号那么高（20 / 11）—— 两个盒子一叠，中间凭空多出十几 dp 的"行距"。
+    // 现在整组高度 = `日号字号 + 农历字号 + 标记余量`，两个字形各自居中在自己的那份里。
+    val dayGlyph = metrics.dayFont
+    val lunarGlyph = if (lunarBoxHDp > 0f) metrics.lunarFont else 0f
+    // 两行之间留出 `GROUP_GAP`：那一小段就是"有日记"短横线的位置
+    //（不给它留位，短横线会压在农历上；用户 2026-09-27："没有保留有日记的标记的位置"）。
+    val gap = if (lunarGlyph > 0f) CalendarLayout.GROUP_GAP else 0f
+    val groupH = dayGlyph + gap + lunarGlyph + MARK_H
+    // 整组在行内**严格居中**（不加 `LUNAR_TIGHTEN/2` 那类整体偏移 —— 用户实测指出
+    // 它会让"选中圆不在分割线正中"）。
+    val groupTopDp = rowY / density + (metrics.cellH - groupH) / 2f
+    val dayCenterDp = groupTopDp + dayGlyph / 2f
+    val lunarCenterDp = groupTopDp + dayGlyph + gap + lunarGlyph / 2f
+    val markTopDp = groupTopDp + dayGlyph + gap + lunarGlyph
     val monthLayout = monthSideLayout ?: CellLayout(
-        // 圆心 = 整组的中心：上边界取"日号字形上沿"（日号盒子略高于字形）
-        circleCenterY = dayCenterDp + (groupBottomH - (dayBox - metrics.dayFont)) / 2f,
+        // 圆心 = 整组中心；圆直径（[CalendarLayout.monthPaneMetrics] 那边）也是按
+        // "整组高 + 14" 撑开的，于是**月视图与周条的圆同尺寸、同排布**。
+        circleCenterY = groupTopDp + groupH / 2f,
         dayCenterY = dayCenterDp,
         lunarCenterY = lunarCenterDp,
         markTop = markTopDp,

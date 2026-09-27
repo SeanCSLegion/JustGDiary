@@ -143,6 +143,7 @@ fun CalendarDayGrid(
     Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
     if (canvasCells) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            if (!FrameGate.allow()) return@Canvas
             val rowPx = metrics.cellH * density
             val cellPx = metrics.cellW * density
             // 真实格子里两个 Text 的**盒子高度**（dp）。它们决定 `Column` 的总高，
@@ -165,21 +166,14 @@ fun CalendarDayGrid(
                 ),
             ).size.height / density
             rows.forEachIndexed { row, week ->
-                val rowYDp = row * metrics.cellH
-                val layout = realCellLayout(
-                    rowYDp = rowYDp,
-                    m = metrics,
-                    lunarBoxHDp = if (metrics.lunarAlpha > 0.01f) lunarBoxH else 0f,
-                    dayBoxHDp = dayBoxH,
-                )
                 week.forEachIndexed { col, date ->
                     val inMonth =
                         date.year == anchorMonth.year && date.monthValue == anchorMonth.monthValue
-                    if (!inMonth) return@forEachIndexed
+                    if (!inMonth && !showAdjacent) return@forEachIndexed
                     drawDayCell(
                         day = date,
                         col = col,
-                        rowY = rowYDp * density,
+                        rowY = row * metrics.cellH * density,
                         cellW = cellPx,
                         cellH = rowPx,
                         m = metrics,
@@ -198,7 +192,7 @@ fun CalendarDayGrid(
                         // 我们已经按真实字号量过了，再换算一次 = 二次缩放，农历会贴到日号上。
                         lunarBoxHDp = lunarBoxH,
                         t = 1f,
-                        monthSideLayout = layout,
+                        dayBoxHDp = dayBoxH,
                     )
                 }
             }

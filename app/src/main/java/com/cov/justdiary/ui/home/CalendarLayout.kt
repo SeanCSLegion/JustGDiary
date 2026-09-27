@@ -234,14 +234,22 @@ object CalendarLayout {
             dividerAlpha = CalendarLayout.lerp(dividerAlpha, other.dividerAlpha, t),
         )
 
-        /** 农历行的高度（0 表示不画）。 */
+        /**
+         * 一整组内容的高度 = **日号字号 + 农历字号 + 标记余量**。
+         *
+         * ⚠️ 2026-09-27 改成"字号驱动"：以前用 `Text` 的盒子高（= 字号 × 主题行高，
+         * 日号 27dp / 农历 24dp），两个盒子一叠比字形高出一大截，圆里的日号与农历
+         * 就被行距撑得很开（用户："日号和农历似乎分得太开了，保留有日记标记的余量即可"）。
+         */
+        val contentH: Float
+            get() = dayFont + (if (lunarAlpha > 0.01f) lunarFont + GROUP_GAP else 0f) +
+                DIARY_MARK_ROW_H
+
+        /** 农历那一行的**行盒**高度（0 表示不画）。[lunarCenterY] 仍以它为基准。 */
         val lunarLineH: Float
             get() = if (lunarAlpha > 0.01f) (lunarFont + 5f) * lunarAlpha else 0f
 
-        /** 一格内容的整体高度（日号 + 间距 + 农历行）。 */
-        val contentH: Float get() = dayFont + 4f + lunarLineH
-
-        /** 选中圆的直径：比内容再大一圈，但被格宽/格高夹住，相邻格不会相碰。 */
+        /** 选中圆的直径：比这一组再大一圈，但被格宽/格高夹住，相邻格不会相碰。 */
         val circleDiameter: Float get() = minOf(cellW - 3f, contentH + 14f, cellH - 3f)
     }
 
@@ -285,6 +293,19 @@ object CalendarLayout {
 
     /** 日号与农历之间的空档要收掉多少 dp（圆底比数字本身高出一截）。 */
     const val LUNAR_TIGHTEN = 6f
+
+    /** 一组内容里给"有日记"短横线留的余量（dp）：它是 2dp 线 + 1dp 间隙。 */
+    const val DIARY_MARK_ROW_H = 3f
+
+    /**
+     * 日号与农历之间的呼吸缝（dp）。
+     *
+     * ⚠️ 2026-09-27 用户连提两次，最后定在这里："日号和农历似乎分得太开了，保留有日记的
+     * 标记的余量即可" → 我一度收到 0（两行贴着），用户当场否掉："那你现在又太近了啊，
+     * 没有保留有日记的标记的位置"。所以：**必须给标记留出可见的空位**，
+     * 再加 2dp 呼吸缝。
+     */
+    const val GROUP_GAP = 2f
 
     /**
      * 一格「日号 + 农历 + 有日记标记」的自然高度。

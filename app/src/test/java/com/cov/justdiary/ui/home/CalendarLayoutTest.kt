@@ -142,9 +142,11 @@ class CalendarLayoutTest {
         // lunarFont = clamp(cellH × 0.18, 9, 11) = 11
         assertEquals(11f, metrics.lunarFont, 1e-3f)
         assertEquals(16f, metrics.lunarLineH, 1e-3f)
-        assertEquals(40f, metrics.contentH, 1e-3f)
-        // circleDiameter = min(cellW - 3, contentH + 14, cellH - 3) = min(54.43, 54, 93) = 54
-        assertEquals(54f, metrics.circleDiameter, 1e-3f)
+        // 一组内容 = 日号 + 呼吸缝 + 农历 + 标记占位 = 20 + 2 + 11 + 3
+        //（2026-09-27 改成"字号驱动"：以前用 Text 的盒子高，会把日号与农历撑得很开）
+        assertEquals(36f, metrics.contentH, 1e-3f)
+        // circleDiameter = min(cellW - 3, contentH + 14, cellH - 3) = min(54.43, 50, 107-3) = 50
+        assertEquals(50f, metrics.circleDiameter, 1e-3f)
     }
 
     // --------------------------------------------------------------- 横屏（原样保留）
@@ -188,7 +190,8 @@ class CalendarLayoutTest {
         )
         assertEquals(45f, tall.cellH, 1e-3f)
         assertEquals(15.3f, tall.dayFont, 1e-3f)
-        assertEquals(19.3f, tall.contentH, 1e-3f)
+        // dayFont 15.3 + 标记占位 3（横屏不显示农历）
+        assertEquals(18.3f, tall.contentH, 1e-3f)
     }
 
     @Test
