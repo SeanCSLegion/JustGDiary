@@ -556,6 +556,8 @@ fun HomeScreen(
         }
         val yearProgressReader: () -> Float = remember { { yearProgress.value } }
         val weekProgressReader: () -> Float = remember { { weekProgress.value } }
+        // 连续流的滚动偏移（年↔月 morph 层要按"屏幕上那一块网格的真实位置"起手）
+        val flowOffset = remember { FlowOffsetProbe() }
         // 连续月历流的初始滚动位置 = 当前月的**静止偏移**（该月第一行顶到视口顶部）。
         // `remember {}` 不带 key：只在第一次组合时取一次，之后滚动位置由流自己持有
         // —— 跨形态保持，正是用户要的「用户滑到哪，周视图返回的时候月视图就留在哪」。
@@ -797,15 +799,15 @@ fun HomeScreen(
                         // 用户看到的就是"完全是跳变、没有过渡动画"。
                         // 周 morph 相反：那一行与当日内容由 morph 层自己画，月层必须让开，
                         // 否则会与 morph 层重影（两层画同一批日期）。
-                        visible = (mode == HomeViewMode.MONTH && !weekMorphing) || yearMorphing,
+                        // ⚠️ 两个 morph 期间月流都**整体隐藏**：周 morph 由 `MonthWeekMorph`
+                        // 重画那一行与当日内容；年 morph 由 `YearMonthMorph` 重画本月网格
+                        // （后者画在年历**之上**，所以月流不能再自己画一遍）。
+                        // 滚动位置不受影响 —— 隐藏 ≠ 卸载。
+                        visible = mode == HomeViewMode.MONTH && !morphing,
                         onDayTap = onFlowDayTap,
                         onTopMonthChange = { key -> if (key != monthKey) monthKey = key },
                         onSettle = { key -> if (key != monthKey) monthKey = key },
-                        yearMorph = MonthFlowYearMorph(
-                            monthKey = monthKey,
-                            miniGrid = yearMiniGrid,
-                            progress = yearProgressReader,
-                        ),
+                        offsetProbe = flowOffset,
                         titleText = titleText,
                         labelText = labelText,
                         modifier = Modifier.align(Alignment.TopCenter),
@@ -837,9 +839,10 @@ fun HomeScreen(
                         )
                     }
 
-                    // ③ 年层：年态期间常驻；年 morph 期间由它按进度淡入 / 缩放。
-                    // 上下滑翻年的手势挂在这一层上（月态由连续月历流自己负责滚动）。
-                    if (mode == HomeViewMode.YEAR || yearMorphing) {
+                    // ③ 年层（**年态静止**）：上下滑翻年的手势挂在它上面。
+                    // morph 期间不画这一份 —— 那一段由 ④ 的 morph 层自己带一份年历，
+                    // 两份同时在场会白画一遍 12 张迷你月。
+                    if (mode == HomeViewMode.YEAR && !yearMorphing) {
                         Box(modifier = pagerGesture) {
                         PagerViewport(
                             bandH = bandH,
@@ -867,7 +870,57 @@ fun HomeScreen(
                         }
                     }
 
-                    // ④ 月↔周 morph 层：用**冻结的源几何**重画，两个方向共用一个源。
+                    // ④ 年 ↔ 月 morph 层：年历（自己一份）+ **本月网格重排进卡片**
+                    //    （照着 iOS `YearMonthMorphView`：网格画在插值矩形里、字号跟着插值，
+                    //      所以日期始终清晰；此前用整块仿射变换会把文字压扁）。
+                    if (yearMorphing) {
+                        YearMonthMorph(
+                            progress = yearProgressReader,
+                            zoomingIn = yearZoomingIn,
+                            layout = flowLayout,
+                            offsetDp = { flowOffset.value },
+                            monthKey = monthKey,
+                            widthDp = calendarW,
+                            heightDp = bandH,
+                            titleHeight = titleH,
+                            weekdayHeight = weekdayH,
+                            targetGrid = remember(yearMiniGrid, titleH, weekdayH) {
+                                CalendarLayout.Rect(
+                                    x = yearMiniGrid.x,
+                                    y = yearMiniGrid.y - (titleH + weekdayH),
+                                    w = yearMiniGrid.w,
+                                    h = yearMiniGrid.h,
+                                )
+                            },
+                            weekStart = weekStart,
+                            selectedKey = selectedKey,
+                            todayKey = todayKey,
+                            flags = flags,
+                            showLunar = showLunarHere,
+                            titleText = titleText,
+                            labelText = labelText,
+                            yearLayer = {
+                                YearLayer(
+                                    year = year,
+                                    selectedMonth = monthFirst.monthValue,
+                                    todayKey = todayKey,
+                                    flags = flags,
+                                    weekStart = weekStart,
+                                    showLunar = showLunarHere,
+                                    yearHeight = bandH,
+                                    yearWidth = calendarW,
+                                    yearProgress = yearProgressReader,
+                                    dateFormats = dateFormats,
+                                    onMonthClick = {},
+                                    // morph 层自己在同一个矩形里画这块网格 → 卡片不再画一遍
+                                    hiddenMonth = monthFirst.monthValue,
+                                )
+                            },
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    }
+
+                    // ⑤ 月↔周 morph 层：用**冻结的源几何**重画，两个方向共用一个源。
                     val source = weekSource
                     if (weekMorphing && source != null) {
                         MonthWeekMorph(
@@ -936,6 +989,8 @@ private fun YearLayer(
     yearProgress: () -> Float,
     dateFormats: DateFormats?,
     onMonthClick: (Int) -> Unit,
+    /** 年↔月 morph 期间不画这一张迷你月（morph 层正在同一矩形里画它，见 `YearCanvas`）。 */
+    hiddenMonth: Int? = null,
 ) {
     val context = LocalContext.current
     // 与进度无关的那部分几何：算一次就够（它只跟尺寸和选中月有关）
@@ -949,6 +1004,7 @@ private fun YearLayer(
         flags = flags,
         weekStart = weekStart,
         showLunar = showLunar,
+        hiddenMonth = hiddenMonth,
         yearTitle = dateFormats?.year(year) ?: context.getString(R.string.date_year, year),
         zodiacLabel = dateFormats?.yearZodiac(year).orEmpty(),
         modifier = Modifier

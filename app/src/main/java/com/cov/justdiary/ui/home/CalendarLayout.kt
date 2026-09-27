@@ -324,24 +324,6 @@ object CalendarLayout {
     /** 一格只有日号（无农历）时的自然高度：以选中圆直径为据。 */
     const val DAY_CELL_NO_LUNAR_H = 48f
 
-    /**
-     * 竖屏行高 = **列宽**与**文字实际高度**两者取大。
-     *
-     * 只按列宽会**裁掉农历**：字号是从 `cellH` 推出来的（`dayFont = cellH×0.34` 上限 20、
-     * `lunarFont = cellH×0.18` 上限 11），之后还要乘系统字号缩放 ——
-     * 用户把系统字号调大时，列宽推出的行高装不下"日期 + 农历"（真机实测农历被切一半）。
-     * 所以这里按上限字号 × 缩放系数估一个内容高度，取较大者。
-     */
-    fun dayCellHeightFor(calendarW: Float, fontScale: Float = 1f, showLunar: Boolean = true): Float {
-        val byWidth = calendarW / 7f * CELL_H_PER_COL_W
-        // 内容下限：`CalendarDayCell` 的注释写明"日号 + 农历 ≈ 70dp"，
-        // 取 72dp 留一点余量。**低于它会裁掉农历**（真机实测：61dp 时农历被切一半）。
-        // 有农历时用 72，无农历（纯日号）时用圆直径那档就够。
-        val natural = if (showLunar) DAY_CELL_CONTENT_H else DAY_CELL_NO_LUNAR_H
-        val byContent = natural * max(1f, fontScale)
-        return max(byWidth, byContent).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
-    }
-
     /** 网格的**实际**高度（当月行数 × 行高）。 */
     fun monthGridHeight(rows: Int, cellH: Float): Float = max(0, rows) * cellH
 
@@ -449,7 +431,7 @@ object CalendarLayout {
      *    旧规则（73dp）只有 19dp 留白，小标题会压到前一行的农历上。
      *
      * [fontScale] 那一项只是**兜底**：系统字号调大时内容会变高，行高至少要放得下
-     * "日号 + 农历"（与 [dayCellHeightFor] 的 `byContent` 同一个下限）。
+     * "日号 + 农历"（下限 72dp，与 [DAY_CELL_CONTENT_H] 同源）。
      */
     fun flowCellHeightFor(
         areaH: Float,
@@ -708,6 +690,68 @@ object CalendarLayout {
             yearOpacity = yearLayerOpacity(p),
             yearScale = 1f + (1f - p) * 0.6f,
             sourceMiniTitleOpacity = clamp01((p - 0.7f) / 0.3f),
+        )
+    }
+
+    // ------------------------------------------------- morph：年 ↔ 月（网格重排）
+
+    /** 年↔月 morph 里"那一块月网格"的插值结果。 */
+    data class YearMonthGridMorph(
+        /** 1 = 月侧（源），0 = 年侧（目标）。 */
+        val t: Float,
+        val rect: Rect,
+        val metrics: DayMetrics,
+        val lunarAlpha: Float,
+        val dividerAlpha: Float,
+    )
+
+    /**
+     * 年↔月 morph 的**网格插值**：源矩形（屏幕上那一块月网格）→ 目标矩形（年历里那张迷你月
+     * 的网格），格子按 [rowCount] 行 × 7 列**重新排布**（不是把整层压扁）。
+     *
+     * 这是从 iOS `YearMonthMorphView` 学来的关键一条：iOS 把 `MonthCanvas` 画在插值出来的
+     * `grid` 矩形里，字号在 `miniDayFont`（≈9-14pt）与月格字号（20pt）之间插值 ——
+     * 所以"月份缩进卡片"的过程中**日期始终清晰**，而不是被拉成一片涂抹。
+     * Android 之前用整块仿射变换（`scaleX/scaleY`），文字会被压扁，用户反馈
+     * "月视图切换年视图的动画也不流畅"。
+     *
+     * @param source 源矩形（**内容坐标 dp**）：`(0, 本块顶 − 滚动偏移, 宽, 行数 × 行高)`
+     * @param target 目标矩形（**内容坐标 dp**）：年历里那张迷你月的网格矩形
+     * @param rowCount 本块要画的行数（`displayedWeekCount`，4…6）
+     */
+    fun yearMonthGridMorph(
+        progress: Float,
+        source: Rect,
+        target: Rect,
+        rowCount: Int,
+        sourceMetrics: DayMetrics,
+        showLunar: Boolean,
+    ): YearMonthGridMorph {
+        val t = clamp01(1f - clamp01(progress))
+        // ⚠️ 方向：`t = 1` 是**月侧**，所以要 `lerp(目标, 源, t)` —— 写成
+        // `lerpRect(source, target, t)` 会得到"p=0 时已经缩到卡片上"的反向动画
+        // （单测 `year month grid morph relayouts...` 就是钉这一条的）。
+        val rect = lerpRect(target, source, t)
+        val cellW = rect.w / 7f
+        // ⚠️ 行高**不能**用 `rect.h / rowCount`：年历里那张迷你月是按**固定 6 行**排的
+        // （`YearCanvas`：`cellH = grid.h / 6`，只画 displayedWeeks 行），所以年侧的
+        // 行高必须是 `target.h / 6`，否则 morph 收尾换回真年历时那张卡片会跳一下。
+        val cellH = lerp(target.h / MONTH_ROWS, sourceMetrics.cellH, t)
+        val metrics = DayMetrics(
+            cellW = cellW,
+            cellH = cellH,
+            // 字号在两个端点之间插值（t = 1 是月侧、t = 0 是迷你月）
+            dayFont = lerp(miniDayFont(cellW, cellH), sourceMetrics.dayFont, t),
+            lunarFont = lerp(MINI_LUNAR_FONT, sourceMetrics.lunarFont, t),
+            lunarAlpha = if (showLunar) clamp01((t - 0.5f) / 0.5f) else 0f,
+            dividerAlpha = clamp01((t - 0.55f) / 0.45f),
+        )
+        return YearMonthGridMorph(
+            t = t,
+            rect = rect,
+            metrics = metrics,
+            lunarAlpha = metrics.lunarAlpha,
+            dividerAlpha = metrics.dividerAlpha,
         )
     }
 

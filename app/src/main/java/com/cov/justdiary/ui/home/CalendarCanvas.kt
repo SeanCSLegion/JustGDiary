@@ -67,6 +67,13 @@ fun YearCanvas(
      */
     /** 页内大标题（`2026年`，32sp bold primary）。 */
     yearTitle: String = "",
+    /**
+     * 这一张迷你月**不画**（`1..12`，仅供年↔月 morph 使用）。
+     *
+     * 与 iOS 的 `YearPageView(hiddenMonth:)` 同一个用途：morph 期间"缩进卡片的那块网格"
+     * 由 morph 层自己画在同一个矩形里，卡片再画一份就成了双重影像。
+     */
+    hiddenMonth: Int? = null,
     /** 大标题右侧的干支生肖（`丙午马年`；非中文时为空字符串）。 */
     zodiacLabel: String = "",
     monthLabel: (LocalDate) -> String,
@@ -136,10 +143,12 @@ fun YearCanvas(
                 fontWeight = FontWeight.SemiBold,
             )
 
-            for (month in 1..12) {
+            monthLoop@ for (month in 1..12) {
                 val card = CalendarLayout.yearCardRect(month, widthDp, heightDp)
                 val title = CalendarLayout.miniTitleRect(card)
                 val grid = CalendarLayout.miniGridRect(card)
+                // morph 期间那一张卡片的**网格**不画（morph 层正在同一位置画它）
+                val gridHidden = month == hiddenMonth
 
                 val monthFirst = LocalDate.of(year, month, 1)
                 val isCurrentMonth = month == selectedMonth
@@ -178,6 +187,8 @@ fun YearCanvas(
                 // 「今天」的实心圆：半径按格子的短边取，封顶保证不碰到上下两行
                 val todayRadius = minOf(cellW, cellH) * 0.42f
 
+                // 只跳过"网格"，卡片标题照画（它是"我在哪个月"的锚点）
+                if (gridHidden) continue@monthLoop
                 rows.forEachIndexed { row, week ->
                     week.forEachIndexed { col, date ->
                         if (date.year != year || date.monthValue != month) return@forEachIndexed

@@ -371,15 +371,15 @@ data class MonthFlowMorphSource(
     )
 }
 
-/** 年↔月 morph 的全部入参（null = 没有年 morph）。 */
-data class MonthFlowYearMorph(
-    /** 顶部大标题/年历源卡片对应的月份（= 父层的 `monthKey`）。 */
-    val monthKey: Int,
-    /** 目标：年历里那张迷你月的**网格**矩形（日历区坐标 dp）。 */
-    val miniGrid: CalendarLayout.Rect,
-    /** 进度读取器（**不是值**：要在延迟 lambda 里读）。 */
-    val progress: () -> Float,
-)
+/**
+ * 把连续流的滚动偏移"漏"给外部（年↔月 morph 层要用它算源矩形）。
+ *
+ * 刻意用**普通可变字段**而不是 Compose state：它在每一帧的放置阶段被写（见 `MonthFlow`
+ * 里那个 `Modifier.offset { }`），写成 state 会让整屏每帧重组 —— 那正是"不跟手"的根因。
+ */
+class FlowOffsetProbe {
+    var value: Float = 0f
+}
 
 // --------------------------------------------------------------------------- 滚动状态
 
@@ -448,7 +448,11 @@ fun MonthFlow(
     onTopMonthChange: (Int) -> Unit,
     onSettle: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    yearMorph: MonthFlowYearMorph? = null,
+    /**
+     * 当前滚动偏移的**写出点**：年↔月 morph 层要按"屏幕上那一块网格的真实位置"起手，
+     * 而偏移只存在于这条流里。传一个普通对象（不是 state）—— 写它不触发重组。
+     */
+    offsetProbe: FlowOffsetProbe? = null,
     /** 横屏左栏的紧凑形态（小标题小一号）。 */
     compact: Boolean = false,
     titleText: (LocalDate) -> String,
@@ -498,23 +502,11 @@ fun MonthFlow(
             .collect { i -> layout.blocks.getOrNull(i)?.let { onTopMonthChange(it.key) } }
     }
 
-    val yearP = yearMorph?.progress
-    val contentAlpha: () -> Float = remember(yearP, visible) {
-        {
-            val base = if (yearP == null) 1f else 1f - CalendarLayout.yearLayerOpacity(yearP())
-            if (visible) base else 0f
-        }
-    }
-    // 钉住层的透明度 = **可见性** × 年 morph 的淡出曲线。
-    // ⚠️ 少了 `visible` 这一半：周态 / 年态下整条流的不透明度是 0（它必须常驻以保住
-    // 滚动位置），但钉住层是**另一个** Box，会照旧画在顶上 —— 实测周态里那颗大标题
-    // 穿在周条后面（周层没有底色，一眼就能看见）。
-    val headerAlpha: () -> Float = remember(yearP, visible) {
-        {
-            val base = if (yearP == null) 1f else CalendarLayout.clamp01((0.45f - yearP()) / 0.45f)
-            if (visible) base else 0f
-        }
-    }
+    val contentAlpha: () -> Float = remember(visible) { { if (visible) 1f else 0f } }
+    // 钉住层的透明度 = 可见性。
+    // ⚠️ 必须单独判：周态 / 年态下整条流的不透明度是 0（它必须常驻以保住滚动位置），
+    // 但钉住层是**另一个** Box，会照旧画在顶上 —— 实测周态里那颗大标题穿在周条后面。
+    val headerAlpha: () -> Float = remember(visible) { { if (visible) 1f else 0f } }
 
     Box(
         modifier = modifier
@@ -533,17 +525,10 @@ fun MonthFlow(
                 .height(viewportH.dp)
                 .offset(y = (titleHeight + weekdayHeight).dp)
                 .graphicsLayer {
-                    // 年 morph 的缩放**不在这里做** —— 整层变换会把相邻月份一起压成一片
-                    // 涂抹（用户："月视图切换年视图的动画也不流畅"）。现在每一块各自变换：
-                    // 只有「顶部那一块」缩进年历卡片，其余块快速淡出（见下面的 MonthFlowBlock）。
-                    //
-                    // 这里只负责两件事：
-                    //  · 整体透明度（月层随年层淡入淡出，两条曲线互补）；
-                    //  · morph 期间**不裁**：缩小的那块要能落到内容区之上（年历第一行的卡片
-                    //    就在标题槽那一带）。平时必须裁，否则日期会画到钉住层上面。
-                    val ym = yearMorph
-                    val p = ym?.progress?.invoke() ?: 0f
-                    clip = ym == null || p <= 0.001f
+                    // 裁在内容区里：日期不许画到钉住层上面。
+                    // （年↔月的过渡由**独立的 morph 层**（`YearMonthMorph`）负责，
+                    //   那条流在 morph 期间整体隐藏 —— 简单、也没有层叠顺序问题。）
+                    clip = true
                     alpha = contentAlpha()
                 }
                 .pointerInput(layout, viewportH, enabled) {
@@ -589,34 +574,11 @@ fun MonthFlow(
                         },
                         modifier = Modifier
                             .offset {
-                                IntOffset(0, ((block.top - scroll.offsetDp) * density).roundToInt())
+                                val off = scroll.offsetDp
+                                // 把"屏幕上这一帧的偏移"记给 morph 层（普通写，不触发重组）
+                                offsetProbe?.value = off
+                                IntOffset(0, ((block.top - off) * density).roundToInt())
                             }
-                            .graphicsLayer {
-                                // 年 morph：**只有顶部那一块**仿射变换到年历里那张迷你月的网格上；
-                                // 其余块快速淡出（`p=0` 时两者都是恒等 / 全不透明，
-                                // 所以 morph 的第一帧与屏幕上那一帧逐像素一致，不会跳）。
-                                val ym = yearMorph ?: return@graphicsLayer
-                                val p = ym.progress()
-                                if (p <= 0f) return@graphicsLayer
-                                if (block.index != layout.blockIndexForKey(ym.monthKey)) {
-                                    alpha = 1f - CalendarLayout.clamp01(p * 3f)
-                                    return@graphicsLayer
-                                }
-                                val sY = block.top - scroll.offsetDp      // 源矩形在本层坐标里的顶
-                                val sH = max(1f, block.rowCount * layout.rowH)
-                                val t = 1f - p
-                                val targetY = ym.miniGrid.y - (titleHeight + weekdayHeight)
-                                val rY = CalendarLayout.lerp(sY, targetY, t)
-                                val rH = CalendarLayout.lerp(sH, ym.miniGrid.h, t)
-                                val rX = CalendarLayout.lerp(0f, ym.miniGrid.x, t)
-                                val rW = CalendarLayout.lerp(widthDp, ym.miniGrid.w, t)
-                                scaleX = rW / max(1f, widthDp)
-                                scaleY = rH / sH
-                                // 锚点 = 本块自己的左上角（所以位移就是"目标 − 源"）
-                                transformOrigin = TransformOrigin(0f, 0f)
-                                translationX = rX * density
-                                translationY = (rY - sY) * density
-                            },
                     )
                 }
             }

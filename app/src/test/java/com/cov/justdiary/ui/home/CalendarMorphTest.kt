@@ -158,6 +158,64 @@ class CalendarMorphTest {
         }
     }
 
+    /**
+     * 年↔月 morph 的**网格重排**（`CalendarLayout.yearMonthGridMorph`）。
+     *
+     * 这一条是"月份缩进卡片时日期始终清晰"的守门人：格子必须按 `rowCount` 行 × 7 列
+     * 落在插值出来的矩形里，字号在 miniDayFont 与月格字号之间插值 ——
+     * 而不是把整块做仿射变换（那样文字会被压扁）。
+     */
+    @Test
+    fun `year month grid morph relayouts the cells instead of squashing them`() {
+        val flowMetrics = CalendarLayout.flowMetrics(portraitW, 94f, showLunar = true)
+        val source = CalendarLayout.Rect(0f, 0f, portraitW, 5 * 94f)   // 五行月，静止位置
+        val target = CalendarLayout.Rect(120f, 300f, 107f, 40f)        // 年历里那张迷你月的网格
+        val rows = 5
+
+        // p = 0（月侧）：源矩形原样、字号就是月格字号
+        val atMonth = CalendarLayout.yearMonthGridMorph(0f, source, target, rows, flowMetrics, true)
+        assertEquals(1f, atMonth.t, 1e-6f)
+        assertEquals(source.x, atMonth.rect.x, 1e-3f)
+        assertEquals(source.y, atMonth.rect.y, 1e-3f)
+        assertEquals(source.w, atMonth.rect.w, 1e-3f)
+        assertEquals(source.h, atMonth.rect.h, 1e-3f)
+        assertEquals(flowMetrics.dayFont, atMonth.metrics.dayFont, 1e-3f)
+        assertEquals(flowMetrics.lunarFont, atMonth.metrics.lunarFont, 1e-3f)
+        assertEquals(1f, atMonth.lunarAlpha, 1e-3f)
+        assertEquals(1f, atMonth.dividerAlpha, 1e-3f)
+
+        // p = 1（年侧）：正好落在迷你月网格上，字号收到 miniDayFont
+        val atYear = CalendarLayout.yearMonthGridMorph(1f, source, target, rows, flowMetrics, true)
+        assertEquals(0f, atYear.t, 1e-6f)
+        assertEquals(target.x, atYear.rect.x, 1e-3f)
+        assertEquals(target.y, atYear.rect.y, 1e-3f)
+        assertEquals(target.w, atYear.rect.w, 1e-3f)
+        assertEquals(target.h, atYear.rect.h, 1e-3f)
+        assertEquals(CalendarLayout.miniDayFont(target.w / 7f, target.h / rows), atYear.metrics.dayFont, 0.6f)
+        assertEquals(0f, atYear.lunarAlpha, 1e-3f)
+        assertEquals(0f, atYear.dividerAlpha, 1e-3f)
+
+        // 端点：年侧的行高必须与年历迷你月一致（**固定 6 行**的尺子，不是 /rowCount）
+        assertEquals(target.h / 6f, atYear.metrics.cellH, 1e-3f)
+        assertEquals(94f, atMonth.metrics.cellH, 1e-3f)
+
+        // 全程：格子始终 7 列（**重排**，不是压扁），宽 / 行高 / 字号三条都单调
+        var previousW = Float.MAX_VALUE
+        var previousH = Float.MAX_VALUE
+        var previousFont = Float.MAX_VALUE
+        for (step in 0..20) {
+            val p = step / 20f
+            val m = CalendarLayout.yearMonthGridMorph(p, source, target, rows, flowMetrics, true)
+            assertEquals("列宽 = 网格宽 / 7", m.rect.w / 7f, m.metrics.cellW, 1e-3f)
+            assertTrue("行高单调不增", m.metrics.cellH <= previousH + 1e-3f)
+            assertTrue("宽度单调不增", m.rect.w <= previousW + 1e-3f)
+            assertTrue("字号单调不增", m.metrics.dayFont <= previousFont + 1e-3f)
+            previousW = m.rect.w
+            previousH = m.metrics.cellH
+            previousFont = m.metrics.dayFont
+        }
+    }
+
     @Test
     fun `year month morph forces seven by six cells at every progress`() {
         for (step in 0..10) {
