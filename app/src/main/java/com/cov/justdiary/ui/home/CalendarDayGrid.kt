@@ -1,6 +1,10 @@
 package com.cov.justdiary.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -104,6 +109,15 @@ fun CalendarDayGrid(
      * 月列表里除第一个月之外的每个月都传 true（用户："一个月的开始前和结束后都是有分割线的"）。
      */
     dividerAboveFirst: Boolean = false,
+    /**
+     * 日期格改由**整块 Canvas** 绘制（连续月历流用；周条 / morph 层仍走真组件）。
+     *
+     * 真机实测：正常帧 8ms，但"新月份首次挂载"那一帧 120~365ms，且**布局/放置段
+     * 95~684ms、组合段 0ms** —— 成本在 ~90 个 `Text` 组件的测量/放置。
+     * 打开后这些文本改由 [drawDayCell] 一次性画完（复用 morph 层那套几何），
+     * 每个格子只留一个透明的语义/命中节点。
+     */
+    canvasCells: Boolean = false,
 ) {
     val fontScale = LocalDensity.current.fontScale
     val dayFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
@@ -113,11 +127,83 @@ fun CalendarDayGrid(
     // `stringResource` 是**每个组合实例各查一次**（不是全局 memo）—— 一屏 180 个格子
     // 就是 720 次 Resources 查询，正好落在"挂载新月份"那一帧（真机实测该帧 257ms）。
     // 提到行/网格这一层之后，一次组合只查 4 次。
+    val scheme = MaterialTheme.colorScheme
+    // `Text` 组件的样式基准（`LocalTextStyle` 是 @Composable，只能取在组合里）
+    val baseTextStyle = LocalTextStyle.current
+    val textMeasurer = rememberTextMeasurer(cacheSize = GRID_TEXT_CACHE)
+    val textLayouts = MorphTextLayouts.shared
     val todayLabel = stringResource(R.string.index_today)
     val selectedLabel = stringResource(R.string.index_selected)
     val hasDiaryLabel = stringResource(R.string.index_has_diary)
     val noDiaryLabel = stringResource(R.string.index_no_diary)
 
+    // ⚠️ **画在 Column 之前**：这一层是"格子的视觉"，而 Column 里那些节点只负责语义与
+    // 命中（`drawVisuals = false` 时它们不画任何东西）。顺序反了的话，某些设备/合成路径下
+    // 会出现"形状画了但被后画的内容盖掉"。
+    Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
+    if (canvasCells) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val rowPx = metrics.cellH * density
+            val cellPx = metrics.cellW * density
+            // 真实格子里两个 Text 的**盒子高度**（dp）。它们决定 `Column` 的总高，
+            // 进而决定"日号 + 农历"这一组在格子里怎么居中 —— 量错就会贴在一起。
+            // span 用 `LocalTextStyle.current.merge(...)`：与 `Text` 组件的取值方式一致。
+            val lunarBoxH = if (showLunar && metrics.lunarAlpha > 0.01f) {
+                textMeasurer.measure(
+                    LUNAR_PROBE_TEXT,
+                    style = baseTextStyle.merge(
+                        TextStyle(fontSize = lunarFontSize, color = scheme.onSurfaceVariant),
+                    ),
+                ).size.height / density
+            } else {
+                0f
+            }
+            val dayBoxH = textMeasurer.measure(
+                "0",
+                style = baseTextStyle.merge(
+                    TextStyle(fontSize = dayFontSize, color = scheme.onSurface),
+                ),
+            ).size.height / density
+            rows.forEachIndexed { row, week ->
+                val rowYDp = row * metrics.cellH
+                val layout = realCellLayout(
+                    rowYDp = rowYDp,
+                    m = metrics,
+                    lunarBoxHDp = if (metrics.lunarAlpha > 0.01f) lunarBoxH else 0f,
+                    dayBoxHDp = dayBoxH,
+                )
+                week.forEachIndexed { col, date ->
+                    val inMonth =
+                        date.year == anchorMonth.year && date.monthValue == anchorMonth.monthValue
+                    if (!inMonth) return@forEachIndexed
+                    drawDayCell(
+                        day = date,
+                        col = col,
+                        rowY = rowYDp * density,
+                        cellW = cellPx,
+                        cellH = rowPx,
+                        m = metrics,
+                        selectedKey = selectedKey,
+                        todayKey = todayKey,
+                        flags = flags,
+                        measurer = textMeasurer,
+                        textLayouts = textLayouts,
+                        fontScale = fontScale,
+                        primary = scheme.primary,
+                        onPrimary = scheme.onPrimary,
+                        onSurface = scheme.onSurface,
+                        onSurfaceVariant = scheme.onSurfaceVariant,
+                        // ⚠️ 这里**直接传量出来的盒子高度**，不要再过 `lunarBoxHDpFor`：
+                        // 那个函数是给 morph 层用的（它只有"流里的参考高度"，要按字号比例换算）；
+                        // 我们已经按真实字号量过了，再换算一次 = 二次缩放，农历会贴到日号上。
+                        lunarBoxHDp = lunarBoxH,
+                        t = 1f,
+                        monthSideLayout = layout,
+                    )
+                }
+            }
+        }
+    }
     Column(modifier = modifier.fillMaxWidth()) {
         rows.forEachIndexed { row, week ->
             val m = metrics
@@ -195,6 +281,7 @@ fun CalendarDayGrid(
                     CalendarDayCell(
                         date = date,
                         dayKey = dayKey,
+                        drawVisuals = !canvasCells,
                         showLunar = showLunar,
                         isSelected = dayKey == selectedKey,
                         isToday = dayKey == todayKey,
@@ -224,7 +311,14 @@ fun CalendarDayGrid(
             }
         }
     }
+    }
 }
+
+/** canvas 模式的文本测量缓存条数（日号 1..31 + 农历，512 足够覆盖相邻月）。 */
+private const val GRID_TEXT_CACHE = 512
+
+/** 量农历盒子高度的探针文本（与 `YearMonthMorph` 同一个）。 */
+private const val LUNAR_PROBE_TEXT = "初一"
 
 /**
  * 单个日期格。
@@ -243,6 +337,8 @@ private fun CalendarDayCell(
     date: LocalDate,
     /** `YYYY-MM-DD`，由调用方算好（一屏 180 格，重复计算 4 次很贵）。 */
     dayKey: String,
+    /** `false` = 本格只做**语义 + 命中**，视觉由外层 Canvas 画（见 [CalendarDayGrid.canvasCells]）。 */
+    drawVisuals: Boolean = true,
     showLunar: Boolean,
     isSelected: Boolean,
     isToday: Boolean,
@@ -329,6 +425,7 @@ private fun CalendarDayCell(
             },
         contentAlignment = Alignment.Center,
     ) {
+        if (!drawVisuals) return@Box
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

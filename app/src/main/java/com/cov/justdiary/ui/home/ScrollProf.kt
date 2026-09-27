@@ -46,6 +46,7 @@ object ScrollProf {
         if (!com.cov.justdiary.app.DebugFlags.morphLog || running) return
         running = true
         n = 0
+        blockMounts.clear()
         lastNs = 0
         cellCount = 0
         textNs = 0
@@ -95,7 +96,10 @@ object ScrollProf {
     /** 一次"这一块从组合到放置完成"的耗时（纳秒）。 */
     fun measure(ns: Long) {
         if (running && ns > 0) measureNs += ns
+        if (ns > 20_000_000) blockMounts.add(ns / 1_000_000)
     }
+
+    private val blockMounts = ArrayList<Long>()
 
     /** 一次块组合（不含布局）的耗时。 */
     fun composeDone(ns: Long) {
@@ -132,6 +136,11 @@ object ScrollProf {
         Log.app.i(
             "滚动探针：整段组合日期格 %d 次（平均 %.1f/帧，最长帧里 %d 次）"
                 .format(totalCells, totalCells.toDouble() / n, cells.maxOrNull() ?: 0),
+        )
+        Log.app.i(
+            "滚动探针：单块挂载 >20ms 的有 %d 次：%s".format(
+                blockMounts.size, blockMounts.joinToString(",") { it.toString() + "ms" },
+            ),
         )
         val worst = (0 until n).maxByOrNull { gaps[it] } ?: 0
         Log.app.i(

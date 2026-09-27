@@ -538,7 +538,6 @@ fun MonthFlow(
         }
     }
 
-    // 可见块窗口：**只在跨块时**才变，于是滚动过程中这条流不重组
     // 预挂载：启动后把"视口外上下各一块"也组合出来。
     // 每一步都会让新挂载的那一块付掉它那份布局代价（实测一块 90~365ms）——
     // 但那是在用户还没滚到那里的时候付的，滚动过程中就不会再顿。
@@ -603,9 +602,11 @@ fun MonthFlow(
         ) {
             for (i in range) {
                 val block = layout.blocks.getOrNull(i) ?: continue
+                val blockStartNs = System.nanoTime()
                 key(block.key) {
                     MonthFlowBlock(
                         block = block,
+                        onPlacedNs = { ScrollProf.measure(System.nanoTime() - blockStartNs) },
                         rowH = layout.rowH,
                         widthDp = widthDp,
                         weekStart = weekStart,
@@ -667,6 +668,8 @@ fun MonthFlow(
 @Composable
 private fun MonthFlowBlock(
     block: MonthFlowLayout.Block,
+    /** 临时探针：本块从开始组合到放置完成（纳秒）。 */
+    onPlacedNs: (() -> Unit)? = null,
     rowH: Float,
     widthDp: Float,
     weekStart: String,
@@ -699,12 +702,14 @@ private fun MonthFlowBlock(
     Box(
         modifier = modifier
             .width(widthDp.dp)
-            .height((block.rowCount * rowH).dp),
+            .height((block.rowCount * rowH).dp)
+            .then(if (onPlacedNs != null) Modifier.onPlaced { onPlacedNs() } else Modifier),
     ) {
         CalendarDayGrid(
             rows = weeks,
             anchorMonth = block.monthFirst,
             metrics = metrics,
+            canvasCells = true,
             modifier = Modifier.onPlaced { ScrollProf.measure(System.nanoTime() - placedNs) },
             selectedKey = selectedKey,
             todayKey = todayKey,
