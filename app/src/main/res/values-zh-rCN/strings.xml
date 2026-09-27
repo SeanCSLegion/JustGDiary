@@ -215,4 +215,10 @@
     <string name="search_loc_sort_hint">按日记数量排序</string>
     <string name="search_loc_country_only">仅国家</string>
     <string name="search_loc_empty">暂无地点数据</string>
+    <string name="read_select_count">已选择 %1$d 项</string>
+    <string name="read_select_exit">退出多选</string>
+    <string name="read_action_edit">编辑</string>
+    <string name="read_image_label">图片，宽 %1$d 高 %2$d</string>
+    <string name="read_image_open">双击全屏查看</string>
+    <string name="a11y_close">关闭</string>
 </resources>

@@ -20,6 +20,13 @@
 > 首页恢复 iOS 的整屏三态 morph、月历只画当月日期、年历恢复 12 个迷你月历、
 > 顶栏去掉自造的月/周按钮、上下滑翻月重新接线，并修掉 9 条缺陷（含 2 条严重）。
 >
+> ✍️ **2026-09-27：日记页·阅读态完成并在真机（MEIZU 21 / Android 16）实测通过**
+> （逐条目击与截图证据见 [`docs/migration-progress.md`](docs/migration-progress.md) 的 **R27** 一节）：
+> 顶栏三态、Hero 卡与空态、六种段落 + 四种行内样式、图片与全屏预览、**悬浮的页内搜索**（计数 / 高亮 /
+> 跳转 / 循环）、长按多选与删除确认；编辑态与分享面板是下一轮。
+> 富文本编辑器的底座调研（Google 官方 API 与样例的实测结论）见
+> [`docs/research-compose-rich-text-apis.md`](docs/research-compose-rich-text-apis.md)。
+>
 > 📐 **2026-09-26：Android 设计规范 v3 已定稿** ——
 > **[`docs/android-design/`](docs/android-design/README.md)** 是**当前唯一的权威界面规范**
 > （取代 `docs/design-spec.md` 与 `docs/ui-design-plan.md` v2；v2 的 8 处自相矛盾已在

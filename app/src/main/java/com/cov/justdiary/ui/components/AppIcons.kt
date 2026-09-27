@@ -68,6 +68,14 @@ object AppIcons {
         )
     }
 
+    /** `image`：图片（内联图占位与「缺图」提示）。 */
+    val Image: ImageVector by lazy {
+        materialIcon(
+            "Image",
+            "M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z",
+        )
+    }
+
     /** `globe`：国家一级。 */
     val Globe: ImageVector by lazy {
         materialIcon(

@@ -1,12 +1,15 @@
 package com.cov.justdiary.ui.diary
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,6 +26,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.R
+import com.cov.justdiary.data.DiaryProgress
+import com.cov.justdiary.data.DiaryTopBarState
 import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.LocationRules
@@ -97,6 +102,22 @@ fun DiaryPageScreen(
     }
     // 分享图的深浅色跟随"当下界面"的取色规则（与 iOS 的 `UITraitCollection` 一致）
     val darkTheme = isDarkTheme(state.settings.themeMode)
+    // 「分享」：渲染这一天的长图（由 `LaunchedEffect(state.shareImageFile)` 交给系统面板）。
+    // 分享面板（预览 + 保存到相册）是规范 §4 的另一块，不在阅读态这一轮。
+    val shareNow: (DiaryPageViewModel.State) -> Unit = { current ->
+        viewModel.shareDiary(
+            isDark = darkTheme,
+            dateText = formats.dayTitle(
+                com.cov.justdiary.model.DateUtil.parseDayKey(current.actualDayKey)
+                    ?: java.time.LocalDate.now(),
+            ),
+            startLine = formats.blockStartLine(
+                showTime = current.settings.autoTime,
+                time = formats.timeOf(java.time.Instant.ofEpochMilli(current.startTimeUtc)),
+                locText = current.locationText,
+            ),
+        )
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -104,54 +125,104 @@ fun DiaryPageScreen(
     ) {
         // 全屏路由没有外层 Scaffold，系统栏避让要自己做（对应 iOS 的 safeArea）
         Box(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            if (state.isRead) {
-                DiaryReadScreen(
-                    dayTitle = formats.dayTitle(com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now()),
-                    blocks = state.blocks.map { block ->
-                        ReadBlock(
-                            startTimeUtc = block.startTimeUtc,
-                            // `auto_time` 关闭时不显示开始时间（只显示地点），与 iOS 的
-                            // `vm.showsTime` 同一语义。数据层照旧记录 start_time_utc。
-                            startLine = formats.blockStartLine(
-                                showTime = state.settings.autoTime,
-                                time = formats.timeOf(java.time.Instant.ofEpochMilli(block.startTimeUtc)),
-                                locText = block.locText,
-                            ),
-                            parts = ContentFlatten.parseContent(block.contentJson),
-                        )
-                    },
-                    keyword = if (state.showSearch) state.searchText else "",
-                    currentMatch = state.hitIndex,
-                    onSearchChange = viewModel::onSearchTextChange,
-                    onSearchStep = viewModel::stepHit,
-                    onToggleTodo = { blockIndex, itemIndex ->
-                        state.blocks.getOrNull(blockIndex)?.let { block ->
-                            // `DiaryReadScreen` 给的是"这一天里的第几个片段 + 待办项下标"
-                            viewModel.toggleTodo(block.id, partIndexOfFirstItems(block.contentJson), itemIndex)
-                        }
-                    },
-                    onShare = {
-                        viewModel.shareDiary(
-                            isDark = darkTheme,
-                            dateText = formats.dayTitle(
-                                com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey) ?: java.time.LocalDate.now(),
-                            ),
-                            startLine = formats.blockStartLine(
-                                showTime = state.settings.autoTime,
-                                time = formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
-                                locText = state.locationText,
-                            ),
-                        )
-                    },
-                    imageLoader = { part ->
-                        part.src?.let { src -> container.mediaStore.image(src)?.asImageBitmap() }
-                    },
-                    // "写日记"入口：与 iOS `DiaryPageView` 的 `if vm.canEditToday`
-                    // （`square.and.pencil` 图标）等价。**这里原先漏了接线** ——
-                    // `DiaryReadScreen` 有 `onWrite` 参数且默认 null，日记页从未传，
-                    // 于是空日记页只有搜索框和分享，没有任何写入口（本轮实测发现并修掉）。
-                    onWrite = if (state.canEditToday) viewModel::enterWrite else null,
+            if (state.isRead || state.selectMode) {
+                // 阅读 / 多选：顶栏由宿主提供，**钉在页面顶部不进滚动区**
+                // （规范 §2.2；iOS 早期挂在 safeAreaInset 上，键盘一弹就被滚出屏幕）。
+                // 编辑态仍由 EditorScreen 自己画顶栏 —— 它要用编辑器内部的脏标记与保存载荷。
+                val topBarState = DiaryTopBarState.of(
+                    isRead = state.isRead,
+                    editingIndex = state.editingIndex,
+                    selectMode = state.selectMode,
+                    selectedIds = state.selectedIds,
+                    canEditToday = state.canEditToday,
+                    showSearch = state.showSearch,
                 )
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = MaterialTheme.colorScheme.background,
+                    topBar = {
+                        DiaryTopBar(
+                            state = topBarState,
+                            onBack = { viewModel.handleBack(editorHasContent = false) },
+                            onToggleSearch = { viewModel.setSearchVisible(!state.showSearch) },
+                            onWrite = viewModel::enterWrite,
+                            onShare = { shareNow(state) },
+                            onExitSelect = { viewModel.handleBack(editorHasContent = false) },
+                            onDeleteSelected = viewModel::confirmDeleteSelected,
+                        )
+                    },
+                ) { innerPadding ->
+                  Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                    DiaryReadScreen(
+                        dayTitle = formats.dayTitle(
+                            com.cov.justdiary.model.DateUtil.parseDayKey(state.actualDayKey)
+                                ?: java.time.LocalDate.now(),
+                        ),
+                        isToday = state.canEditToday,
+                        blocks = state.blocks.map { block ->
+                            ReadBlock(
+                                id = block.id,
+                                startTimeUtc = block.startTimeUtc,
+                                // `auto_time` 关闭时不显示开始时间（只显示地点），与 iOS 的
+                                // `vm.showsTime` 同一语义。数据层照旧记录 start_time_utc。
+                                timeLabel = if (state.settings.autoTime) {
+                                    formats.timeOf(java.time.Instant.ofEpochMilli(block.startTimeUtc))
+                                } else {
+                                    ""
+                                },
+                                locText = block.locText,
+                                parts = ContentFlatten.parseContent(block.contentJson),
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        showSearch = state.showSearch,
+                        keyword = state.searchText,
+                        // 当前命中（计数指向的那一处）用更强的高亮，与其余命中区分
+                        currentHitBlockId = currentHit(state)?.blockId,
+                        currentHit = currentHit(state)?.let {
+                            DiarySearch.Match(it.partIndex, it.itemIndex, it.start, it.end)
+                        },
+                        onToggleTodo = { blockIndex, itemIndex ->
+                            state.blocks.getOrNull(blockIndex)?.let { block ->
+                                // `DiaryReadScreen` 给的是"这一天里的第几个片段 + 待办项下标"
+                                viewModel.toggleTodo(
+                                    block.id,
+                                    partIndexOfFirstItems(block.contentJson),
+                                    itemIndex,
+                                )
+                            }
+                        },
+                        // 点整卡 → 编辑；长按 → 多选（规范 §2.4/§2.8）——
+                        // 这三条链路原先一个都没接线，点了没反应。
+                        onEditBlock = viewModel::enterEditBlock,
+                        onLongPressBlock = { index ->
+                            state.blocks.getOrNull(index)?.let { viewModel.enterSelect(it.id) }
+                        },
+                        onToggleSelect = { index ->
+                            state.blocks.getOrNull(index)?.let { viewModel.toggleSelection(it.id) }
+                        },
+                        selectMode = state.selectMode,
+                        selectedIds = state.selectedIds,
+                        scrollTargetBlockId = state.scrollTargetBlockId,
+                        onScrollTargetConsumed = viewModel::consumeScrollTarget,
+                        imageLoader = { part ->
+                            part.src?.let { src -> container.mediaStore.image(src)?.asImageBitmap() }
+                        },
+                    )
+                    // 页内搜索栏悬浮在内容之上（钉住不滚动）：跳到命中处时
+                    // 「第几个/共几个」与步进键都还在手边
+                    if (state.showSearch) {
+                        DiarySearchBarOverlay(
+                            keyword = state.searchText,
+                            hitOrdinal = DiaryProgress.hitOrdinal(state.hitIndex, state.hits.size),
+                            hitCount = state.hits.size,
+                            onSearchChange = viewModel::onSearchTextChange,
+                            onSearchStep = viewModel::stepHit,
+                            modifier = Modifier.align(Alignment.TopCenter),
+                        )
+                    }
+                  }
+                }
             } else {
                 EditorScreen(
                     dayTitle = formats.dayTitle(
@@ -199,6 +270,14 @@ fun DiaryPageScreen(
         )
     }
 }
+
+/**
+ * 当前命中（`当前序号` 指向的那一处）。搜索栏收起、关键词为空或下标越界时为 null。
+ *
+ * 下标越界是真实场景：删掉片段后 `hits` 可能已经变短。
+ */
+private fun currentHit(state: DiaryPageViewModel.State): DiaryPageViewModel.SearchHit? =
+    if (state.showSearch) state.hits.getOrNull(state.hitIndex) else null
 
 /**
  * 编辑器里"位置行"的状态。
@@ -253,7 +332,8 @@ private fun DiaryAlertDialog(
             title = EXIT_TITLE
             message = EXIT_MESSAGE
             confirmLabel = DISCARD_LABEL
-            onConfirm = onClose
+            // 「放弃」= 回到本页的阅读态，**不关页**（iOS E1：discardEditing() + showRead()）
+            onConfirm = viewModel::showRead
         }
 
         DiaryPageViewModel.DiaryAlert.DiscardConfirm -> {

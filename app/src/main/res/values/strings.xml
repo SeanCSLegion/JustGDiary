@@ -226,4 +226,10 @@
     <string name="search_loc_sort_hint">Sorted by entries count</string>
     <string name="search_loc_country_only">Country only</string>
     <string name="search_loc_empty">No location data yet</string>
+    <string name="read_select_count">Selected %1$d</string>
+    <string name="read_select_exit">Exit selection</string>
+    <string name="read_action_edit">Edit</string>
+    <string name="read_image_label">Image, %1$d by %2$d</string>
+    <string name="read_image_open">Double tap to view full screen</string>
+    <string name="a11y_close">Close</string>
 </resources>

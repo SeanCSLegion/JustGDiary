@@ -1,5 +1,19 @@
 # 08 · 日记页实施计划
 
+> **进度（2026-09-27）**：步骤 1–5 的**阅读态**部分已落地并在真机实测（见
+> [`../migration-progress.md`](../migration-progress.md) 的 R27 一节）。仍欠：编辑态并入新顶栏（步骤 1 的
+> 编辑分支）、分享面板（步骤 3）、预测性返回（步骤 1.4）、无障碍打磨的剩余项（步骤 6）。
+>
+> **富文本编辑器的底座**（下一轮的前提）已单独调研并给出结论：
+> [`../research-compose-rich-text-apis.md`](../research-compose-rich-text-apis.md)。
+> 结论摘要：本项目解析到的 `foundation 1.12.1` / `ui-text 1.12.1` 里**没有**
+> `TextFieldState ↔ AnnotatedString` 的框架桥，也没有 `changeSpanStyle`；真正的富文本 API 是
+> `TextFieldBuffer.addStyle(SpanStyle|ParagraphStyle, range, ExpandPolicy)` + `TrackedRange`
+> （stable），唯一官方样例是 `BasicTextFieldTrackedRangeToggleBoldSample`；
+> **可编辑文本框内不支持内联图片**（三条独立证据），因此图片继续作为独立段落；
+> 且 `content_json` 是"分段 + run 布尔"，与 Compose 的"区间 + 样式"之间需要一个**纯函数归一化器**
+> （先写它 + 用 `app/src/test/resources/golden/` 的字节级夹具钉住，再决定文本框选型）。
+
 > **这一篇是"怎么改"的施工图**，不是"改成什么样"的规范。规范在 [`04-diary.md`](04-diary.md)。
 > 日记页是全 app 最复杂的一块：四种形态（阅读 / 编辑 / 多选 / 分享）、
 > 一条富文本往返链路、一条位置采集链路、一条分享长图链路。

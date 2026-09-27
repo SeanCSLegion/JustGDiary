@@ -3025,3 +3025,73 @@ wrap-content 子节点"时那块缓冲画不出来。
 - 跨年时 `flags` 换了实例（数据加载）⇒ 整窗重录（真内容变化，无法免；但可以靠上一条变便宜）。
 - `Modifier.offset { }` 自带 layer（`placeWithLayer`），所以**每帧拖动并不重录**；
   网上"用 graphicsLayer 换 offset"在这版 Compose 上几乎是空操作，别白改。
+
+---
+
+## R27 · 日记页**阅读态**（2026-09-27，真机 MEIZU 21 / Android 16）
+
+> 规范：[`docs/android-design/04-diary.md`](android-design/04-diary.md) §2 阅读态 · 施工图
+> [`08-diary-implementation-plan.md`](android-design/08-diary-implementation-plan.md) 步骤 1–5。
+> **编辑态（格式栏 / 插图 / 保存）不在本轮**，富文本编辑器的底座调研见
+> [`docs/research-compose-rich-text-apis.md`](research-compose-rich-text-apis.md)。
+
+### 交付物
+
+| 文件 | 内容 |
+| --- | --- |
+| `ui/diary/DiaryTopBar.kt`（新） | 阅读 / 多选两态顶栏（M3 `TopAppBar` 64dp，钉在页面顶部）；形态由纯函数 `data/DiaryTopBarState.of` 给 |
+| `ui/diary/DiaryReadScreen.kt`（重写） | `LazyColumn` + 列宽 `min(660, 宽−32)` 居中 + Hero 卡 + 条目卡 + 逐段落富文本 + 图片 + 悬浮搜索栏 |
+| `ui/diary/DiaryImagePreview.kt`（新） | 图片全屏预览（点/下拉关闭、双击适宽↔原始） |
+| `ui/diary/ReadLayout.kt` | 图片宽度改成"= 正文列宽"（去掉 iOS 的 343 上限）；`DiarySearch` 改成**逐项**匹配（计数与高亮同一份结果）；新增 `DiaryScroll` 下标换算 |
+| `ui/diary/DiaryPageScreen.kt` | 阅读/多选走 `Scaffold(topBar=…)`；接通原先**六个默认空实现**的回调（点卡片→编辑、长按→多选、选中切换、搜索、滚到命中、待办） |
+| `ui/components/Components.kt` | `DiaryCard` 支持 `onLongClick` 与自定义 `border`（选中态 2dp `primary`） |
+| `AndroidManifest.xml` | `MainActivity` 改 `singleTop`（见下"真机发现"第 4 条） |
+
+### 接线修掉的三个断链（本轮的主要目的）
+
+1. `DiaryReadScreen` 的 6 个回调此前**一个都没传**：点卡片、长按、选中、删除全是死的；
+2. 页内搜索的 `setSearchVisible` 全仓没有调用点 —— 界面里根本没有入口；
+3. 阅读页没有返回按钮，且顶栏是 `Column(verticalScroll)` 的第一项（一滚就跑）。
+
+### 真机实测发现并修掉的 6 个缺陷（其中 2 条来自用户实测反馈）
+
+| # | 现象 | 根因 | 修法 |
+| --- | --- | --- | --- |
+| 1 | 点放大镜后**搜索栏看不见**（图标已 active） | `LazyColumn` 按 key 锚定可见项：在头部插入一项不会把它推进视口，而是留在视口上方 | 先滚到顶（后又整体改为悬浮栏，见 #5） |
+| 2 | 点「下一个匹配」**滚到的是上一张卡** | 下标少算了 Hero 那一项（`index + leadingItems` 里 `leadingItems` 只算了搜索栏） | 抽出纯函数 `DiaryScroll.itemIndexForBlock` + 单测 |
+| 3 | 编辑态按返回**整页关掉**回到首页 | `handleBack` 在"编辑器为空"时走了 `close()`；iOS 是 `showRead()`（回到本页阅读态，E1） | 新增 `showRead()`，退出确认也改成回阅读态 |
+| 4 | 日记页已打开时再点深链 → **回到首页** | `standard` 启动模式下会新建 Activity 实例，而 `LaunchIntent` 是进程级单例：新旧两个 `RootScreen` 都观察并消费它，新实例常拿到已清空的 key | `MainActivity` 改 `android:launchMode="singleTop"` |
+| 5 | 搜索栏**跟着内容滚走**（用户反馈） | 规范按 iOS 直译成"插在 Hero 上方"，而 iOS 那边它也在 `ScrollView` 里 | 改成悬浮层 `DiarySearchBarOverlay`：钉在顶栏下方、列表在它下面滚（规范 §2.7 已同步修正） |
+| 6 | 命中高亮**看不出当前是哪一个**（用户反馈） | 所有命中共用一个 `primaryContainer` 样式（iOS 也是这样） | 高亮分两级：当前命中 `primary` 实底 + `onPrimary` 字，其余 `primaryContainer` + `primary`；`DiarySearch.highlights` 返回 `(区间, 是否当前)`，当前命中由 `hits[hitIndex]` 给出 |
+
+### 一套算法（规范 §2.7 与 iOS 的差异）
+
+iOS 的计数（ViewModel 扫 part）与高亮（每个 chunk 各扫各的）是两套，跨 chunk 的关键词**只计数不高亮**。
+Android 侧只有 `DiarySearch.findMatches` 一个函数：计数与高亮都从它出发，列表 / 待办**逐项**成文本单元
+（不会出现"拼接后才命中、渲染时落不到任何一项"的跨项命中）。
+
+### 测试
+
+- **JVM 单测 441 条全绿**（新增 33 条，连跑 3 次无 flaky）：
+  - `DiaryPageStateTest`（Robolectric，真开 SQLite）：点卡片 → 载入的是**该条**内容；长按 → 多选并选中；
+    删除 → 回阅读态且选中清空；**删空不关页**；**编辑态收到 `refresh()` 不改变 `isRead`**（iOS 的坑）；
+    返回键优先级（多选 → 编辑 → 关页）；退出编辑回阅读态；搜索命中与 `DiarySearch` 逐条对齐。
+  - `DiaryReadScreenTest`（Robolectric + Compose）：点卡片 / 长按接线；**整卡一条语义** + 「编辑 / 删除」
+    自定义动作；待办可切换且**不会**把卡片点进编辑；空态文案；搜索栏计数与步进；多选态 `isSelected`。
+  - `ReadLayoutTest`：图片宽 = 正文列宽（60dp 下限）；列表**逐项**搜索；高亮区间与计数同源且只有一处是"当前"；滚动下标。
+  - `DiaryReadScreenTest` 另有一条按 `spanStyles` 断言"当前命中只有一处、其余用浅底"（两级高亮的回归）。
+- **真机实测**（MEIZU 21，1080×2340@440dpi，Android 16）：富文本六种段落 + 四种行内样式 + 图片；
+  Hero / 空态 / 历史日期无写入口；点卡片→编辑→返回回阅读态；长按→多选→删除确认→删空停阅读态；
+  页内搜索（`hello` 4 处命中：正文 2 + 待办 1 + 另一张卡 1）计数、高亮、跳转、循环；图片全屏预览；
+  深色 + 浅色；系统字号 1.3× / 2.0× 无裁切；`uiautomator dump` 核对无障碍节点。
+
+### 仍未做（下一轮）
+
+- **编辑态**并入本轮的新顶栏（现在编辑器还画自己的顶栏），以及格式栏 9 键、插图、保存后回阅读态；
+- 分享面板（规范 §4：预览 + 分享… + 保存到相册）—— 本轮点分享仍是"直接渲染长图 → 系统面板"；
+- 预测性返回（`PredictiveBackHandler`）；
+- 图片渲染的一个已知表现：文件真实比例与库里 `w/h` 不一致时按 `ContentScale.Fit` 留边（与 iOS 一致，
+  测试数据里是脚本故意写歪的）；
+- `docs/android-design/04-diary.md` 的 mockup（`board-03-diary.html`）里搜索栏仍画在 Hero 上方 ——
+  文档 §2.7 已注明改为悬浮，图未重绘。
+

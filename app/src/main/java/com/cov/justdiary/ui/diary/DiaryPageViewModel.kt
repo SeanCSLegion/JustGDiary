@@ -127,8 +127,19 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         data object ShareFailed : DiaryAlert
     }
 
-    /** 页内搜索的一次命中（与 iOS `SearchHit` 同构）。 */
-    data class SearchHit(val blockId: Long, val partIndex: Int, val start: Int, val len: Int)
+    /**
+     * 页内搜索的一次命中。
+     *
+     * `itemIndex` 为 -1 表示命中在整段文本上，否则是列表 / 待办的第几项。
+     * 命中由 [DiarySearch.findMatches] 算出 —— **与阅读页高亮是同一个函数**（规范 §2.7）。
+     */
+    data class SearchHit(
+        val blockId: Long,
+        val partIndex: Int,
+        val itemIndex: Int,
+        val start: Int,
+        val end: Int,
+    )
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -172,9 +183,17 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
-    /** 重新从库里读这一天（保存/删除之后，或从别处返回时）。 */
+    /**
+     * 重新从库里读这一天（从别处返回、或收到"数据变过"的通知时）。
+     *
+     * **编辑 / 多选态只换数据，不动形态**：`reload(showRead = true)` 会把 `isRead` 复位成阅读态、
+     * 清空 `editingIndex` 与选中集合 —— iOS 的 `.diaryVersionChanged → load()` 就是这么干的，
+     * 结果是"正在写的内容被写库通知踢掉"（规范 §1 与本页不变量 7：**这个坑不迁移**）。
+     * 保存 / 删除走的仍是 `reload()`（那两处本来就要回到阅读态）。
+     */
     fun refresh() {
-        viewModelScope.launch { reload() }
+        val keepMode = !_state.value.isRead || _state.value.selectMode
+        viewModelScope.launch { reload(showRead = !keepMode) }
     }
 
     private suspend fun reload(showRead: Boolean = true) {
@@ -281,18 +300,46 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** 返回键 / 左上角返回。有未保存内容时先确认。 */
+    /**
+     * 返回键 / 左上角返回。三态的优先级与 iOS `handleBack` 一致：
+     *
+     * 1. **多选** → 退出多选，页面不关；
+     * 2. **编辑且编辑器非空** → 先问「退出编辑」；
+     * 3. **编辑且编辑器为空** → 直接回本页的阅读态（**不关页**，iOS E1）；
+     * 4. 阅读 → 关闭整页。
+     *
+     * 第 3 条原先写成了 `close()`：在编辑页按一次返回会直接回首页，
+     * 用户看到的是"这一天整个被关掉了"，而不是"回到刚才读的那一页"（真机实测）。
+     */
     fun handleBack(editorHasContent: Boolean) {
         val current = _state.value
         if (current.selectMode) {
             _state.value = current.copy(selectMode = false, selectedIds = emptySet())
             return
         }
-        if (!current.isRead && editorHasContent) {
-            _state.value = current.copy(alert = DiaryAlert.ExitConfirm)
+        if (!current.isRead) {
+            if (editorHasContent) {
+                _state.value = current.copy(alert = DiaryAlert.ExitConfirm)
+            } else {
+                showRead()
+            }
             return
         }
         close()
+    }
+
+    /**
+     * 回到本页的阅读态（**不关页**）。对应 iOS 的 `showRead()`
+     * （`DiaryViewModel.swift:216-227`）：退出编辑 / 放弃修改后先看到刚写的内容。
+     */
+    fun showRead() {
+        _state.value = _state.value.copy(
+            isRead = true,
+            editingIndex = null,
+            selectMode = false,
+            selectedIds = emptySet(),
+            alert = null,
+        )
     }
 
     /** 顶栏"放弃修改"。 */
@@ -489,28 +536,35 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         _state.value = _state.value.copy(scrollTargetBlockId = null)
     }
 
+    /**
+     * 重算命中。**与阅读页的高亮共用 [DiarySearch.findMatches]**（规范 §2.7：
+     * iOS 那种"计数一套、高亮另一套"会让跨 chunk 的关键词只计数不高亮）。
+     *
+     * 命中数变化后下标要收回界内：删掉片段 / 改关键词后，`hitIndex` 可能指着旧位置。
+     */
     private fun recomputeHits() {
-        val keyword = _state.value.searchText.trim()
-        if (keyword.isEmpty()) {
-            _state.value = _state.value.copy(hits = emptyList(), hitIndex = 0)
+        val keyword = _state.value.searchText
+        if (keyword.isBlank()) {
+            _state.value = _state.value.copy(hits = emptyList(), hitIndex = 0, scrollTargetBlockId = null)
             return
         }
-        val lower = keyword.lowercase()
         val found = mutableListOf<SearchHit>()
         for (block in _state.value.blocks) {
-            ContentFlatten.parseContent(block.contentJson).forEachIndexed { partIndex, part ->
-                val text = ContentFlatten.flattenPart(part).lowercase()
-                var from = 0
-                while (true) {
-                    val at = text.indexOf(lower, from)
-                    if (at < 0) break
-                    found.add(SearchHit(block.id, partIndex, at, keyword.length))
-                    from = at + lower.length
-                    if (from >= text.length) break
-                }
+            val parts = ContentFlatten.parseContent(block.contentJson)
+            DiarySearch.findMatches(parts, keyword).forEach { match ->
+                found.add(
+                    SearchHit(
+                        blockId = block.id,
+                        partIndex = match.partIndex,
+                        itemIndex = match.itemIndex,
+                        start = match.start,
+                        end = match.end,
+                    ),
+                )
             }
         }
-        _state.value = _state.value.copy(hits = found, hitIndex = 0)
+        val index = _state.value.hitIndex.coerceIn(0, (found.size - 1).coerceAtLeast(0))
+        _state.value = _state.value.copy(hits = found, hitIndex = index)
     }
 
     // ------------------------------------------------------------------ 位置

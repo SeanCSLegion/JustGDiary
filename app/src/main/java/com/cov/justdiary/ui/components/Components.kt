@@ -2,6 +2,8 @@ package com.cov.justdiary.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,10 +56,18 @@ import com.cov.justdiary.ui.theme.TypeSize
  *
  * 行为上仍与 iOS 对齐的部分：卡片在"增强对比度"下描边加粗（→ 1.5dp / 90%）。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DiaryCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    /**
+     * 长按（日记条目卡用它进多选态）。给出时点击改走 `combinedClickable` ——
+     * `Surface(onClick)` 只支持单击，没有长按位。
+     */
+    onLongClick: (() -> Unit)? = null,
+    /** 覆盖默认描边（日记条目卡"被选中"时是 2dp `primary`，规范 §2.8）。 */
+    border: BorderStroke? = null,
     contentPadding: PaddingValues = PaddingValues(Spacing.card),
     /**
      * 加在**内容层**（`Surface` 的 clickable 之内）的修饰符。
@@ -75,20 +85,30 @@ fun DiaryCard(
     val shape = RoundedCornerShape(Radius.card)
 
     // 增强对比度：描边加深加粗（与 iOS 的规则一致）
-    val border = if (increased) {
+    val resolvedBorder = border ?: if (increased) {
         BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant)
     } else {
         BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     }
 
-    if (onClick != null) {
+    if (onLongClick != null) {
+        Surface(
+            modifier = modifier.combinedClickable(onClick = onClick ?: {}, onLongClick = onLongClick),
+            shape = shape,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = resolvedBorder,
+        ) {
+            Box(modifier = Modifier.padding(contentPadding).then(contentModifier)) { content() }
+        }
+    } else if (onClick != null) {
         Surface(
             onClick = onClick,
             modifier = modifier,
             shape = shape,
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            border = border,
+            border = resolvedBorder,
         ) {
             Box(modifier = Modifier.padding(contentPadding).then(contentModifier)) { content() }
         }
@@ -98,7 +118,7 @@ fun DiaryCard(
             shape = shape,
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            border = border,
+            border = resolvedBorder,
         ) {
             Box(modifier = Modifier.padding(contentPadding).then(contentModifier)) { content() }
         }

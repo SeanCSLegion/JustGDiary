@@ -94,7 +94,9 @@ object EditorTypography {
     @Composable
     fun textStyleFor(style: String): TextStyle = when (style) {
         "title" -> MaterialTheme.typography.headlineMedium
-        "heading" -> MaterialTheme.typography.titleLarge
+        // 小标题在设计稿里是 22/28 **medium**（`.rt .heading { font-weight: 500 }`），
+        // 而 M3 的 `titleLarge` 官方字重是 400 —— 字号仍是官方值，只补回设计稿的这半档。
+        "heading" -> MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium)
         "quote" -> MaterialTheme.typography.bodyMedium
         else -> MaterialTheme.typography.bodyLarge
     }

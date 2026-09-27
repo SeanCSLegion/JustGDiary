@@ -19,11 +19,18 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.JustDiary">
 
+        <!--
+            singleTop：深链必须交给**同一个** Activity 实例处理。
+            默认的 standard 模式下，"日记页已打开时再点一条深链"会新建一个实例：
+            `LaunchIntent` 是进程级单例，新旧两个 `RootScreen` 都会观察并消费它，
+            结果是新实例常常拿到已被清空的 key —— 实测表现为"第二次深链把日记页关掉、回到首页"。
+        -->
         <activity
             android:name=".app.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.JustDiary"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

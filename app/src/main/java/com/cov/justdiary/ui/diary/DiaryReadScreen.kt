@@ -1,87 +1,120 @@
 package com.cov.justdiary.ui.diary
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.stringResource
-import com.cov.justdiary.R
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Image
+import com.cov.justdiary.R
 import com.cov.justdiary.model.ContentPart
-import com.cov.justdiary.service.SearchUtil
+import com.cov.justdiary.model.ContentPartStyle
+import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
+import com.cov.justdiary.ui.components.AppIcons
+import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
 import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
 import com.cov.justdiary.ui.theme.TypeSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * 日记阅读页。对应 iOS `Views/Diary/DiaryPageView.swift` + `ReadTextView.swift`。
+ * 日记阅读页（只有内容区 —— 顶栏在 [DiaryTopBar]，由 `DiaryPageScreen` 的 `Scaffold` 提供）。
+ * 对应 iOS `Views/Diary/DiaryPageView.swift` 的阅读态 + `ReadTextView` / `MediaViews`。
  *
- * 与 iOS 的差别在于**渲染方式**：iOS 用一个 `UITextView` + `NSAttributedString` 承载整篇
- * （附件区用于待办与图片），Android 侧改为**逐段落渲染 Compose 组件** —— 这样待办勾选、
- * 图片点击、命中高亮都是普通组件行为，不需要文本附件与命中测试那套机制。
- * 段落的样式与行距仍走 [EditorTypography]（与编辑器共用同一套语义样式与比例）。
+ * ## 结构（规范 `docs/android-design/04-diary.md` §2）
+ *
+ * ```
+ * LazyColumn                        ← 命中定位需要 item 概念（iOS 是 ScrollViewReader）
+ *  ├─ [showSearch] 页内搜索栏 52dp   ← 在 Hero **上方**
+ *  ├─ Hero 卡（常驻，空的一天也在）
+ *  └─ 条目卡 × N（点→编辑；长按 400ms→多选）
+ * ```
+ *
+ * 正文列宽 `min(660, 宽 − 32)` 居中，**阅读 = 编辑**（同一公式，进出编辑卡文字不左右跳）。
+ *
+ * ## 与 iOS 的差别在于渲染方式
+ *
+ * iOS 用一个大 `UITextView` + `NSAttributedString` 承载整篇（待办与图片靠附件 + 命中测试），
+ * Android 侧改为**逐段落渲染 Compose 组件**（[ReadLayout.PartRender] 的三种形态）：
+ * 待办勾选、图片点击、命中高亮都成了普通组件行为，不需要附件与命中测试那套机制。
+ * 段落的语义样式与字号仍走 [EditorTypography]（与编辑器共用同一套映射）。
  *
  * @param blocks 这一天的片段（时间 + 地点 + 内容），按时间升序。
- * @param keyword 条目内搜索的关键词（空则不搜索）。
- * @param currentMatch 当前匹配序号（用于"上一个/下一个"定位）。
- * @param onToggleTodo 勾选/取消待办（`blockIndex, itemIndex`）。
- * @param onSearchChange 搜索关键词变化。
- * @param onSearchStep 上一个 / 下一个匹配（`-1` / `+1`）。
- * @param onShare 生成并分享长图。
- * @param imageLoader 内联图片的加载器（返回已降采样的位图）。
+ * @param keyword 页内搜索关键词（空则不搜索）。计数与步进键在悬浮的 [DiarySearchBarOverlay] 上。
+ * @param scrollTargetBlockId 需要滚动到的片段 id（由"上一个/下一个"设置）。
+ * @param contentPadding `Scaffold` 给的顶栏 / 系统栏让位。
  */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
@@ -89,309 +122,384 @@ fun DiaryReadScreen(
     dayTitle: String,
     blocks: List<ReadBlock>,
     modifier: Modifier = Modifier,
+    isToday: Boolean = false,
+    showSearch: Boolean = false,
     keyword: String = "",
-    currentMatch: Int = -1,
-    onSearchChange: (String) -> Unit = {},
-    onSearchStep: (Int) -> Unit = {},
+    /** 当前命中所在的片段 id（与 [currentHit] 一起决定"哪一处是当前命中"）。 */
+    currentHitBlockId: Long? = null,
+    /** 当前命中（`当前序号` 指向的那一处）：它用更强的高亮，和其余命中区分开。 */
+    currentHit: DiarySearch.Match? = null,
     onToggleTodo: (Int, Int) -> Unit = { _, _ -> },
-    onShare: () -> Unit = {},
-    imageLoader: (ContentPart) -> ImageBitmap? = { null },
-    /** 点某个片段 → 进编辑（对应 iOS `handleBlockTap`）。 */
     onEditBlock: (Int) -> Unit = {},
-    /** 长按某个片段 → 进多选（对应 iOS 的 `onLongPressGesture`）。 */
     onLongPressBlock: (Int) -> Unit = {},
-    /** 多选态：显示勾选框、点击变成选中/取消。 */
     selectMode: Boolean = false,
     selectedIds: Set<Long> = emptySet(),
-    /** 今天才显示的"写日记"入口（`null` = 不显示）。 */
-    onWrite: (() -> Unit)? = null,
-    /** 多选态下点某个片段：切换选中（`blockIndex`）。 */
     onToggleSelect: (Int) -> Unit = {},
-    onDeleteSelected: () -> Unit = {},
+    imageLoader: (ContentPart) -> ImageBitmap? = { null },
+    scrollTargetBlockId: Long? = null,
+    onScrollTargetConsumed: () -> Unit = {},
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
-    val parts = remember(blocks) { blocks.flatMap { it.parts } }
-    val matches = remember(parts, keyword) { DiarySearch.findMatches(parts, keyword) }
+    // 正文列宽：一条公式、一处读取（`AdaptiveLayout.contentColumn`）。
+    val columnWidth: Dp = LocalAdaptiveLayout.current
+        .contentColumn(ReadLayout.CONTENT_MAX_WIDTH.toFloat()).dp
+    val listState = rememberLazyListState()
 
-    Column(modifier = modifier.verticalScroll(rememberScrollState())) {
-        // 顶栏：只剩动作（多选计数 / 写日记 / 分享）。
-        // **日期不在这里** —— 它与元信息一起进下方的 hero 卡片（规范 §6.1/§6.2、缺陷 D8：
-        // 日期写在顶栏时，空态只剩一条搜索框，整屏像坏掉了一样）。
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.page, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (selectMode) {
-                    Text(
-                        text = selectedIds.size.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    IconButton(onClick = onDeleteSelected, enabled = selectedIds.isNotEmpty()) {
-                        Icon(Icons.Filled.Delete, contentDescription = DELETE_LABEL)
-                    }
-                }
-                if (onWrite != null) {
-                    IconButton(onClick = onWrite) {
-                        Icon(Icons.Filled.Create, contentDescription = WRITE_LABEL)
-                    }
-                }
-                IconButton(onClick = onShare) {
-                    Icon(Icons.Filled.Share, contentDescription = SHARE_LABEL)
-                }
+    // 命中定位：滚到命中的那张卡（iOS 是 `scrollTo(anchor: .center)`；
+    // LazyColumn 没有 anchor 参数，用"视口 1/3 处"近似居中）
+    LaunchedEffect(scrollTargetBlockId) {
+        val target = scrollTargetBlockId ?: return@LaunchedEffect
+        val index = blocks.indexOfFirst { it.id == target }
+        if (index >= 0) {
+            val viewport = listState.layoutInfo.viewportEndOffset - listState.layoutInfo.viewportStartOffset
+            listState.animateScrollToItem(
+                index = DiaryScroll.itemIndexForBlock(index),
+                // 负偏移 = 让目标停在视口偏上 1/3 处（近似 iOS 的 `anchor: .center`）
+                scrollOffset = -viewport / 3,
+            )
+        }
+        onScrollTargetConsumed()
+    }
+
+    // 搜索栏**悬浮在内容之上**（宿主绘制，不进列表）。
+    //
+    // 规范 §2.7 说"插在 Hero 卡上方"，那是按 iOS 的 ScrollView 直译的：iOS 里它跟着内容滚，
+    // 于是点「下一个匹配」跳到命中处以后，搜索栏连同计数与步进键一起被顶出屏幕 ——
+    // 用户看不到"第几个/共几个"，也没法再点下一个，搜索就失去了意义（用户实测反馈）。
+    // 改为钉在顶栏下方：列表在它下面滚动，计数与步进键始终在手边。
+
+    // 点正文 / 卡片之间的空白收键盘（iOS R14）。子组件（卡片、待办）自己消费点击，
+    // 这里只接管"没落到任何可点区域"的那些点击。
+    val focusManager = LocalFocusManager.current
+    LazyColumn(
+        state = listState,
+        modifier = modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            // 页内搜索会拉起键盘：内容区要让开 IME，否则最后一张卡被键盘压住滚不上来
+            .imePadding()
+            .pointerInput(Unit) {
+                detectTapGestures { focusManager.clearFocus() }
+            },
+        contentPadding = PaddingValues(
+            // 顶部要让开悬浮搜索栏，否则第一张卡被压在它下面
+            top = 10.dp + if (showSearch) SearchBarMetrics.TotalHeight else 0.dp,
+            bottom = 32.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(Spacing.card),
+    ) {
+        item(key = HERO_KEY) {
+            DiaryColumn(columnWidth) { DiaryHeroCard(dayTitle, isToday, blocks) }
+        }
+        itemsIndexed(blocks, key = { _, block -> block.id }) { index, block ->
+            DiaryColumn(columnWidth) {
+                DiaryBlockCard(
+                    block = block,
+                    keyword = keyword,
+                    selectMode = selectMode,
+                    selected = block.id in selectedIds,
+                    onEdit = { onEditBlock(index) },
+                    onLongPress = { onLongPressBlock(index) },
+                    onToggleSelect = { onToggleSelect(index) },
+                    onToggleTodo = { itemIndex -> onToggleTodo(index, itemIndex) },
+                    imageLoader = imageLoader,
+                    // 只有"当前命中所在的那张卡"才把某一处画成当前命中
+                    currentHit = currentHit.takeIf { block.id == currentHitBlockId },
+                )
             }
         }
+    }
+}
 
-        // 条目内搜索栏
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.page),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = onSearchChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text(SEARCH_PLACEHOLDER) },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (keyword.isNotEmpty()) {
-                        IconButton(onClick = { onSearchChange("") }) {
-                            Icon(Icons.Filled.Clear, contentDescription = CLEAR_LABEL)
-                        }
-                    }
-                },
-            )
-            if (keyword.isNotEmpty()) {
+/** 一天里的一个片段（阅读渲染的输入）。 */
+data class ReadBlock(
+    /** 片段 id（多选与待办回写要用）。 */
+    val id: Long,
+    val startTimeUtc: Long,
+    /** 时间文案；`auto_time` 关闭时为空串（**只是不显示**，`start_time_utc` 照常入库）。 */
+    val timeLabel: String,
+    /** 地点文案（空 = 没记录地点）。 */
+    val locText: String,
+    val parts: List<ContentPart>,
+)
+
+/** 把一项内容放进居中的正文列（`min(660, 宽 − 32)`）。 */
+@Composable
+private fun DiaryColumn(width: Dp, content: @Composable ColumnScope.() -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        Column(modifier = Modifier.width(width), content = content)
+    }
+}
+
+// ---------------------------------------------------------------------------- Hero 卡
+
+/**
+ * Hero 卡（规范 §2.3）：**常驻**，哪怕是空的一天。
+ *
+ * 空的一天**没有独立空态视图** —— 元信息行换成「这一天没有留下日记。」，
+ * 这样"这一天有没有内容"和"这一天是哪一天"永远在同一张卡里回答（缺陷 D8 的修法）。
+ */
+@Composable
+private fun DiaryHeroCard(dayTitle: String, isToday: Boolean, blocks: List<ReadBlock>) {
+    val fontScale = LocalDensity.current.fontScale
+    val meta = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale)
+    DiaryCard(
+        // Hero 卡也是**一条语义**：TalkBack 读作
+        // 「9月15日 周二，今日，9:41，2 个片段，东山区 · 京都府 · 日本」（规范 §5）
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    text = if (matches.isEmpty()) NO_MATCH_LABEL else "${currentMatch + 1}/${matches.size}",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = dayTitle,
+                    fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.cardTitle, fontScale),
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (isToday) TodayPill(fontScale)
+            }
+            val first = blocks.firstOrNull()
+            if (first == null) {
+                Text(
+                    text = stringResource(R.string.index_day_empty),
+                    fontSize = meta,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                IconButton(onClick = { onSearchStep(-1) }, enabled = matches.isNotEmpty()) {
-                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = PREV_MATCH_LABEL)
-                }
-                IconButton(onClick = { onSearchStep(1) }, enabled = matches.isNotEmpty()) {
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = NEXT_MATCH_LABEL)
-                }
-            }
-        }
-
-        // hero 卡片：日期 + （今天才有的）胶囊 + 元信息行。**常驻**，空态也画 —— 这是缺陷 D8
-        // 的修法（规范 §6.2：不给整屏空白）。位置与 iOS 一致：`搜索栏 → hero → 片段卡片`
-        // （`DiaryPageView.swift:123-142`，间距 12）。
-        val fontScale = LocalDensity.current.fontScale
-        // 宿主只在"今天"才传 `onWrite`（`canEditToday = actualDayKey == todayKey`，
-        // 见 `DiaryPageViewModel.State.canEditToday`），所以非 null 即今天 —— 与 iOS 的
-        // `vm.canEditToday` 判断同源，不需要再引入一套日期比较。
-        val isToday = onWrite != null
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.page),
-            shape = RoundedCornerShape(Radius.card),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+            } else {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = dayTitle,
-                        fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.cardTitle, fontScale),
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.widthIn(max = ReadLayout.READING_MAX_WIDTH.dp),
-                    )
-                    if (isToday) {
-                        // 「今天」胶囊（iOS `index_card_today`：primary 底 + onPrimary 字、12sp medium）
+                    if (first.timeLabel.isNotEmpty()) {
                         Text(
-                            text = stringResource(R.string.index_today),
-                            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, fontScale),
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(percent = 50))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
-                        )
-                    }
-                }
-                // 元信息行：首片段的 `startLine` + 片段数。`startLine` 是宿主按 `auto_time`
-                // **预先算好的**（关闭时不显示时间），这里**不重算**；地点若存在也已经包含在
-                // `startLine` 里，所以不再单列一行地点（规范 §6.1 的 hero）。空态换成既有文案。
-                Text(
-                    text = when {
-                        blocks.isEmpty() -> stringResource(R.string.index_day_empty)
-
-                        blocks.first().startLine.isBlank() ->
-                            stringResource(R.string.read_hero_segments, blocks.size)
-
-                        else -> "${blocks.first().startLine} · " +
-                            stringResource(R.string.read_hero_segments, blocks.size)
-                    },
-                    fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // 片段列表
-        blocks.forEachIndexed { blockIndex, block ->
-            val selected = block.id in selectedIds
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .combinedClickable(
-                        onClick = {
-                            if (selectMode) onToggleSelect(blockIndex) else onEditBlock(blockIndex)
-                        },
-                        onLongClick = { onLongPressBlock(blockIndex) },
-                    )
-                    .padding(horizontal = Spacing.page, vertical = Spacing.card),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (selectMode) {
-                        Icon(
-                            imageVector = if (selected) Icons.Filled.CheckCircle else Icons.Filled.Clear,
-                            contentDescription = null,
-                            tint = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            text = first.timeLabel,
+                            fontSize = meta,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Text(
-                        text = block.startLine,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = stringResource(R.string.read_hero_segments, blocks.size),
+                        fontSize = meta,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (first.locText.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Place,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = first.locText,
+                            fontSize = meta,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 「今日」胶囊（12sp medium、`primary` 底、`onPrimary` 字）—— 只在当天出现。 */
+@Composable
+private fun TodayPill(fontScale: Float) {
+    Text(
+        text = stringResource(R.string.index_today),
+        fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, fontScale),
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.onPrimary,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+// ---------------------------------------------------------------------------- 条目卡
+
+/**
+ * 条目卡（规范 §2.4）：12dp 内边距 · 16dp 圆角 · `surfaceContainerLow` · 无阴影。
+ *
+ * 点整卡（含正文）→ 编辑；长按 → 多选（`combinedClickable` 的长按阈值是系统的 400ms，
+ * 与 iOS 的 `minimumDuration: 0.4` 同值）。
+ */
+@Composable
+private fun DiaryBlockCard(
+    block: ReadBlock,
+    keyword: String,
+    selectMode: Boolean,
+    selected: Boolean,
+    onEdit: () -> Unit,
+    onLongPress: () -> Unit,
+    onToggleSelect: () -> Unit,
+    onToggleTodo: (Int) -> Unit,
+    imageLoader: (ContentPart) -> ImageBitmap?,
+    currentHit: DiarySearch.Match?,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    // 命中与高亮用的是同一份结果（`DiarySearch.findMatches`）—— 规范 §2.7 的"一套算法"。
+    val matches = remember(block.parts, keyword) { DiarySearch.findMatches(block.parts, keyword) }
+    val editLabel = stringResource(R.string.read_action_edit)
+    val deleteLabel = stringResource(R.string.delete)
+
+    DiaryCard(
+        onClick = { if (selectMode) onToggleSelect() else onEdit() },
+        onLongClick = onLongPress,
+        // 选中的卡加 2dp `primary` 描边（规范 §2.8）
+        border = if (selectMode && selected) {
+            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            this.selected = selectMode && selected
+            // 整卡一条语义 + 「编辑 / 删除」两个自定义动作（规范 §5）
+            customActions = listOf(
+                CustomAccessibilityAction(editLabel) { onEdit(); true },
+                CustomAccessibilityAction(deleteLabel) { onToggleSelect(); true },
+            )
+        },
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (selectMode) SelectCircle(selected)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 抬头：时间（13sp bold primary）+ 地点（12sp onSurfaceVariant，最多 2 行）
+                if (block.timeLabel.isNotEmpty()) {
+                    Text(
+                        text = block.timeLabel,
+                        fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                if (block.locText.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = AppIcons.Place,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = block.locText,
+                            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, fontScale),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                // 正文：逐段落渲染
                 block.parts.forEachIndexed { partIndex, part ->
                     ReadPart(
                         part = part,
-                        keyword = keyword,
-                        onToggleTodo = { itemIndex -> onToggleTodo(blockIndex, itemIndex) },
+                        partIndex = partIndex,
+                        matches = matches,
+                        currentHit = currentHit,
+                        onToggleTodo = onToggleTodo,
                         imageLoader = imageLoader,
                     )
                 }
             }
         }
-
-        Box(modifier = Modifier.padding(bottom = 96.dp))
     }
 }
 
-/** 一天里的一个片段（与 iOS `ShareBlock` 同构，但多了渲染好的起始行文案）。 */
-data class ReadBlock(
-    /** 片段 id（多选与待办回写要用）。 */
-    val id: Long = 0,
-    val startTimeUtc: Long,
-    val startLine: String,
-    val parts: List<ContentPart>,
-)
+/** 多选态的勾选圈（20dp）：未选中 = 描边圆，选中 = `primary` 实底 + 对勾。 */
+@Composable
+private fun SelectCircle(selected: Boolean) {
+    val primary = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .padding(top = 1.dp)
+            .size(20.dp)
+            .clip(CircleShape)
+            .background(if (selected) primary else Color.Transparent)
+            .border(1.5.dp, if (selected) primary else MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------- 段落
 
 @Composable
 private fun ReadPart(
     part: ContentPart,
-    keyword: String,
+    partIndex: Int,
+    matches: List<DiarySearch.Match>,
+    currentHit: DiarySearch.Match?,
     onToggleTodo: (Int) -> Unit,
     imageLoader: (ContentPart) -> ImageBitmap?,
 ) {
     when (val render = ReadLayout.renderModel(listOf(part)).firstOrNull()) {
-        is ReadLayout.PartRender.Paragraph -> ParagraphText(render, keyword)
+        is ReadLayout.PartRender.Paragraph -> ParagraphText(
+            render = render,
+            highlights = DiarySearch.highlights(matches, partIndex, ITEM_WHOLE_PART, currentHit),
+        )
 
         is ReadLayout.PartRender.Items -> Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             render.items.forEachIndexed { index, item ->
                 val done = render.done.getOrNull(index) == true
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .let { if (render.isTodo) it.clickable { onToggleTodo(index) } else it },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (render.isTodo) {
-                        TodoBox(done)
-                    } else {
-                        Text("•", style = MaterialTheme.typography.bodyLarge)
-                    }
-                    Text(
+                if (render.isTodo) {
+                    TodoRow(
                         text = item,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (done) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                        textDecoration = if (done) TextDecoration.LineThrough else null,
+                        done = done,
+                        highlights = DiarySearch.highlights(matches, partIndex, index, currentHit),
+                        onToggle = { onToggleTodo(index) },
+                    )
+                } else {
+                    BulletRow(
+                        text = item,
+                        highlights = DiarySearch.highlights(matches, partIndex, index, currentHit),
                     )
                 }
             }
         }
 
-        is ReadLayout.PartRender.Image -> {
-            val bitmap = imageLoader(part)
-            if (bitmap != null) {
-                val widthDp = ReadLayout.imageDisplayWidth(320.0).dp
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .width(widthDp)
-                        .clip(RoundedCornerShape(Radius.image)),
-                    contentScale = ContentScale.FillWidth,
-                )
-            } else {
-                // 占位块按库里存的宽高比撑开，图片加载完后版面不会跳（iOS 同一思路）。
-                // 高度走 `ReadLayout.imageDisplayHeight`：纯函数，已有单测覆盖。
-                val displayWidth = ReadLayout.imageDisplayWidth(320.0)
-                Box(
-                    modifier = Modifier
-                        .width(displayWidth.dp)
-                        .height(ReadLayout.imageDisplayHeight(part, displayWidth).dp)
-                        .clip(RoundedCornerShape(Radius.image))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = IMAGE_MISSING_LABEL,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        is ReadLayout.PartRender.Image -> InlineImage(part = part, imageLoader = imageLoader)
 
         null -> Unit
     }
 }
 
+/**
+ * 段落文本：语义样式 → M3 角色（[EditorTypography] 是唯一映射点），
+ * 行内样式叠加，命中区间着 `primaryContainer` 底 + `primary` 字。
+ */
 @Composable
-private fun ParagraphText(render: ReadLayout.PartRender.Paragraph, keyword: String) {
-    // 段落样式 → M3 角色（唯一映射点），行高直接用角色的官方值。
-    // 首轮这里是 displayMedium（45sp！）/ headlineMedium / bodyMedium / bodyLarge ——
-    // 大标题被映射到了 displayMedium，那是 M3 的 45sp 档，不是段落标题该用的角色。
+private fun ParagraphText(
+    render: ReadLayout.PartRender.Paragraph,
+    highlights: List<DiarySearch.Highlight>,
+) {
     val textStyle = EditorTypography.textStyleFor(render.style)
     val annotated = buildAnnotatedString {
         render.spans.forEach { span ->
@@ -412,24 +520,25 @@ private fun ParagraphText(render: ReadLayout.PartRender.Paragraph, keyword: Stri
             ) { append(span.text) }
         }
     }
-    val highlighted = highlightAnnotated(annotated, keyword)
+    val text = annotated.withHighlights(highlights)
 
-    if (render.style == "quote") {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(Radius.concentric(Radius.card, 4.dp)),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
-        ) {
+    if (render.style == ContentPartStyle.quote) {
+        // 引用：`surfaceContainerHigh` 底 + 4dp 圆角 + 6×10dp 内边距（规范 §2.5）。
+        // iOS 侧**没有**左侧竖线、没有内缩（竖线只出现在分享长图里）。
+        Box(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = highlighted,
-                modifier = Modifier.padding(Spacing.card),
+                text = text,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 style = textStyle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
     } else {
         Text(
-            text = highlighted,
+            text = text,
             modifier = Modifier.fillMaxWidth(),
             style = textStyle,
             color = MaterialTheme.colorScheme.onSurface,
@@ -438,51 +547,76 @@ private fun ParagraphText(render: ReadLayout.PartRender.Paragraph, keyword: Stri
     }
 }
 
-/** 命中高亮：把关键字段落背景设为 `primaryContainer`、前景设为 `primary`。 */
+/** 列表项：前导 `•` + 缩进 18dp（规范 §2.5）。 */
 @Composable
-private fun highlightAnnotated(annotated: AnnotatedString, keyword: String): AnnotatedString {
-    if (keyword.isBlank()) return annotated
-    val segments = SearchUtil.highlightSegments(annotated.text, keyword)
-    if (segments.none { it.hit }) return annotated
-
-    val background = MaterialTheme.colorScheme.primaryContainer
-    val foreground = MaterialTheme.colorScheme.primary
-    return buildAnnotatedString {
-        var cursor = 0
-        segments.forEach { segment ->
-            val start = cursor
-            val end = (cursor + segment.text.length).coerceAtMost(annotated.length)
-            cursor = end
-            if (start < end) {
-                if (segment.hit) {
-                    withStyle(SpanStyle(background = background, color = foreground)) {
-                        append(annotated.subSequence(start, end))
-                    }
-                } else {
-                    append(annotated.subSequence(start, end))
-                }
-            }
+private fun BulletRow(text: String, highlights: List<DiarySearch.Highlight>) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(MARKER_GAP),
+    ) {
+        // 标记右对齐在 18dp 的槽里（设计稿 `.li .bul { width:18px; text-align:right }`）
+        Box(modifier = Modifier.width(MARKER_SLOT), contentAlignment = Alignment.CenterEnd) {
+            Text(
+                text = "•",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        if (cursor < annotated.length) append(annotated.subSequence(cursor, annotated.length))
+        Text(
+            text = AnnotatedString(text).withHighlights(highlights),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 
 /**
- * 待办的勾选框。
- *
- * 未勾选 = 1dp 描边 + 透明底；勾选 = 品牌色实底 + 对勾。
- * （iOS 侧是渐变填充的圆角方框，这里按 Material 3 的语义重做，形状与状态含义保持一致。）
+ * 待办行：整行可点（iOS 的命中区是"标记到行尾"），
+ * 勾选框只用**形状 + 颜色**表达状态（不靠颜色单独承载）。
  */
 @Composable
+private fun TodoRow(
+    text: String,
+    done: Boolean,
+    highlights: List<DiarySearch.Highlight>,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = done, role = Role.Checkbox) { onToggle() },
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(MARKER_GAP),
+    ) {
+        // 勾选框在 18dp 槽里居中对齐，并下沉 3dp 与首行文字对齐（设计稿 `.todo .cbox`）
+        Box(modifier = Modifier.width(MARKER_SLOT), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.padding(top = MARKER_TOP)) { TodoBox(done) }
+        }
+        Text(
+            text = AnnotatedString(text).withHighlights(highlights),
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (done) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+            textDecoration = if (done) TextDecoration.LineThrough else null,
+        )
+    }
+}
+
+/** 待办勾选框：18dp；未完成 = 2dp `onSurfaceVariant` 描边；完成 = `primary` 实底 + 对勾。 */
+@Composable
 private fun TodoBox(done: Boolean) {
-    val shape = RoundedCornerShape(Radius.badge)
-    val color = if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    val shape = RoundedCornerShape(Radius.bar)
+    val color = if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         modifier = Modifier
-            .size(20.dp)
+            .size(18.dp)
             .clip(shape)
             .background(if (done) color else Color.Transparent)
-            .border(1.dp, color, shape),
+            .border(if (done) 0.dp else 2.dp, color, shape),
         contentAlignment = Alignment.Center,
     ) {
         if (done) {
@@ -496,21 +630,268 @@ private fun TodoBox(done: Boolean) {
     }
 }
 
-private val WRITE_LABEL: String
-    @Composable get() = stringResource(R.string.index_write)
-private val DELETE_LABEL: String
-    @Composable get() = stringResource(R.string.delete)
-private val SHARE_LABEL: String
-    @Composable get() = stringResource(R.string.a11y_share)
-private val SEARCH_PLACEHOLDER: String
-    @Composable get() = stringResource(R.string.read_search_placeholder)
-private val CLEAR_LABEL: String
-    @Composable get() = stringResource(R.string.search_time_clear)
+// ---------------------------------------------------------------------------- 图片
+
+/**
+ * 内联图片（规范 §2.6）：宽 = 正文列宽、圆角 12dp、上下各 10dp、**没有最大高度**。
+ *
+ * 文件缺失 / 还没解码完时按库里的 `w/h` 比例占位 —— 图到位后版面不跳。
+ * 位图在 IO 线程解码（`MediaStore` 内有 LRU 缓存），避免首帧在主线程解码大图。
+ */
+@Composable
+private fun InlineImage(part: ContentPart, imageLoader: (ContentPart) -> ImageBitmap?) {
+    val src = part.src.orEmpty()
+    val bitmap by produceState<ImageBitmap?>(initialValue = null, src) {
+        value = withContext(Dispatchers.IO) { imageLoader(part) }
+    }
+    // `w`/`h` 只表达宽高比（跨端契约）：宽度由列宽决定。
+    val ratio = remember(part.w, part.h) {
+        val w = part.w ?: 0.0
+        val h = part.h ?: 0.0
+        if (w > 0 && h > 0) (w / h).toFloat() else (1.0 / ReadLayout.IMAGE_FALLBACK_RATIO).toFloat()
+    }
+    val label = stringResource(
+        R.string.read_image_label,
+        (part.w ?: 0.0).toInt(),
+        (part.h ?: 0.0).toInt(),
+    )
+    val openLabel = stringResource(R.string.read_image_open)
+    var preview by remember(src) { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = ReadLayout.IMAGE_SPACING.dp),
+    ) {
+        val box = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ReadLayout.IMAGE_MIN_HEIGHT.dp)
+            .aspectRatio(ratio)
+            .clip(RoundedCornerShape(Radius.image))
+        val shown = bitmap
+        if (shown != null) {
+            Image(
+                bitmap = shown,
+                contentDescription = label,
+                modifier = box.clickable(onClickLabel = openLabel) { preview = true },
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            // 缺失 / 加载中：保留槽位不重排（iOS 用 `Color.clear` 占位）
+            Box(
+                modifier = box.background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = AppIcons.Image,
+                    contentDescription = label,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+    }
+
+    val shown = bitmap
+    if (preview && shown != null) {
+        DiaryImagePreview(
+            bitmap = shown,
+            contentDescription = label,
+            onDismiss = { preview = false },
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------- 页内搜索栏
+
+/**
+ * 页内搜索栏（规范 §2.7）：高 52dp，插在 Hero 卡**上方**。
+ *
+ * `当前序号 / 总数` + 上一个 / 下一个步进；输入为空时只剩输入框。
+ * 计数来自 `DiaryPageViewModel.hits`（[DiarySearch.findMatches] 的结果），
+ * 与卡片上的高亮是同一份数据 —— 这正是 iOS 那两套算法刻意收敛掉的地方。
+ */
+@Composable
+fun DiarySearchBar(
+    keyword: String,
+    hitOrdinal: Int,
+    hitCount: Int,
+    onSearchChange: (String) -> Unit,
+    onSearchStep: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = SearchBarMetrics.BarHeight),
+        shape = RoundedCornerShape(Radius.field),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Box(modifier = Modifier.weight(1f)) {
+                BasicTextField(
+                    value = keyword,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                )
+                if (keyword.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.read_search_placeholder),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (keyword.isNotEmpty()) {
+                Text(
+                    text = if (hitCount == 0) {
+                        stringResource(R.string.read_search_no_match)
+                    } else {
+                        "$hitOrdinal/$hitCount"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                IconButton(onClick = { onSearchStep(-1) }, enabled = hitCount > 0) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = PREV_MATCH_LABEL)
+                }
+                IconButton(onClick = { onSearchStep(1) }, enabled = hitCount > 0) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = NEXT_MATCH_LABEL)
+                }
+                IconButton(onClick = { onSearchChange("") }) {
+                    Icon(Icons.Filled.Clear, contentDescription = CLEAR_LABEL)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 悬浮的页内搜索栏：钉在顶栏下方，**不随内容滚动**。
+ *
+ * 容器用页面底色铺满整宽（不是半透明），这样列表从它下面滚过去时不会在圆角周围露出来；
+ * 一点点阴影表明它浮在内容之上（与格式栏同一套语言）。
+ */
+@Composable
+fun DiarySearchBarOverlay(
+    keyword: String,
+    hitOrdinal: Int,
+    hitCount: Int,
+    onSearchChange: (String) -> Unit,
+    onSearchStep: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val columnWidth: Dp = LocalAdaptiveLayout.current
+        .contentColumn(ReadLayout.CONTENT_MAX_WIDTH.toFloat()).dp
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.background,
+        shadowElevation = 2.dp,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = SearchBarMetrics.PagePadding,
+                    vertical = SearchBarMetrics.VerticalPadding,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(modifier = Modifier.width(columnWidth)) {
+                DiarySearchBar(
+                    keyword = keyword,
+                    hitOrdinal = hitOrdinal,
+                    hitCount = hitCount,
+                    onSearchChange = onSearchChange,
+                    onSearchStep = onSearchStep,
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------- 工具
+
+/**
+ * 命中高亮的**两级**配色：
+ *
+ * | | 底色 | 字色 |
+ * | --- | --- | --- |
+ * | 当前命中（`当前序号` 指向的那一处） | `primary` | `onPrimary` |
+ * | 其余命中 | `primaryContainer` | `primary` |
+ *
+ * 两级的原因：所有命中一个样式时，点「上一个 / 下一个」只能靠页面滚动猜"现在看的是哪一个"
+ * （同一张卡里有多处命中时尤其看不出来）。当前命中用实底反转色，一眼能认出来。
+ *
+ * 区间来自 [DiarySearch.highlights]（与计数同一份 `Match`），因此**画出来的
+ * 命中数就是数出来的命中数** —— 不会出现 iOS 那种"跨 chunk 只计数不高亮"。
+ */
+@Composable
+private fun AnnotatedString.withHighlights(highlights: List<DiarySearch.Highlight>): AnnotatedString {
+    if (highlights.isEmpty()) return this
+    val currentBg = MaterialTheme.colorScheme.primary
+    val currentFg = MaterialTheme.colorScheme.onPrimary
+    val matchBg = MaterialTheme.colorScheme.primaryContainer
+    val matchFg = MaterialTheme.colorScheme.primary
+    return AnnotatedString.Builder(this).apply {
+        highlights.forEach { highlight ->
+            val start = highlight.range.first.coerceIn(0, length)
+            val end = (highlight.range.last + 1).coerceIn(start, length)
+            if (start < end) {
+                addStyle(
+                    SpanStyle(
+                        background = if (highlight.current) currentBg else matchBg,
+                        color = if (highlight.current) currentFg else matchFg,
+                    ),
+                    start,
+                    end,
+                )
+            }
+        }
+    }.toAnnotatedString()
+}
+
+/** 段落里"整段"这个文本单元的下标（列表 / 待办用项下标，普通段落用 -1）。 */
+private const val ITEM_WHOLE_PART = -1
+private const val HERO_KEY = "diary-hero"
+
+/** 页内搜索栏的尺寸（规范 §2.7：栏高 52dp）。 */
+object SearchBarMetrics {
+    val BarHeight = 52.dp
+    val VerticalPadding = 8.dp
+    val PagePadding = 16.dp
+
+    /** 悬浮栏连上下留白占掉的高度 —— 列表顶部要按它让位。 */
+    val TotalHeight = BarHeight + VerticalPadding * 2
+}
+
+private val MARKER_SLOT = 18.dp
+
+/** 标记与文字之间的距离（设计稿 `.li` / `.todo` 的 `gap: 10px`）。 */
+private val MARKER_GAP = 10.dp
+
+/** 勾选框下沉量，让它与首行文字视觉对齐（设计稿 `.todo .cbox { margin-top: 3px }`）。 */
+private val MARKER_TOP = 3.dp
+
 private val PREV_MATCH_LABEL: String
     @Composable get() = stringResource(R.string.read_search_prev)
 private val NEXT_MATCH_LABEL: String
     @Composable get() = stringResource(R.string.read_search_next)
-private val NO_MATCH_LABEL: String
-    @Composable get() = stringResource(R.string.read_search_no_match)
-private val IMAGE_MISSING_LABEL: String
-    @Composable get() = stringResource(R.string.share_image_placeholder)
+private val CLEAR_LABEL: String
+    @Composable get() = stringResource(R.string.search_time_clear)
