@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onPlaced
@@ -213,12 +214,26 @@ class MonthFlowLayout private constructor(
      * 返回 [IntRange] 而不是 `List<Block>`：组合层要把它包进 `derivedStateOf`，
      * 区间**相等**时（滚动过程中的绝大多数帧）不触发重组，列表则每帧都是新实例。
      */
-    fun visibleBlockRange(offset: Float, viewportH: Float, margin: Float): IntRange {
+    fun visibleBlockRange(
+        offset: Float,
+        viewportH: Float,
+        margin: Float,
+        /**
+         * 视口之外**额外**预挂载的块数（上下各这么多块）。
+         *
+         * 真机实测（`ScrollProf`，MEIZU 21 / 120Hz）：正常帧 8ms（120Hz 预算内），
+         * 但**新的一个月首次挂载**那一帧要 90~365ms —— 每次滚到新月份都会顿一下。
+         * 预挂载把这份代价提前到"用户还没滚到那里"的时候付。
+         */
+        preMount: Int = 0,
+    ): IntRange {
         if (blocks.isEmpty()) return IntRange.EMPTY
-        val first = blockIndexAt(max(0f, offset - margin))
+        val anchor = blockIndexAt(max(0f, offset - margin))
+        val first = (anchor - preMount).coerceAtLeast(0)
         val limit = offset + viewportH + margin
-        var last = first
+        var last = anchor
         while (last + 1 < blocks.size && blocks[last + 1].top < limit) last++
+        last = (last + preMount).coerceAtMost(blocks.size - 1)
         return first..last
     }
 
@@ -524,8 +539,21 @@ fun MonthFlow(
     }
 
     // 可见块窗口：**只在跨块时**才变，于是滚动过程中这条流不重组
+    // 预挂载：启动后把"视口外上下各一块"也组合出来。
+    // 每一步都会让新挂载的那一块付掉它那份布局代价（实测一块 90~365ms）——
+    // 但那是在用户还没滚到那里的时候付的，滚动过程中就不会再顿。
+    // ⚠️ 只预挂 1 块：2 块会把启动那一瞬间拉出 500ms 的卡顿（实测），得不偿失。
+    var preMount by remember(layout) { mutableStateOf(0) }
+    LaunchedEffect(layout) {
+        withFrameNanos { }
+        preMount = 1
+    }
+
+    // 可见块窗口：**只在跨块时**才变，于是滚动过程中这条流不重组
     val range by remember(layout, viewportH) {
-        derivedStateOf { layout.visibleBlockRange(scroll.offsetDp, viewportH, layout.rowH) }
+        derivedStateOf {
+            layout.visibleBlockRange(scroll.offsetDp, viewportH, layout.rowH, preMount)
+        }
     }
     // 顶部大标题：占视口最多的那一块（滑动中途就换字，且不会乱跳）
     val topIndex by remember(layout, viewportH) {
