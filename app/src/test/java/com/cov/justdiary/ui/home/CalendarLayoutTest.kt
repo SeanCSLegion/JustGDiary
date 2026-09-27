@@ -64,9 +64,10 @@ class CalendarLayoutTest {
         assertEquals(44f, CalendarLayout.MINIMUM_ROW_HEIGHT, 1e-6f)
         // 未来日期不再靠透明度表达（0.35 alpha 对比度只有 2.19:1）；
         // 改用 M3 的 onSurfaceVariant 语义色，见 docs/ui-design-plan.md §3.1
-        // M3 easing.emphasized / easing.emphasized.decelerate（官方令牌值）
+        // M3 easing.emphasized（官方令牌值）；morph 曲线**不用 M3**，用 iOS 那条
+        // `.timingCurve(0.2, 0.75, 0.3, 1.0)` —— 见 `IOS_MORPH_CURVE` 的说明。
         assertEquals(listOf(0.2f, 0f, 0f, 1f), CalendarLayout.M3_EMPHASIZED.toList())
-        assertEquals(listOf(0.05f, 0.7f, 0.1f, 1f), CalendarLayout.M3_EMPHASIZED_DECELERATE.toList())
+        assertEquals(listOf(0.2f, 0.75f, 0.3f, 1f), CalendarLayout.IOS_MORPH_CURVE.toList())
         // 竖屏版面的常量：顶栏、大标题槽、行高上下界
         // M3 small top app bar 的官方高度
         assertEquals(64f, CalendarLayout.HEADER_H, 1e-6f)

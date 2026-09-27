@@ -267,11 +267,16 @@ fun HomeScreen(
             )
             else -> tween<Float>(
                 durationMillis = CalendarLayout.MORPH_DURATION_MS,
+                // ⚠️ 必须用 **iOS 那条** `timingCurve(0.2, 0.75, 0.3, 1.0)`
+                //（`CalendarLayout.morphSlideAnimation`）。之前用的是 M3 的
+                // `emphasizedDecelerate`：它在 **6% 时长**就走完一半路程（iOS 是 15%），
+                // 于是"开头一瞬全到位、后面大半时间几乎不动" —— 观感就是"动画太快"，
+                // 而且任何后段淡入（小标题、年层）都被压成瞬间。
                 easing = CubicBezierEasing(
-                    CalendarLayout.M3_EMPHASIZED_DECELERATE[0],
-                    CalendarLayout.M3_EMPHASIZED_DECELERATE[1],
-                    CalendarLayout.M3_EMPHASIZED_DECELERATE[2],
-                    CalendarLayout.M3_EMPHASIZED_DECELERATE[3],
+                    CalendarLayout.IOS_MORPH_CURVE[0],
+                    CalendarLayout.IOS_MORPH_CURVE[1],
+                    CalendarLayout.IOS_MORPH_CURVE[2],
+                    CalendarLayout.IOS_MORPH_CURVE[3],
                 ),
             )
         }
@@ -750,29 +755,28 @@ fun HomeScreen(
                 )
             }
         } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                HomeTopBar(
-                    // 月态只放年份（月份由下面 72dp 的 32sp 大标题承担）；周态放月份名 = 回月历
-                    leftLabel = homeTitle(mode, year, monthFirst, dateFormats, context),
-                    showLeft = mode != HomeViewMode.YEAR,
-                    todayLabel = todayPillLabel(selectedDate, today, monthFirst, dateFormats, context),
-                    onLeftClick = {
-                        // 月态 → 年历；周态 → 回月态；年态不可点（整枚隐藏）
-                        if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
-                    },
-                    onToday = ::goToday,
-                    mode = mode,
-                )
-
-                // 日历区：月流（常驻）/ 周层 / 年层 / morph 层 四选一地叠在同一块几何里。
-                //
-                // ⚠️ `clipToBounds`：连续月历流在年 morph 里会被放大着往卡片里缩，
-                // 不裁的话它会画到顶栏上面去。
+            // ⚠️ **iOS 的顶栏模型**：顶部只有一行**悬浮**胶囊（`HomeTopBar` 自身没有背景），
+            // 日历区拿的是**整屏**高度，内容可以穿到胶囊底下。规范
+            // `docs/android-design/02-adaptive-and-navigation.md` §3.4 写的就是这条
+            //（"首页｜**无 `TopAppBar`**：只有一行 64dp 的胶囊行"）。
+            //
+            // 之前实现成了 `Column { 顶栏; 日历区 }`：顶栏**占位**、并把日历挤到下面，
+            // 日历上沿再被 `clipToBounds()` 裁掉 —— 年↔月 morph 里年层放大后超出日区的
+            // 那一条（第一排 1/2/3 月）就被切掉了（用户："有第一排日期有一点点遮挡"）。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 唯一的裁剪边界 = 整屏：日历区自己不再裁，morph 层才能画到胶囊那一带。
+                    .clipToBounds(),
+            ) {
+                // 日历区：位置与高度跟"顶栏占位"时**完全一致**（y = 顶栏高、高 = `bandH`），
+                // 所以月/周/年三态与两个 morph 的几何一行都不用改。
                 Box(
                     modifier = Modifier
-                        .weight(1f)
+                        .align(Alignment.TopCenter)
+                        .offset(y = topBarH.dp)
                         .fillMaxWidth()
-                        .clipToBounds()
+                        .height(bandH.dp)
                         .then(a11yModifier),
                     contentAlignment = Alignment.TopCenter,
                 ) {
@@ -958,6 +962,21 @@ fun HomeScreen(
                         )
                     }
                 }
+
+                // 悬浮顶栏：**最后画** = 盖在日历之上；本身没有背景，年层放大后溢出的
+                // 那一条会从胶囊周围（而不是"被顶栏下沿切断"）露出来。
+                HomeTopBar(
+                    // 月态只放年份（月份由下面 72dp 的 32sp 大标题承担）；周态放月份名 = 回月历
+                    leftLabel = homeTitle(mode, year, monthFirst, dateFormats, context),
+                    showLeft = mode != HomeViewMode.YEAR,
+                    todayLabel = todayPillLabel(selectedDate, today, monthFirst, dateFormats, context),
+                    onLeftClick = {
+                        // 月态 → 年历；周态 → 回月态；年态不可点（整枚隐藏）
+                        if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
+                    },
+                    onToday = ::goToday,
+                    mode = mode,
+                )
             }
         }
 

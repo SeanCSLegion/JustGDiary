@@ -59,7 +59,17 @@ object CalendarLayout {
      *
      * 用于"进入"方向的大面积过渡（`MotionTokens.EasingEmphasizedDecelerateCubicBezier`）。
      */
-    val M3_EMPHASIZED_DECELERATE = floatArrayOf(0.05f, 0.7f, 0.1f, 1f)
+    /**
+     * **iOS 的 morph 曲线**：`CalendarLayout.morphSlideAnimation` =
+     * `.timingCurve(0.2, 0.75, 0.3, 1.0, duration: morphDuration)`。
+     *
+     * 与之前误用的 M3 `emphasizedDecelerate (0.05, 0.7, 0.1, 1.0)` 差别很大，实测：
+     * 走到"一半进度"所需的时间 —— iOS **15%** 时长，M3 只有 **6%**。
+     * 用 M3 那条时开头一瞬就全到位、后面大半时间几乎不动，观感是"动画太快"，
+     * 且所有后段淡入（小标题、年层）都被压成瞬间（用户："动画速率全都太快了，
+     * 相较 iOS 版来说。也可能是动画曲线不一致的问题"）。
+     */
+    val IOS_MORPH_CURVE = floatArrayOf(0.2f, 0.75f, 0.3f, 1f)
 
     /**
      * 翻月 / 翻周 / 回到今天的时长（毫秒）。
