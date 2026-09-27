@@ -1218,8 +1218,15 @@ private fun morphSource(
             MonthFlowMorphSource.Label(
                 monthFirst = block.monthFirst,
                 key = block.key,
+                // ⚠️ 与 `MonthFlowBlock` 里画小标题时**同一个式子**：
+                //     `.offset(y = -(labelBandH + LABEL_TIGHT_GAP))`
+                // 也就是"小标题底边距本月第一行顶 = labelBandH + LABEL_TIGHT_GAP"。
+                // 原来这里只减了 `LABEL_TIGHT_GAP`（漏掉 `labelBandH` ≈ 21dp），
+                // 于是 morph 画出来的小标题比真实位置**偏低**，交班那一帧会跳
+                //（用户 2026-09-27："年视图切换到月视图的时候，小月份的位置偏高了一点点"
+                //  —— 也就是 morph 期间偏低、交班后回到正确位置，观感上是"偏高一点点"）。
                 bottom = block.top - offsetDp + titleHeight + weekdayHeight -
-                    CalendarLayout.LABEL_TIGHT_GAP,
+                    (labelBandH + CalendarLayout.LABEL_TIGHT_GAP),
             ),
         )
         CalendarGrid.displayedWeeks(block.monthFirst, weekStart).forEachIndexed { i, week ->
