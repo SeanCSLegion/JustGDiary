@@ -1143,8 +1143,10 @@ fun MonthWeekMorph(
                                 // `MonthWeekMorphView` 完全一致。
                                 //
                                 // 这里试过两版"有位移"的方案（跟着行一起走 / 额外落位 24dp），
-                                // 用户实测后拍板："干脆和 iOS 版一样，让小标题直接在最终位置算了。
-                                // 这样比跳变更好。" —— 所以回到 iOS 行为，不要再加位移。
+                                // 也试过让它与日期行同步淡入（`* 1.4`）+ 把它画到行上层，
+                                // 用户最终拍板："就让小标题直接出现就行了。" ——
+                                // **保持现状**：位置钉在终点、`* 2.2` 曲线（后段淡入）、
+                                // 画在日期行之前（与 iOS 同序）。不要再动这三条。
                                 translationY =
                                     (label.bottom - source.labelBandH - clipTop()) * density
                                 alpha = 1f - CalendarLayout.clamp01(progress() * 2.2f)
