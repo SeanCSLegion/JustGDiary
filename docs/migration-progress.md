@@ -2105,7 +2105,7 @@ morph 里漏传 → 小标题在交班时会突然由灰变蓝。现在 `MonthFl
 （之前用"把 morph 停在 p=0"的办法验过 0 像素差，这条性质没有被破坏）。
 实测（慢放逐帧截图）：小标题在 morph **中段**就已经淡入并在落位，不再等到最后才冒出来。
 
-## R11 · 小标题与上个月的间隔：从 6.7dp 调到 10.3dp
+## R11 · 小标题：位置回到 iOS 行为；与上个月的间隔 6.7 → 16.3dp
 
 用户："稍微调高一点前一个月到小标题之间的间隔，之前我说的紧贴在两个月连续的时候会感觉
 有些太近了。"
@@ -2123,9 +2123,31 @@ morph 里漏传 → 小标题在交班时会突然由灰变蓝。现在 `MonthFl
 下方收紧），与"小标题属于下面那个月"的语义一致。
 
 上限是**分割线**（画在本月第一行顶）：墨迹离它只剩 4.7dp，所以最多坐 ~4dp，取 3.5dp
-（留 1dp 余量）。单测 `the label keeps a gap above the previous month's last row` 现在同时钉住
-三件事：上方空档 ≥ 11 + TUCK、整体仍放得进上一行的留白、**墨迹仍在分割线上方**。
-证据：`docs/ui-audit/r11-1-label-gap-before-after.png`（上=改之前，下=改之后）。
+（留 1dp 余量）。
+
+用户复看后要求"还需要再加大一点" —— 小标题已经贴到分割线，只剩最后一个余量：
+**格子内容上方的留白**。于是再加 `CalendarLayout.DAY_CONTENT_RISE = 6dp`，把日期格里的
+内容（圆 + 日号 + 农历 + 标记）整体上移（`CalendarDayCell` 的居中 offset 与
+`YearMonthMorph.cellLayout` 同步改，否则 morph 两端会错开）。副作用是**正向**的：
+
+| | 原始 | +TUCK | +TUCK+RISE |
+| --- | --- | --- | --- |
+| 上个月农历墨迹底 → 小标题墨迹顶 | 6.7dp | 10.3dp | **16.3dp** |
+| 小标题墨迹底 → 分割线 | 4.7dp | 1.0dp | 1.0dp |
+| 格子内容墨迹：上方 / 下方留白 | 34 / 25dp（偏下） | 34 / 25dp | **28.3 / 30.7dp（基本居中）** |
+
+### 小标题的位移动画：试了两版，最后按用户拍板回到 iOS
+
+用户先选"小标题是突然出现的，没有淡入"，于是做了（1）跟着自己那个月的第一行走、
+（2）额外 24dp 落位位移 + 与行同步淡入。用户实测后说："小标题的问题没有修复。我觉得
+干脆和 iOS 版一样，让小标题直接在最终位置算了。这样比跳变更好。"
+→ **完全回到 iOS 行为**：位置钉在终点（screen y 恒定，只被裁剪边界扫过）、
+`alpha = 1 - clamp01(progress * 2.2)`；`LABEL_RISE`、`morphRowY()`、
+`MonthFlowMorphSource.Label.firstRowIndex` 全部删掉（不留死代码）。
+
+单测 `the label keeps a gap above the previous month's last row` 现在同时钉住：
+上方空档 ≥ 11 + TUCK + RISE、整体仍放得进上一行的留白、**墨迹仍在分割线上方**。
+证据：`docs/ui-audit/r11-1-label-gap-before-after.png`（① 原始 ② 只加 TUCK ③ 再加 RISE）。
 
 ### 单测抓到的两个真 bug（都已修）
 

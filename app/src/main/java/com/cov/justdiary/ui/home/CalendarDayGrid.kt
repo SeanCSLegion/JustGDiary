@@ -294,10 +294,13 @@ private fun CalendarDayCell(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             // 与下面农历的 `-LUNAR_TIGHTEN` 配对，让"日号 + 农历"这一组在格子里
-            // （也就是分隔线之间）**光学居中**。
+            // （也就是分隔线之间）**光学居中**；再整体上移 `DAY_CONTENT_RISE`
+            // （用户要求把"上个月 → 小标题"的间隔再加大，见那个常量的注释）。
             // ⚠️ 必须用 `offset`（不参与布局）而不是 `padding` —— 加 padding 会把 Column 的
             // 布局高度撑大 6dp，内容正好顶到格子下沿，**农历又被裁掉**（实测踩到）。
-            modifier = Modifier.offset(y = CalendarLayout.LUNAR_TIGHTEN.dp / 2f),
+            modifier = Modifier.offset(
+                y = (CalendarLayout.LUNAR_TIGHTEN / 2f - CalendarLayout.DAY_CONTENT_RISE).dp,
+            ),
         ) {
             Box(
                 modifier = Modifier.size(circleDiameter),

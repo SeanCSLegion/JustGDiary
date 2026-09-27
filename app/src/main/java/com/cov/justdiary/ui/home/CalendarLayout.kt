@@ -417,6 +417,18 @@ object CalendarLayout {
      */
     const val LABEL_TUCK = 3.5f
 
+    /**
+     * 日期格里的内容（圆 + 日号 + 农历 + 标记）整体**上移**多少 dp。
+     *
+     * 用户 2026-09-27 第二次要求："还需要再加大一点"（上个月 → 小标题的间隔）。
+     * 小标题已经贴到分割线（余量 1dp），唯一的余量来自格子内容上方的留白，
+     * 所以把整组内容上移：间隔变大，同时墨迹在格子里反而更居中
+     * （改之前内容偏下 4.5dp，改之后基本居中）。
+     *
+     * 与 [LUNAR_TIGHTEN]/2 合起来就是 `CalendarDayCell` 里那个居中的 offset。
+     */
+    const val DAY_CONTENT_RISE = 6f
+
     /** 连续月历流里小标题的字号（竖屏 15 / 横屏紧凑 13）。 */
     fun flowLabelFontSize(compact: Boolean): Float = if (compact) 13f else 15f
 
