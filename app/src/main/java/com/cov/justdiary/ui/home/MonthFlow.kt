@@ -1401,9 +1401,15 @@ fun MonthWeekMorph(
                     modifier = Modifier
                         .fillMaxWidth()
                         .graphicsLayer {
-                            // 起手 = 冻结时的真实位置（`row.top`），终点 = 星期栏下沿
+                            // 起手 = 冻结时的真实位置（`row.top`），终点 = 星期栏下沿。
+                            //
+                            // ⚠️ **不要再减 `clipTop()`**：外层那个 Box 已经整体
+                            // `translationY = clipTop()` 了，`row.top` 又是**日历区坐标**
+                            // （相对日历区左上角），再减一次等于减两遍 —— 实测第一帧
+                            // `174 − 102 = 72`，整行直接跳到上方 102dp，正是用户反复说的
+                            // "一开始就跳到上方了，根本不是真实的起始位置"。
                             val y = CalendarLayout.lerp(selectedRow.top, headH, progress())
-                            translationY = (y - clipTop()) * density
+                            translationY = y * density
                         },
                 )
                 source.labels.forEach { label ->
