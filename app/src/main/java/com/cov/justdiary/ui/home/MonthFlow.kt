@@ -39,6 +39,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.draw.clipToBounds
@@ -790,7 +792,10 @@ private fun BlockCanvas(
 
     Box(
         modifier = modifier
-            .width(CalendarLayout.monthCellW(metrics.cellW * 7f).dp.coerceAtLeast(0.dp))
+            // ⚠️ `metrics.cellW` **已经是格宽**（`monthCellW(width) = width / 7`）。
+            // 第一版写成 `monthCellW(cellW * 7)` 又除了一次 7、再取整 ⇒ 宽度 0，
+            // 整块既画不出来也收不到手势（实测点日期没反应）。
+            .width((metrics.cellW * 7f).dp)
             .height((block.rowCount * rowH).dp)
             // 命中：一格一格的坐标换算，避免为 42 个日期各建一个可点节点。
             // 起手 2dp 内不消费事件，日期格的点击与月流的拖动互不打架。
@@ -846,13 +851,21 @@ private fun BlockCanvas(
                         }
                     }
                     if (first >= 0) {
-                        drawCellDividers(
-                            columns = (first..last).toList(),
-                            rowY = rowYDp * density.density,
-                            cellW = cellPx,
-                            alpha = metrics.dividerAlpha,
-                            color = scheme.outlineVariant,
-                        )
+                        // ⚠️ 位置与长度都要与旧版**同一个像素起点**：那条线是本行 Box 的
+                        // 顶边（`height 1dp`，`y = 行顶`），横向只跨"有当月日期的那几列"
+                        //（用户拍板的规则："分割线范围到日期为限，而不是一整行"）。
+                        if (metrics.dividerAlpha > 0.01f) {
+                            drawRect(
+                                color = scheme.outlineVariant.copy(
+                                    alpha = 0.35f * metrics.dividerAlpha,
+                                ),
+                                topLeft = Offset(first * cellPx, rowYDp * density.density),
+                                size = Size(
+                                    (last - first + 1) * cellPx,
+                                    1.dp.toPx(),
+                                ),
+                            )
+                        }
                     }
                 }
                 val layout = realCellLayout(
