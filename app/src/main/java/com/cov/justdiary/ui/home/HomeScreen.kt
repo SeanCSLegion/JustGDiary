@@ -1063,7 +1063,10 @@ fun HomeScreen(
 
                     // ⑤ 月↔周 morph 层：用**冻结的源几何**重画，两个方向共用一个源。
                     val source = weekSource
-                    // 与上面那条互补：进度到终点就撤，把画面交给真实图层
+                    // 与上面那条互补：进度到终点就撤，把画面交给真实图层。
+                    //
+                    // ⚠️ `weekProgress.value` 是**快照状态**，进度一变就会让这段重组，
+                    // 所以交班那一帧是准的（不会"晚一帧"）。
                     if (weekMorphing && source != null && weekProgress.value < 1f) {
                         MonthWeekMorph(
                             progress = weekProgressReader,

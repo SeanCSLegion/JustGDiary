@@ -545,6 +545,20 @@ internal fun DrawScope.drawDayCell(
 ) {
     if (alpha <= 0.01f) return
     val key = DateUtil.dayKeyOf(day)
+    // 临时诊断：记录 (日期 → rowY)。同一天出现在两个 rowY 上 = 重影来源。
+    if (com.cov.justdiary.app.DebugFlags.morphLog) {
+        if (morphDebugFrame != lastMorphFrame) {
+            lastMorphFrame = morphDebugFrame
+            morphRowY.clear()
+        }
+        val prev = morphRowY[key]
+        if (prev != null && kotlin.math.abs(prev - rowY) > 1f) {
+            com.cov.justdiary.service.Log.app.i(
+                "重影：" + key + " 同帧 rowY=" + prev + " / " + rowY,
+            )
+        }
+        morphRowY[key] = rowY
+    }
     val isSelected = key == selectedKey
     val isToday = key == todayKey
     val isFuture = key > todayKey
@@ -711,3 +725,9 @@ private const val CELL_SIDE_PAD = 4f
 
 private var lastDrawFrame = -1
 private val drawCounts = HashMap<String, Int>()
+
+
+// 临时诊断
+internal var morphDebugFrame = 0
+private var lastMorphFrame = -1
+private val morphRowY = HashMap<String, Float>()

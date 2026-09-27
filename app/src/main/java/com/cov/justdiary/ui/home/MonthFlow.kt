@@ -582,6 +582,14 @@ fun MonthFlow(
     }
 
     val contentAlpha: () -> Float = remember(visible) { { if (visible) 1f else HIDDEN_ALPHA } }
+    // ⚠️ 隐藏时**必须连日期格一起不画**，不能只把整层 alpha 压到 0.004。
+    //
+    // 用户 2026-09-27 报"月↔周切换时同一格有两个数字"。诊断（记录 (日期 → rowY)）显示
+    // 同一帧里同一天出现了两个 rowY（198 / 0）：一个来自这一层、一个来自 morph 层。
+    // 这一层当时 alpha 只有 0.004，肉眼看不见，但**它确实在画**；一旦取值不是 0
+    //（比如动画的中间态、或合成器没把它完全丢掉），就会与 morph 层叠成重影。
+    // 现在直接把"画不画"做成布尔，从根上保证不可见层不产生像素。
+    val drawCells = visible
     // 钉住层的透明度 = 可见性。
     // ⚠️ 必须单独判：周态 / 年态下整条流的不透明度是 0（它必须常驻以保住滚动位置），
     // 但钉住层是**另一个** Box，会照旧画在顶上 —— 实测周态里那颗大标题穿在周条后面。
@@ -622,6 +630,7 @@ fun MonthFlow(
                 key(block.key) {
                     MonthFlowBlock(
                         block = block,
+                        drawCells = drawCells,
                         onPlacedNs = { ScrollProf.measure(System.nanoTime() - blockStartNs) },
                         rowH = layout.rowH,
                         widthDp = widthDp,
@@ -686,6 +695,8 @@ private fun MonthFlowBlock(
     block: MonthFlowLayout.Block,
     /** 临时探针：本块从开始组合到放置完成（纳秒）。 */
     onPlacedNs: (() -> Unit)? = null,
+    /** `false` = 这一层当前不可见，**连日期格都不画**（见 `MonthFlow` 里 `drawCells` 的说明）。 */
+    drawCells: Boolean = true,
     rowH: Float,
     widthDp: Float,
     weekStart: String,
@@ -721,18 +732,21 @@ private fun MonthFlowBlock(
             .height((block.rowCount * rowH).dp)
             .then(if (onPlacedNs != null) Modifier.onPlaced { onPlacedNs() } else Modifier),
     ) {
-        BlockCanvas(
-            block = block,
-            weeks = weeks,
-            metrics = metrics,
-            rowH = rowH,
-            showLunar = showLunar,
-            selectedKey = selectedKey,
-            todayKey = todayKey,
-            flags = flags,
-            onDayTap = onDayTap,
-            modifier = Modifier.onPlaced { ScrollProf.measure(System.nanoTime() - placedNs) },
-        )
+        // 不可见时**不画日期格**（见 `drawCells` 的说明：只压 alpha 会与 morph 层叠成重影）
+        if (drawCells) {
+            BlockCanvas(
+                block = block,
+                weeks = weeks,
+                metrics = metrics,
+                rowH = rowH,
+                showLunar = showLunar,
+                selectedKey = selectedKey,
+                todayKey = todayKey,
+                flags = flags,
+                onDayTap = onDayTap,
+                modifier = Modifier.onPlaced { ScrollProf.measure(System.nanoTime() - placedNs) },
+            )
+        }
         // 小标题在**分割线上方**（用户的次序：上个月日期 → 小标题 → 分割线 → 本月日期）。
         // 它借用的是上一行底部那段留白，不额外占高度。
         MonthFlowLabel(
@@ -1318,6 +1332,7 @@ fun MonthWeekMorph(
             CalendarWeekdayHeader(weekStart = weekStart)
         }
 
+        morphDebugFrame++
         // 行与小标题：裁在「跟着顶栏移动的边界」以下。
         //
         // 裁剪的做法是「占位 + frame + clipToBounds」：外层整体下移 `clipTop`、内层自己
@@ -1356,43 +1371,41 @@ fun MonthWeekMorph(
                 // 就被画了两遍，看起来就是"日号叠字/重影"（用户 2026-09-27："非常明显有问题，
                 // 有重叠"）。实测行清单：`…3:2026-09-21* 4:2026-09-28* 5:2026-09-28 6:2026-10-05…`
                 // —— 第 4、5 行是同一条周。
-                val drawnWeeks = HashSet<LocalDate>()
-                source.rows.forEachIndexed { i, row ->
-                    // 只画**被点中那个月**的行（相邻月整块交给真实图层）
-                    if (!row.inSelectedBlock) return@forEachIndexed
-                    if (!drawnWeeks.add(row.week.first())) return@forEachIndexed
-                    val isSelected = i == source.selectedIndex
-                    if (isSelected) {
-                        // 被点中的那一行要**逐帧改度量**（月格行高 → 周条高度），
-                        // 所以单独放一个组合作用域读进度：每帧只重组这 7 个日期格，
-                        // 其余行完全不重组。
-                        SelectedMorphRow(
-                            row = row,
-                            mMetrics = mMetrics,
-                            wMetrics = wMetrics,
-                            progress = progress,
-                            clipTop = clipTop,
-                            selectedKey = selectedKey,
-                            todayKey = todayKey,
-                            flags = flags,
-                            showLunar = showLunar,
-                        )
-                    } else {
-                        MorphRow(
-                            row = row,
-                            metrics = mMetrics,
-                            progress = progress,
-                            selectedTop = selectedTop,
-                            clipTop = clipTop,
-                            heightDp = heightDp,
-                            selectedKey = selectedKey,
-                            todayKey = todayKey,
-                            flags = flags,
-                            showLunar = showLunar,
-                            density = density,
-                        )
-                    }
-                }
+                // ⚠️ **morph 只画被点中那一周这一行**（2026-09-27 重做）。
+                //
+                // 原来这里把 `source` 里"本月所有行 + 相邻月所有行"都画出来，各自算位移与
+                // 透明度做"让位"动画。实测（12 秒慢放逐帧）那套行定位**每一帧都是错的**：
+                // 数字叠成一片、星期栏画两遍、行的落点与冻结位置对不上 —— 用户：
+                // "动画是完全不对的，一开始就跳到上方了，而不是从日期的实际位置开始移动"。
+                //
+                // 现在只保留一行：它的起手位置就是**冻结时它真实所在的位置**（`row.top`
+                // 是日历区坐标、已含标题槽与星期栏与滚动偏移），终点是周条的位置
+                // （星期栏下沿）。其余行整块不动、也不画 —— 交班时由真实周层接管。
+                // 这样"从日期的实际位置开始移动"是构造上成立的，而不是靠调参凑出来。
+                val selectedRow = source.selectedRow ?: return@Box
+                val sp = progress()
+                CalendarDayGrid(
+                    rows = remember(selectedRow.week) { listOf(selectedRow.week) },
+                    anchorMonth = selectedRow.anchorMonth,
+                    metrics = mMetrics.lerp(wMetrics, sp),
+                    selectedKey = selectedKey,
+                    todayKey = todayKey,
+                    flags = flags,
+                    onDayClick = {},
+                    showAdjacent = true,
+                    adjacentAlpha = { sp },
+                    showLunar = showLunar,
+                    showDividers = true,
+                    dividerAboveFirst = selectedRow.showDivider,
+                    canvasCells = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            // 起手 = 冻结时的真实位置（`row.top`），终点 = 星期栏下沿
+                            val y = CalendarLayout.lerp(selectedRow.top, headH, progress())
+                            translationY = (y - clipTop()) * density
+                        },
+                )
                 source.labels.forEach { label ->
                     MonthFlowLabel(
                         cellW = cellW,
