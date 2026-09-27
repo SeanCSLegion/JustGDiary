@@ -128,8 +128,6 @@ fun CalendarDayGrid(
     // 就是 720 次 Resources 查询，正好落在"挂载新月份"那一帧（真机实测该帧 257ms）。
     // 提到行/网格这一层之后，一次组合只查 4 次。
     val scheme = MaterialTheme.colorScheme
-    // `Text` 组件的样式基准（`LocalTextStyle` 是 @Composable，只能取在组合里）
-    val baseTextStyle = LocalTextStyle.current
     val textMeasurer = rememberTextMeasurer(cacheSize = GRID_TEXT_CACHE)
     val textLayouts = MorphTextLayouts.shared
     val todayLabel = stringResource(R.string.index_today)
@@ -145,25 +143,6 @@ fun CalendarDayGrid(
         Canvas(modifier = Modifier.fillMaxSize()) {
             val rowPx = metrics.cellH * density
             val cellPx = metrics.cellW * density
-            // 真实格子里两个 Text 的**盒子高度**（dp）。它们决定 `Column` 的总高，
-            // 进而决定"日号 + 农历"这一组在格子里怎么居中 —— 量错就会贴在一起。
-            // span 用 `LocalTextStyle.current.merge(...)`：与 `Text` 组件的取值方式一致。
-            val lunarBoxH = if (showLunar && metrics.lunarAlpha > 0.01f) {
-                textMeasurer.measure(
-                    LUNAR_PROBE_TEXT,
-                    style = baseTextStyle.merge(
-                        TextStyle(fontSize = lunarFontSize, color = scheme.onSurfaceVariant),
-                    ),
-                ).size.height / density
-            } else {
-                0f
-            }
-            val dayBoxH = textMeasurer.measure(
-                "0",
-                style = baseTextStyle.merge(
-                    TextStyle(fontSize = dayFontSize, color = scheme.onSurface),
-                ),
-            ).size.height / density
             rows.forEachIndexed { row, week ->
                 week.forEachIndexed { col, date ->
                     val inMonth =
@@ -186,12 +165,9 @@ fun CalendarDayGrid(
                         onPrimary = scheme.onPrimary,
                         onSurface = scheme.onSurface,
                         onSurfaceVariant = scheme.onSurfaceVariant,
-                        // ⚠️ 这里**直接传量出来的盒子高度**，不要再过 `lunarBoxHDpFor`：
-                        // 那个函数是给 morph 层用的（它只有"流里的参考高度"，要按字号比例换算）；
-                        // 我们已经按真实字号量过了，再换算一次 = 二次缩放，农历会贴到日号上。
-                        lunarBoxHDp = lunarBoxH,
+                        // 排版完全由字号驱动，这里只需要告诉它"要不要画农历"
+                        hasLunar = showLunar && metrics.lunarAlpha > 0.01f,
                         t = 1f,
-                        dayBoxHDp = dayBoxH,
                     )
                 }
             }

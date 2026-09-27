@@ -786,9 +786,6 @@ private fun BlockCanvas(
     val measurer = rememberTextMeasurer(cacheSize = BLOCK_TEXT_CACHE)
     val textLayouts = MorphTextLayouts.shared
     val scheme = MaterialTheme.colorScheme
-    val baseTextStyle = LocalTextStyle.current
-    val dayFontSize = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
-    val lunarFontSize = DynamicTypeMetrics.calendarSp(metrics.lunarFont.dp, fontScale)
 
     Box(
         modifier = modifier
@@ -819,23 +816,6 @@ private fun BlockCanvas(
         Canvas(modifier = Modifier.fillMaxSize()) {
             val cellPx = metrics.cellW * density.density
             val rowPx = metrics.cellH * density.density
-            // 两个文字盒子高度：真实格子里 `Column[日号, 农历, 标记]` 的总高靠它们算
-            val dayBoxH = measurer.measure(
-                "0",
-                style = baseTextStyle.merge(
-                    TextStyle(fontSize = dayFontSize, color = scheme.onSurface),
-                ),
-            ).size.height / density.density
-            val lunarBoxH = if (showLunar && metrics.lunarAlpha > 0.01f) {
-                measurer.measure(
-                    "初一",
-                    style = baseTextStyle.merge(
-                        TextStyle(fontSize = lunarFontSize, color = scheme.onSurfaceVariant),
-                    ),
-                ).size.height / density.density
-            } else {
-                0f
-            }
             weeks.forEachIndexed { row, week ->
                 val rowYDp = row * metrics.cellH
                 // 分割线：与真组件同一条规则 —— 只画"这一行里真正属于当月的那几列"，
@@ -868,12 +848,6 @@ private fun BlockCanvas(
                         }
                     }
                 }
-                val layout = realCellLayout(
-                    rowYDp = rowYDp,
-                    m = metrics,
-                    lunarBoxHDp = if (metrics.lunarAlpha > 0.01f) lunarBoxH else 0f,
-                    dayBoxHDp = dayBoxH,
-                )
                 week.forEachIndexed { col, date ->
                     if (date.year != block.monthFirst.year ||
                         date.monthValue != block.monthFirst.monthValue
@@ -897,8 +871,7 @@ private fun BlockCanvas(
                         onPrimary = scheme.onPrimary,
                         onSurface = scheme.onSurface,
                         onSurfaceVariant = scheme.onSurfaceVariant,
-                        lunarBoxHDp = lunarBoxH,
-                        dayBoxHDp = dayBoxH,
+                        hasLunar = showLunar && metrics.lunarAlpha > 0.01f,
                         t = 1f,
                     )
                 }
