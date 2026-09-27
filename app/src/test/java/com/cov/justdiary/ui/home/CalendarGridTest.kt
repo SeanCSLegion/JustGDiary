@@ -98,6 +98,37 @@ class CalendarGridTest {
         assertEquals(2, CalendarGrid.columnOf(date, sunday))
     }
 
+    /**
+     * 周条那一周必须**由选中日推**（iOS `weekKey(selectedDate)`）：
+     * 点到露出来的下个月那几天时，当前月的 `weeks()` 里没有这一天 ——
+     * 旧写法会退回本月第一周，表现为"动画结束后周条跳到另一周"。
+     */
+    @Test
+    fun `week of a selected day follows the day even across months`() {
+        // 2026-10-01 是周四（周一为一周之始 → 这一周是 9/28–10/4，跨月）
+        val week = CalendarGrid.weekOf("2026-10-01", monday)
+        assertEquals(7, week.size)
+        assertEquals(LocalDate.of(2026, 9, 28), week.first())
+        assertEquals(LocalDate.of(2026, 10, 4), week.last())
+        assertTrue("这一周要包含选中日", week.any { DateUtil.dayKeyOf(it) == "2026-10-01" })
+        // 真正会出错的场景：**顶部大标题的月份 ≠ 点中那天所在的月**。
+        // 连续流可以滚到大标题已是 10 月、而屏幕上还露着 9 月下旬那几行，
+        // 此时点 9/27：它不在 10 月的周窗口里（窗口从 9/28 开始），
+        // 旧写法"在当月周列表里找、找不到退回第一周"就会把周条跳到 9/28 那一周。
+        val octoberWeeks = CalendarGrid.displayedWeeks(LocalDate.of(2026, 10, 1), monday)
+        assertTrue(
+            "10 月的周窗口里没有 9/27（旧写法正是在这里退回第一周）",
+            octoberWeeks.none { row -> row.any { DateUtil.dayKeyOf(it) == "2026-09-27" } },
+        )
+        val week927 = CalendarGrid.weekOf("2026-09-27", monday)
+        assertEquals("9/27 属于 9/21 那一周", LocalDate.of(2026, 9, 21), week927.first())
+        // 周日为一周之始也要对
+        val sundayWeek = CalendarGrid.weekOf("2026-10-01", sunday)
+        assertEquals(LocalDate.of(2026, 9, 27), sundayWeek.first())
+        // 非法 key 不炸
+        assertTrue(CalendarGrid.weekOf("", monday).isEmpty())
+    }
+
     @Test
     fun `weeks cache returns the same instance for the same month`() {
         val monthFirst = LocalDate.of(2026, 9, 1)

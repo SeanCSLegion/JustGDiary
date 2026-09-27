@@ -765,9 +765,12 @@ fun HomeScreen(
             // 那一条（第一排 1/2/3 月）就被切掉了（用户："有第一排日期有一点点遮挡"）。
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    // 唯一的裁剪边界 = 整屏：日历区自己不再裁，morph 层才能画到胶囊那一带。
-                    .clipToBounds(),
+                    .fillMaxSize(),
+                // ⚠️ **这里不能加 `clipToBounds()`**：`padding(Scaffold 的 innerPadding)`
+                // 把这一层压到状态栏下沿，一旦裁剪，年层放大后超出日区的那一条就切在那里
+                // （用户："月到年的第一排还是有被切的问题"）。不裁的话它可以一直画到窗口
+                // 顶部、从状态栏底下穿过去 —— 与 iOS 的 `hFull` 模型一致。
+                // 日历区自己该裁的地方（连续流的内容层）另有 clip，不受影响。
             ) {
                 // 日历区：位置与高度跟"顶栏占位"时**完全一致**（y = 顶栏高、高 = `bandH`），
                 // 所以月/周/年三态与两个 morph 的几何一行都不用改。
@@ -826,10 +829,14 @@ fun HomeScreen(
                         WeekLayer(
                             calendarW = calendarW,
                             weekStart = weekStart,
-                            week = weekOf(
-                                CalendarGrid.displayedWeeks(monthFirst, weekStart),
-                                selectedKey,
-                            ),
+                            // ⚠️ 周条显示的必须是**选中日所在的那一周**，不能"在当前月的
+                            // 周列表里找、找不到就退回第一周"：连续流里可以点到露出来的
+                            // 下个月那几天（比如流停在 9 月、点到 10 月 1 日），那时在
+                            // 9 月的周列表里根本找不到它 —— 旧写法会退回 9 月第一周，
+                            // 表现为"动画正确、动画结束后周视图突然跳到另一周"
+                            // （用户 2026-09-27 报的"有概率"就是这个，取决于点哪一天）。
+                            // iOS 用 `CalendarLayout.weekKey(selectedDate)`，同一条语义。
+                            week = CalendarGrid.weekOf(selectedKey, weekStart),
                             selectedKey = selectedKey,
                             todayKey = todayKey,
                             flags = flags,
@@ -1340,9 +1347,6 @@ private const val WEEK_STRIP_MAX_WIDTH_DP = 560f
 private const val WEEK_PAGE_THRESHOLD = 60f
 
 /** 周条形态下取选中日所在的那一周（找不到就退回第一行）。 */
-private fun weekOf(weeks: List<List<LocalDate>>, selectedKey: String): List<LocalDate> =
-    weeks.firstOrNull { row -> row.any { DateUtil.dayKeyOf(it) == selectedKey } } ?: weeks.first()
-
 /** 周条的无障碍描述：`2026年9月14日 周一 那一周`。 */
 @Composable
 private fun weekDescription(week: List<LocalDate>): String {

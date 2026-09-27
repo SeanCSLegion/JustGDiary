@@ -65,6 +65,20 @@ object CalendarGrid {
     }
 
     /**
+     * 选中日所在的那一周（7 天，可能跨月）。
+     *
+     * 周视图的周条用它 —— iOS 对应 `CalendarLayout.weekKey(selectedDate)`。
+     * ⚠️ **不能**改成"在当前月 `weeks()` 里找选中日、找不到就退回第一周"：
+     * 连续月历流里点到露出来的下个月那几天时，当前月的周列表里根本没有这一天，
+     * 于是会退回本月第一周，表现为"动画正确、动画结束后周条突然跳到另一周"。
+     */
+    fun weekOf(selectedKey: String, weekStart: String): List<LocalDate> {
+        val day = DateUtil.parseDayKey(selectedKey) ?: return emptyList()
+        val first = DateUtil.weekFirst(day, weekStart)
+        return (0 until 7).map { first.plusDays(it.toLong()) }
+    }
+
+    /**
      * 会实际绘制的行：从尾部删除"整行都不属于当月"的行，至少保留 1 行。
      *
      * 横屏高度不足时，这一裁剪决定了要画几行（进而决定格子高度）。
