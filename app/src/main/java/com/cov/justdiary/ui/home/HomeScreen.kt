@@ -931,8 +931,11 @@ fun HomeScreen(
                     // 就已经到 1 了 —— 这一段时间里 **morph 层和真实周层同时可见**，两块都画
                     // 那 7 个日号，只是位置上差几个像素，看起来就是"好多日号重叠起来了"
                     //（用户 2026-09-27 截图实锤）。morph 层到终点即让位，两者永不同时在场上。
-                    val weekSettled = mode != HomeViewMode.WEEK ||
-                        (!morphing && weekProgress.value >= 1f)
+                    // ⚠️ 前半句 `mode == WEEK` **不能省**：我一度写成 `mode != WEEK || …`，
+                    // 结果月视图与年视图下都常驻了一层周条（用户 2026-09-27 当场发现）。
+                    // 真实周层只在**周态**存在；月/年态下这一层必须完全不在场上。
+                    val weekSettled = mode == HomeViewMode.WEEK &&
+                        !morphing && weekProgress.value >= 1f
                     if (weekSettled) {
                         WeekLayer(
                             calendarW = calendarW,
