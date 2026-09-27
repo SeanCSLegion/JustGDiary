@@ -591,14 +591,16 @@ internal fun DrawScope.drawDayCell(
     val lunarGlyph = if (lunarBoxHDp > 0f) metrics.lunarFont else 0f
     // 两行之间留出 `GROUP_GAP`：那一小段就是"有日记"短横线的位置
     //（不给它留位，短横线会压在农历上；用户 2026-09-27："没有保留有日记的标记的位置"）。
-    val gap = if (lunarGlyph > 0f) CalendarLayout.GROUP_GAP else 0f
-    val groupH = dayGlyph + gap + lunarGlyph + MARK_H
+    // ⚠️ 顺序是「日号 → 有日记标记 → 农历」（用户 2026-09-27 实测指出：
+    // "有日记标记是在农历下面。但是，应该是在日号下面，农历上面"）。
+    val gap = CalendarLayout.GROUP_GAP
+    val groupH = dayGlyph + gap + MARK_H + gap + lunarGlyph
     // 整组在行内**严格居中**（不加 `LUNAR_TIGHTEN/2` 那类整体偏移 —— 用户实测指出
     // 它会让"选中圆不在分割线正中"）。
     val groupTopDp = rowY / density + (metrics.cellH - groupH) / 2f
     val dayCenterDp = groupTopDp + dayGlyph / 2f
-    val lunarCenterDp = groupTopDp + dayGlyph + gap + lunarGlyph / 2f
-    val markTopDp = groupTopDp + dayGlyph + gap + lunarGlyph
+    val markTopDp = groupTopDp + dayGlyph + gap
+    val lunarCenterDp = groupTopDp + dayGlyph + gap + MARK_H + gap + lunarGlyph / 2f
     val monthLayout = monthSideLayout ?: CellLayout(
         // 圆心 = 整组中心；圆直径（[CalendarLayout.monthPaneMetrics] 那边）也是按
         // "整组高 + 14" 撑开的，于是**月视图与周条的圆同尺寸、同排布**。

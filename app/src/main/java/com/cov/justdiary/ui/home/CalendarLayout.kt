@@ -235,15 +235,15 @@ object CalendarLayout {
         )
 
         /**
-         * 一整组内容的高度 = **日号字号 + 农历字号 + 标记余量**。
+         * 一整组内容的高度 = **日号 + 缝 + 标记 + 缝 + 农历**（顺序就是屏幕上从上到下的顺序）。
          *
          * ⚠️ 2026-09-27 改成"字号驱动"：以前用 `Text` 的盒子高（= 字号 × 主题行高，
          * 日号 27dp / 农历 24dp），两个盒子一叠比字形高出一大截，圆里的日号与农历
          * 就被行距撑得很开（用户："日号和农历似乎分得太开了，保留有日记标记的余量即可"）。
          */
         val contentH: Float
-            get() = dayFont + (if (lunarAlpha > 0.01f) lunarFont + GROUP_GAP else 0f) +
-                DIARY_MARK_ROW_H
+            get() = dayFont + GROUP_GAP + DIARY_MARK_ROW_H +
+                (if (lunarAlpha > 0.01f) GROUP_GAP + lunarFont else 0f)
 
         /** 农历那一行的**行盒**高度（0 表示不画）。[lunarCenterY] 仍以它为基准。 */
         val lunarLineH: Float
