@@ -1304,6 +1304,20 @@ private fun WeekStrip(
                 detectHorizontalDragGestures(
                     onDragStart = {
                         tracker.resetTracking()
+                        // ⚠️ 先停掉可能还在跑的落定动画，并把它的剩余量并进手指位移。
+                        //
+                        // iOS 的 `DragPagePager` 同样在拖动手势里独占偏移；不停的话动画会继续
+                        // 往旧目标写 `settleAnim`，与手指的 `dragDp` 叠加 → 「不跟手」。
+                        // 并进 `dragDp` 是为了让 `dragDp + settleAnim` 这个**总位移**保持连续
+                        //（直接清掉会视觉跳一下）。
+                        scope.launch {
+                            settleAnim.stop()
+                            val leftover = settleAnim.value
+                            if (leftover != 0f) {
+                                dragDp += leftover
+                                settleAnim.snapTo(0f)
+                            }
+                        }
                     },
                     onDragEnd = {
                         // 单位统一：位移是 dp，`VelocityTracker` 给 px/s
@@ -1318,8 +1332,15 @@ private fun WeekStrip(
                         )
                         val step = CalendarLayout.stepOf(target)
                         scope.launch {
+                            // ⚠️ **负号不能丢**：`step = +1` 是"翻到下一周"，内容要**左移**一页
+                            //（新的一周从右边进来），所以终点是 `-pageDp`。
+                            // 写成 `+step * pageDp` 的话，松手后内容先往反方向飞一页，
+                            // 落到终点再换数据 —— 用户看到的"滑动之后手离开，周视图会跳回
+                            // 前面，然后再跳到新的周"就是这个（iOS 那边是
+                            // `let delta = goNext ? -pageSize : pageSize`）。
+                            // 年份翻页 `commitPx = -step * pagePx` 也是同一个约定。
                             settleAnim.animateTo(
-                                targetValue = step * pageDp - dragDp,
+                                targetValue = -step * pageDp - dragDp,
                                 animationSpec = tween(
                                     durationMillis = if (step != 0) {
                                         CalendarLayout.DragPagerMath.PAGE_SETTLE_MS
