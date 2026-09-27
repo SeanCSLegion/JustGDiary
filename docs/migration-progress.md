@@ -1902,6 +1902,14 @@ LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
   `weekStripAlpha`（周条的淡出必须比内容区更陡）。
 - 全量 **416** 条 JVM 单测通过。
 
+### 截图证据（`docs/ui-audit/`）
+
+| 文件 | 内容 |
+| --- | --- |
+| `r6-1-continuous-flow-no-snap.png` | 左：月态静止；右：慢拖 260px 松手后**停在原地**（未吸附） |
+| `r6-2-month-week-morph.png` | 左：月→周 morph 的中间帧（标题淡出、选中行上移、内容顶上来）；右：周态终态 |
+| `r6-3-year-to-month.png` | 左：年→月 morph 的中间帧（网格从「10月」卡片长出来）；右：月态终态（下个月日期已就位） |
+
 ### 与 iOS 的两处刻意差异（平台要求，不是省事）
 
 1. 每一个日期都是**真实的 Compose 组件**（TalkBack 逐格可读），不是 Canvas；
