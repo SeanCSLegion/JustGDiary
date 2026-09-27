@@ -1469,6 +1469,11 @@ private fun SelectedMorphRow(
         // "一些分割线的动画还是不对"就是它。
         showDividers = true,
         dividerAboveFirst = row.showDivider,
+        // ⚠️ **必须与月流 / 周条走同一条 Canvas 路径**（用户 2026-09-27 报"月↔周切换时
+        // 农历明显有跳动"）。morph 原先用真组件 `CalendarDayCell`，它那套排版是
+        // `Column(居中, +3dp) [圆, 农历(-6dp), 标记]` —— 与新的"整组居中（日号→标记→农历）"
+        // 差着整整一段，于是交班（morph ↔ 真实图层）那一帧农历会跳 ~36dp。
+        canvasCells = true,
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -1507,6 +1512,7 @@ private fun MorphRow(
         showLunar = showLunar,
         showDividers = true,
         dividerAboveFirst = row.showDivider,
+        canvasCells = true,
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
