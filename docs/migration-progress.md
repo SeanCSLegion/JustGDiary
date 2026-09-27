@@ -2086,6 +2086,25 @@ iOS `MonthWeekMorphView` 是 `content().offset(y: contentOffset)`，其中
 morph 里漏传 → 小标题在交班时会突然由灰变蓝。现在 `MonthFlowMorphSource.Label` 带上
 `key`，morph 里按 `todayMonthKey` 传 `isCurrent`。
 
+## R10 · 月↔周的小标题：**有意偏离 iOS**，改成"有位移 + 与行同步淡入"
+
+用户先是选了"小标题是突然出现的，没有淡入"，随后自己复核了 iOS：
+
+> "对了，我看了一下 iOS 的版本，iOS 版就是小标题一开始就在最终位置的。那你不要参考
+> iOS 版了，这也是之前你说两个版本逻辑一致的原因。"
+
+确实如此 —— iOS `MonthWeekMorphView` 把小标题钉在终点、只用 `1 - clamp01(progress*2.2)`
+淡入，所以"逻辑一致"但观感就是"跳出来"。这次**有意不跟 iOS**：
+
+| | 之前（= iOS） | 现在 |
+| --- | --- | --- |
+| 位置 | 钉在终点（screen y 恒定） | **锚到它那个月第一行**当前的 y（`morphRowY`，与行同一套公式）**再叠加 `LABEL_RISE = 24dp` 的落位位移** |
+| 透明度 | `1 - clamp01(p * 2.2)`（很晚才淡入） | `1 - clamp01(p * 1.4)`（**与行同一条曲线**，标签和它的日期同时出现/消失） |
+
+`p = 0` 时两项位移都归零 → `label.bottom - labelBandH`，与连续流的排版**逐像素一致**
+（之前用"把 morph 停在 p=0"的办法验过 0 像素差，这条性质没有被破坏）。
+实测（慢放逐帧截图）：小标题在 morph **中段**就已经淡入并在落位，不再等到最后才冒出来。
+
 ### 单测抓到的两个真 bug（都已修）
 
 1. **矩形插值方向反了**：`lerpRect(source, target, t)` 在 `t = 1`（月侧）给的是**目标** ——

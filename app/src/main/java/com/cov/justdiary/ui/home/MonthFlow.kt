@@ -267,6 +267,18 @@ class MonthFlowLayout private constructor(
 private const val LABEL_TIGHT_GAP = 3f
 
 /**
+ * 月↔周 morph 里小标题**落位**的位移（dp）。
+ *
+ * ⚠️ 这是**有意偏离 iOS** 的一处。iOS 把小标题钉死在终点位置、只用 `1 - clamp01(2.2p)`
+ * 淡入；用户实测（并且自己在 iOS 上也复核过）："小标题一开始就在最终位置"，所以那个
+ * 版本只会"跳出来"。用户明确要求"不要参考 iOS 版了"，改成有位移。
+ *
+ * 位移方向：月→周时小标题**往上走**（与选中行升到周条同向），周→月时从上方落位。
+ * `p = 0` 时归零，所以两端仍与真实排版逐像素一致。
+ */
+private const val LABEL_RISE = 24f
+
+/**
  * 月份小标题：压在**当月 1 号那一列的正上方**（在这一列里居中，与日号同一个中心），
  * 并且紧贴 1 号那一行。
  *
@@ -368,6 +380,13 @@ data class MonthFlowMorphSource(
         val monthFirst: LocalDate,
         /** 月份键（`CalendarGrid.monthKey`）—— morph 里判 `isCurrent` 用。 */
         val key: Int,
+        /**
+         * 这个月**第一行**在 [MonthFlowMorphSource.rows] 里的下标。
+         *
+         * 小标题在 morph 里要**跟着它那一行一起移动**（用户："小标题好像没有做位置移动的
+         * 动画，所以才会感觉只有跳出来"），靠它找到锚点行。
+         */
+        val firstRowIndex: Int,
         /** 冻结时小标题**底边**在日历区坐标里的 y（紧贴日期数字上方）。 */
         val bottom: Float,
     )
@@ -987,6 +1006,7 @@ private fun morphSource(
             MonthFlowMorphSource.Label(
                 monthFirst = block.monthFirst,
                 key = block.key,
+                firstRowIndex = rows.size,
                 bottom = block.top - offsetDp + titleHeight + weekdayHeight - LABEL_TIGHT_GAP,
             ),
         )
@@ -1140,9 +1160,34 @@ fun MonthWeekMorph(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .graphicsLayer {
-                                translationY =
-                                    (label.bottom - source.labelBandH - clipTop()) * density
-                                alpha = 1f - CalendarLayout.clamp01(progress() * 2.2f)
+                                val p = progress()
+                                // ⚠️ 小标题**跟着它那个月的第一行一起移动**，而不是钉在终点。
+                                //
+                                // iOS 是把它钉死在终点位置、只用 `1 - clamp01(2.2p)` 淡入的；
+                                // 用户实测："小标题好像没有做位置移动的动画，所以才会感觉只有
+                                // 跳出来。并且淡入淡出是在其他日期移动之后才有的。"
+                                // 所以这里改成：
+                                //   · 位置 = 锚点行当前的 y − 带高 − 间隙（**两端仍然与真实排版
+                                //     逐像素一致**：`p = 0` 时锚点行回到冻结位置，正好等于
+                                //     `label.bottom - labelBandH`）；
+                                //   · 透明度与行**同一条曲线**（`1 - clamp01(p * 1.4)`），
+                                //     标签与它的日期同时出现、同时消失。
+                                val anchor = source.rows.getOrNull(label.firstRowIndex)
+                                val y = if (anchor == null) {
+                                    label.bottom - source.labelBandH
+                                } else {
+                                    morphRowY(
+                                        row = anchor,
+                                        isSelected = label.firstRowIndex == source.selectedIndex,
+                                        selectedTop = selectedTop,
+                                        headH = headH,
+                                        heightDp = heightDp,
+                                        rowH = source.rowH,
+                                        p = p,
+                                    ) - LABEL_TIGHT_GAP - source.labelBandH
+                                } - LABEL_RISE * p
+                                translationY = (y - clipTop()) * density
+                                alpha = 1f - CalendarLayout.clamp01(p * 1.4f)
                             },
                     )
                 }
@@ -1251,6 +1296,26 @@ private fun SelectedMorphRow(
                 translationY = (y - clipTop()) * density
             },
     )
+}
+
+/**
+ * morph 里某一行**当前**画在哪儿（日历区坐标，dp）。
+ *
+ * 与 [SelectedMorphRow] / [MorphRow] 里那两条 `translationY` 是**同一套公式** ——
+ * 小标题靠它跟着自己那一行走。
+ */
+private fun morphRowY(
+    row: MonthFlowMorphSource.Row,
+    isSelected: Boolean,
+    selectedTop: Float,
+    headH: Float,
+    heightDp: Float,
+    rowH: Float,
+    p: Float,
+): Float = when {
+    isSelected -> CalendarLayout.lerp(row.top, headH, p)
+    row.top < selectedTop -> row.top - p * (row.top + rowH)
+    else -> row.top + p * (heightDp - row.top)
 }
 
 /** morph 里**其余的行**：位置与透明度全部在延迟 lambda 里读进度（不触发重组）。 */
