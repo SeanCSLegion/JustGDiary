@@ -550,6 +550,13 @@ internal fun DrawScope.drawDayCell(
     monthSideLayout: CellLayout? = null,
     /** 覆盖"年侧"那份排版（迷你月：圆心 = 格心）。 */
     miniSideLayout: CellLayout? = null,
+    /**
+     * `true` = **日号靠左、农历靠右右对齐**（用户 2026-09-27："把农历放右边，右对齐"）。
+     *
+     * 只改横向落点：日号仍在左边那份的垂直中心上（即圆心/组心），农历贴右边线。
+     * `false`（默认）= 日号居中、农历在它下方（月视图与周条的既有排布）。
+     */
+    lunarRightAligned: Boolean = false,
     alpha: Float = 1f,
     /** 网格左边缘的 x（px）。 */
     originX: Float = 0f,
@@ -643,6 +650,9 @@ internal fun DrawScope.drawDayCell(
     // `metrics.dayFont` 是逐帧连续插值的 —— 不量化就每帧全 miss，每格每帧都要重新整形
     //（31 格 × 2 次 ≈ 60 次/帧，实测占 2~5ms）。量化到 0.5dp 后同一档字号复用同一条缓存，
     // 视觉上最多差 0.5dp（iOS 自己也是按 0.5pt 量化的）。
+    // 日号的横向中心：默认格心；"农历靠右"模式下挪到偏左（0.30 格宽）
+    // 左边给日号：`0.24 格宽` —— 与右边农历之间留出约 4dp 的缝（56dp 格宽下实测刚好不撞）
+    val dayX = if (lunarRightAligned) originX + metrics.cellW * 0.24f * density else cx
     val num = textLayouts.layout(
         measurer = measurer,
         text = day.dayOfMonth.toString(),
@@ -653,7 +663,7 @@ internal fun DrawScope.drawDayCell(
     drawText(
         textLayoutResult = num,
         topLeft = Offset(
-            x = cx - num.size.width / 2f,
+            x = dayX - num.size.width / 2f,
             y = dayCy - num.size.height / 2f,
         ),
         alpha = alpha,
@@ -667,12 +677,20 @@ internal fun DrawScope.drawDayCell(
             fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.lunarFont).dp, fontScale),
             color = textColor,
         )
+        // "农历靠右"模式：贴右内边距右对齐，且与日号同一水平线（都在组心上）
+        val lunarX = if (lunarRightAligned) {
+            originX + (metrics.cellW - CELL_SIDE_PAD) * density - lunar.size.width
+        } else {
+            cx - lunar.size.width / 2f
+        }
+        val lunarY = if (lunarRightAligned) {
+            dayCy - lunar.size.height / 2f
+        } else {
+            layout.lunarCenterY * density - lunar.size.height / 2f
+        }
         drawText(
             textLayoutResult = lunar,
-            topLeft = Offset(
-                x = cx - lunar.size.width / 2f,
-                y = layout.lunarCenterY * density - lunar.size.height / 2f,
-            ),
+            topLeft = Offset(x = lunarX, y = lunarY),
             alpha = alpha * metrics.lunarAlpha,
         )
     }
@@ -682,7 +700,7 @@ internal fun DrawScope.drawDayCell(
         val markTop = CalendarLayout.lerp(layout.markTop * density, miniMarkTop, miniBlend)
         drawRoundRect(
             color = (if (isSelected) onPrimary else primary).copy(alpha = alpha),
-            topLeft = Offset(cx - markW / 2f * density, markTop),
+            topLeft = Offset(dayX - markW / 2f * density, markTop),
             size = Size(markW * density, 2f * density),
             cornerRadius = CornerRadius(1f * density),
         )
@@ -777,6 +795,9 @@ private fun cellLayout(rowY: Float, m: CalendarLayout.DayMetrics, lunarBoxHDp: F
         markTop = top + m.circleDiameter + lunarBoxHDp + 1f,
     )
 }
+
+/** "农历靠右"模式里离格子右边线的内边距（dp）。 */
+private const val CELL_SIDE_PAD = 4f
 
 /** "有日记"标记那一行的高度：1dp padding + 2dp 短横线。 */
 private const val MARK_H = 3f
