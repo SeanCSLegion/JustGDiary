@@ -312,8 +312,6 @@ private fun DiaryAlertDialog(
     )
 }
 
-private val SHARE_CHOOSER_TITLE: String
-    @Composable get() = stringResource(R.string.share_chooser_title)
 
 private val OK_LABEL: String
     @Composable get() = stringResource(R.string.ok)
@@ -344,16 +342,12 @@ private val DISCARD_MESSAGE: String
     @Composable get() = stringResource(R.string.editor_discard_msg)
 private val CROSS_DAY_TITLE: String
     @Composable get() = stringResource(R.string.editor_cross_day_title)
-private val CROSS_DAY_MESSAGE: String
-    @Composable get() = stringResource(R.string.editor_cross_day_msg)
 private val SAVE_FAILED_TITLE: String
     @Composable get() = stringResource(R.string.editor_save_failed_title)
 private val SAVE_FAILED_MESSAGE: String
     @Composable get() = stringResource(R.string.editor_save_failed_msg)
 private val DELETE_TITLE: String
     @Composable get() = stringResource(R.string.editor_delete_title)
-private val DELETE_MESSAGE: String
-    @Composable get() = stringResource(R.string.editor_delete_msg)
 private val IMAGE_FAILED_TITLE: String
     @Composable get() = stringResource(R.string.editor_image_failed_title)
 private val IMAGE_FAILED_MESSAGE: String

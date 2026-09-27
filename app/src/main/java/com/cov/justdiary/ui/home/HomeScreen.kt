@@ -554,7 +554,11 @@ fun HomeScreen(
             fontScale = fontScale,
             showLunar = showLunarHere,
         )
-        val flowLayout = remember(weekStart, rowH) { MonthFlowLayout.of(weekStart, rowH) }
+        // ⚠️ 行高先量化到 0.5dp 再建版面：窗口 resize / 分屏拖动 / 系统字号动画期间
+        // `rowH` 是**逐帧连续变化**的，直接当 key 会让 `MonthFlowLayout.of` 每帧重建
+        // 2412 个块（每次都是 2412 次 `LocalDate.of` + 列表分配）。量化后最多每 0.5dp 重建一次。
+        val rowHKey = kotlin.math.round(rowH * 2f) / 2f
+        val flowLayout = remember(weekStart, rowHKey) { MonthFlowLayout.of(weekStart, rowHKey) }
         val viewportH = maxOf(0f, bandH - titleH - weekdayH)
 
         // 年历的几何：年 morph 的终点是**当前月那张卡片的迷你网格**。
@@ -564,7 +568,6 @@ fun HomeScreen(
                 CalendarLayout.yearCardRect(monthFirst.monthValue, calendarW, bandH),
             )
         }
-        val monthTitle = monthTitleText(monthFirst, dateFormats, context)
         val titleText: (LocalDate) -> String = remember(dateFormats, context) {
             { month -> monthTitleText(month, dateFormats, context) }
         }
@@ -844,7 +847,12 @@ fun HomeScreen(
                             // 表现为"动画正确、动画结束后周视图突然跳到另一周"
                             // （用户 2026-09-27 报的"有概率"就是这个，取决于点哪一天）。
                             // iOS 用 `CalendarLayout.weekKey(selectedDate)`，同一条语义。
-                            week = CalendarGrid.weekOf(selectedKey, weekStart),
+                            // `List` 在 Compose 里按**实例**比较，每次重组新建会让
+                            // `WeekLayer → WeekStrip → 3×CalendarDayGrid` 全部重跑
+                            //（21 格 × 农历 + 字符串），所以这里必须 remember。
+                            week = remember(selectedKey, weekStart) {
+                                CalendarGrid.weekOf(selectedKey, weekStart)
+                            },
                             selectedKey = selectedKey,
                             todayKey = todayKey,
                             flags = flags,
@@ -1045,7 +1053,6 @@ private fun YearLayer(
         todayKey = todayKey,
         flags = flags,
         weekStart = weekStart,
-        showLunar = showLunar,
         hiddenMonth = hiddenMonth,
         yearTitle = dateFormats?.year(year) ?: context.getString(R.string.date_year, year),
         zodiacLabel = dateFormats?.yearZodiac(year).orEmpty(),
@@ -1381,8 +1388,6 @@ private fun WeekStrip(
 /** 周条在宽窗口里的宽度上限（与当日面板的正文列同一个量级）。 */
 private const val WEEK_STRIP_MAX_WIDTH_DP = 560f
 
-/** 横向拖动翻周的判定阈值（dp）。 */
-private const val WEEK_PAGE_THRESHOLD = 60f
 
 /** 周条形态下取选中日所在的那一周（找不到就退回第一行）。 */
 /** 周条的无障碍描述：`2026年9月14日 周一 那一周`。 */
@@ -1541,10 +1546,6 @@ private fun monthTitleText(
     ?: context.getString(R.string.date_month_short, monthFirst.monthValue)
 
 // ---------------------------------------------------------------------- 日历
-
-/** 年历 morph 期间月层的不透明度曲线（对应 iOS `1 - clamp01((p - 0.45) / 0.55)`）。 */
-private fun fadeProgress(progress: Float): Float =
-    CalendarLayout.clamp01((progress - 0.45f) / 0.55f)
 
 // ---------------------------------------------------------------------- 当日面板
 
@@ -1737,7 +1738,11 @@ private fun DayBlockCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            ContentFlatten.parseContent(block.contentJson).forEach { part ->
+            // ⚠️ 必须 remember：解析是 JSON 解码 +（v1 回退时）抛异常 + 逐 part `copy`，
+            // 长日记 5~30ms，而它在**组合期**同步跑 —— 不 remember 的话每次重组
+            //（选中日变化、切周态、数据刷新）都要重来一遍。
+            val parts = remember(block.contentJson) { ContentFlatten.parseContent(block.contentJson) }
+            parts.forEach { part ->
                 DayPanelPart(part = part, imageLoader = imageLoader)
             }
         }

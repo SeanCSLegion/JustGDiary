@@ -241,7 +241,13 @@ class MonthFlowLayout private constructor(
             val key = "$weekStart#${(h * 100f).roundToInt()}"
             cache[key]?.let { return it }
             val built = MonthFlowLayout(weekStart, h, buildBlocks(weekStart, h))
-            if (cache.size > 8) cache.clear()
+            // ⚠️ 别写成 `cache.clear()`：窗口 resize / 分屏拖动 / 字号动画期间行高逐帧变化，
+        // 整张清空会让**上一帧的行高**也一起丢掉，下一帧连一次命中都没有。
+        // 按插入顺序淘汰最老的一条即可。
+        while (cache.size > 8) {
+            val oldest = cache.keys.firstOrNull() ?: break
+            cache.remove(oldest)
+        }
             cache[key] = built
             return built
         }
@@ -281,7 +287,6 @@ fun MonthFlowLabel(
     cellW: Float,
     /** 小标题所在的列（0…6）。 */
     column: Int,
-    bandH: Float,
     text: String,
     modifier: Modifier = Modifier,
     isCurrent: Boolean = false,
@@ -669,7 +674,6 @@ private fun MonthFlowBlock(
         MonthFlowLabel(
             cellW = cellW,
             column = DateUtil.weekdayIndex(block.monthFirst, weekStart),
-            bandH = labelBandH,
             text = label,
             compact = compact,
             modifier = Modifier
@@ -860,10 +864,11 @@ private suspend fun settle(
     velocityDpPerSec: Float,
 ) {
     val maxOff = layout.maxOffset(viewportH)
-    val projected = origin - translationDp - velocityDpPerSec * MonthFlowPhysics.PROJECTION_SECONDS
     val target = MonthFlowPhysics.projectedTarget(origin, translationDp, velocityDpPerSec, maxOff)
     val initial = MonthFlowPhysics.initialVelocity(origin, target, velocityDpPerSec)
     if (DebugFlags.morphLog) {
+        // 投影值只给这条日志用 —— 放进开关里，关掉调试时不做这次乘法。
+        val projected = origin - translationDp - velocityDpPerSec * MonthFlowPhysics.PROJECTION_SECONDS
         Log.app.d(
             "monthflow fling: v=%.0fdp/s 拖了%.0fdp 预测落点%.0fdp（夹取后%.0f，上限%.0f）".format(
                 velocityDpPerSec, translationDp, projected, target, maxOff,
@@ -1171,7 +1176,6 @@ fun MonthWeekMorph(
                     MonthFlowLabel(
                         cellW = cellW,
                         column = DateUtil.weekdayIndex(label.monthFirst, weekStart),
-                        bandH = source.labelBandH,
                         text = labelText(label.monthFirst),
                         isCurrent = label.key == todayMonthKey,
                         modifier = Modifier
@@ -1186,11 +1190,13 @@ fun MonthWeekMorph(
                                 // ⚠️ 不能用 iOS 那条 `1 - clamp01(p * 2.2)`：那会让它在
                                 // `p < 0.45` 才开始出现、`p < 0.2` 才看得清，别的日期都动完了
                                 // 它才冒出来 —— 用户否掉两次的就是这个观感。
+                                // （这里原本**多写了一行** `alpha = 1 - clamp01(progress() * 2.2f)`，
+                                //   把上面的值覆盖掉了，等于用户否掉的那版一直在生效；
+                                //   2026-09-27 清理时删掉。）
                                 val pp = progress()
                                 alpha = CalendarLayout.clamp01((1f - pp) * 2f)
                                 translationY =
                                     (label.bottom - source.labelBandH - clipTop()) * density
-                                alpha = 1f - CalendarLayout.clamp01(progress() * 2.2f)
                             },
                     )
                 }
@@ -1241,7 +1247,10 @@ private fun SelectedMorphRow(
     val density = LocalDensity.current.density
     val metrics = remember(p, mMetrics, wMetrics) { mMetrics.lerp(wMetrics, p) }
     CalendarDayGrid(
-        rows = listOf(row.week),
+        // ⚠️ 必须 remember：这一行是 morph 里唯一在**组合期**逐帧重组的（行高/字号要跟着 p 走），
+        // 而 `List` 在 Compose 里按实例比较 —— 每帧新建 `listOf(...)` 会让
+        // `CalendarDayGrid` 连同 7 个格子每帧全量重组（各自 4 次 stringResource + 农历 + 标题拼接）。
+        rows = remember(row.week) { listOf(row.week) },
         anchorMonth = row.anchorMonth,
         metrics = metrics,
         selectedKey = selectedKey,

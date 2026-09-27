@@ -40,25 +40,9 @@ object CalendarLayout {
      */
     const val MORPH_DURATION_MS = 600
 
-    /** `-slow-morph` / `SLOW_MORPH=1` 下的调试慢放时长。 */
-    const val SLOW_MORPH_DURATION_MS = 3000
-
     /** 减弱动态效果时的时长（线性）。 */
     const val REDUCED_MORPH_DURATION_MS = 180
 
-    /**
-     * **M3 `easing.emphasized`** = `cubic-bezier(0.2, 0, 0, 1)`。
-     *
-     * 数值取自 material3 1.4.0 的官方令牌实现（`MotionTokens.EasingEmphasizedCubicBezier`）；
-     * 首轮用的 `timingCurve(0.2, 0.75, 0.3, 1.0)` 是 iOS 的曲线，不属于 Material。
-     */
-    val M3_EMPHASIZED = floatArrayOf(0.2f, 0f, 0f, 1f)
-
-    /**
-     * **M3 `easing.emphasized.decelerate`** = `cubic-bezier(0.05, 0.7, 0.1, 1)`。
-     *
-     * 用于"进入"方向的大面积过渡（`MotionTokens.EasingEmphasizedDecelerateCubicBezier`）。
-     */
     /**
      * **iOS 的 morph 曲线**：`CalendarLayout.morphSlideAnimation` =
      * `.timingCurve(0.2, 0.75, 0.3, 1.0, duration: morphDuration)`。
@@ -77,7 +61,6 @@ object CalendarLayout {
      * 两者都是 **M3 duration token**：`medium1 = 250`、`medium2 = 300`。
      */
     const val PAGE_SETTLE_DURATION_MS = 300
-    const val QUICK_SETTLE_DURATION_MS = 250
 
     /**
      * 竖屏：首页顶栏高度。
@@ -97,7 +80,6 @@ object CalendarLayout {
     const val COMPACT_MONTH_TITLE_H = 34f
     const val COMPACT_WEEKDAY_HEADER_H = 26f
 
-    /** 周条行高与周态日期标题行。 */
     /**
      * 周条高度。
      *
@@ -149,7 +131,7 @@ object CalendarLayout {
     /**
      * 不画农历时的每行最小高度（规范 §5.3 的第二档）。
      *
-     * ⚠️ 原来这里与 [MINIMUM_ROW_HEIGHT] 共用 44，导致 `perRow ∈ [38, 44)` 被误判成
+     * ⚠️ 原来这里与"带农历的下沿"共用 44，导致 `perRow ∈ [38, 44)` 被误判成
      * "连一行都放不下"、错误降级为周条。
      */
     const val NO_LUNAR_ROW_HEIGHT = 38f
@@ -173,9 +155,6 @@ object CalendarLayout {
      * 需要更多行时不再拉高格子，而是**让日历区整体变高**（行数 × 行高）。
      */
     const val PORTRAIT_CELL_H = 56f
-
-    /** 竖屏日历区的绝对下限（低于它就没有可用的月历了）。 */
-    const val PORTRAIT_MIN_AREA_H = 240f
 
     /**
      * 月格行高的**安全上限**（dp）。
@@ -219,7 +198,6 @@ object CalendarLayout {
 
     /** 矩形（左上角 + 宽高），对应 iOS 的 `CGRect`。 */
     data class Rect(val x: Float, val y: Float, val w: Float, val h: Float) {
-        val maxX: Float get() = x + w
         val maxY: Float get() = y + h
 
         fun lerp(other: Rect, t: Float): Rect = Rect(
@@ -279,12 +257,8 @@ object CalendarLayout {
      * 调用方传入的是"顶栏之外的全部可用高"（竖屏）或"分栏左栏的可用高"。月 / 年两态都是
      * **整屏视图**，日记预览只在周态与横屏分栏里出现，所以这里有多少给多少。
      */
-    fun monthAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float =
+    fun monthAreaHeight(availableH: Float): Float =
         availableH.coerceAtLeast(0f)
-
-    /** 旧名保留（旧调用点仍可用），语义等同 [monthAreaHeight]。 */
-    fun portraitAreaHeight(availableH: Float, rows: Int = MONTH_ROWS): Float =
-        monthAreaHeight(availableH, rows)
 
     /**
      * 月格的行高：**按固定 [MONTH_ROWS]（6）行等分，不封顶**。
@@ -299,31 +273,15 @@ object CalendarLayout {
      */
     fun cellHeightFor(
         areaH: Float,
-        rows: Int = MONTH_ROWS,
         headerH: Float = BIG_TITLE_H + WEEKDAY_HEADER_H,
-        preferred: Float = PORTRAIT_CELL_H,
     ): Float = ((areaH - headerH) / MONTH_ROWS).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
 
     /**
-     * 竖屏行高：**由列宽推出**，让"上下间隔"与"左右间隔"接近。
-     *
-     * 用户真机反馈："目前的日期上下间隔太大了，参考左右间隔来设置上下间隔。"
-     * 原因是行高被"把整页均分给行数"算成了 114dp（5 行月），而列宽只有 ~51dp ——
-     * 行距是列距的两倍多，看着就散。
-     *
-     * 1.2 这个系数：设计稿的 `PORTRAIT_CELL_H = 56` 对应 51dp 列宽（≈1.1），
-     * iOS 参考图约 1.34，取中间偏设计稿。
+     * 月格字号的上限（[monthMetrics] / [monthPaneMetrics] 与 mini 月都用这一组值）。
+     * 上限而不是定值：格子够大时字号不再跟着长，否则一行只放得下两三个数字。
      */
-    const val CELL_H_PER_COL_W = 1.2f
-
-    /** 月格字号的上限（`monthMetrics` 里的 `clamp` 用的是同一组值）。 */
     const val DAY_FONT_MAX = 20f
     const val LUNAR_FONT_MAX = 11f
-
-    /**
-     * 内联月份标签往首行留白里下探多少 dp（标签行高度为 0，靠这个偏移落在 1 号上方）。
-     */
-    const val COMPACT_LABEL_DROP = 6f
 
     /** 日号与农历之间的空档要收掉多少 dp（圆底比数字本身高出一截）。 */
     const val LUNAR_TIGHTEN = 6f
@@ -371,7 +329,7 @@ object CalendarLayout {
         headerH: Float = BIG_TITLE_H + WEEKDAY_HEADER_H,
     ): DayMetrics = monthPaneMetrics(
         cellW = monthCellW(width),
-        cellH = cellHeightFor(areaH, rows, headerH),
+        cellH = cellHeightFor(areaH, headerH),
         showLunar = showLunar,
     )
 
@@ -578,10 +536,6 @@ object CalendarLayout {
         }
     }
 
-    /** 横屏日历区的高度：`max(220, screenH - topPad - bottomClearance)`。 */
-    fun landscapePaneHeight(screenH: Float, topPad: Float, bottomClearance: Float): Float =
-        max(220f, screenH - topPad - bottomClearance)
-
     // ------------------------------------------------------------------ 绘制几何（DayDraw）
 
     fun cellCenterX(col: Int, cellW: Float): Float = (col + 0.5f) * cellW
@@ -746,7 +700,6 @@ object CalendarLayout {
         progress: Float,
         source: Rect,
         target: Rect,
-        rowCount: Int,
         sourceMetrics: DayMetrics,
         showLunar: Boolean,
     ): YearMonthGridMorph {

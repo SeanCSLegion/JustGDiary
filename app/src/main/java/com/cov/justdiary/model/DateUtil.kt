@@ -37,8 +37,29 @@ object DateUtil {
     fun dayKeyOf(instant: Instant, zone: ZoneId = ZoneId.systemDefault()): String =
         dayKeyOf(instant.atZone(zone).toLocalDate())
 
-    fun dayKeyOf(date: LocalDate): String =
-        String.format(DAY_KEY_PATTERN, date.year, date.monthValue, date.dayOfMonth)
+    fun dayKeyOf(date: LocalDate): String {
+        // ⚠️ 别改回 `String.format`：月视图一次重组要拼 240~320 个日期键
+        //（每格 isSelected/isToday/hasDiary/无障碍各一次），年历一次绘制 365 个。
+        // `String.format` 每次都要建 Formatter 并解析格式串，比手写零填充慢一到两个数量级。
+        val y = date.year
+        val m = date.monthValue
+        val d = date.dayOfMonth
+        // 年号同样要补到 4 位（`%04d`）：`DateUtilTest` 钉住了 0999-12-31 这种边界。
+        return StringBuilder(10)
+            .apply {
+                if (y < 1000) {
+                    append('0')
+                    if (y < 100) {
+                        append('0')
+                        if (y < 10) append('0')
+                    }
+                }
+            }
+            .append(y).append('-')
+            .append(if (m < 10) "0" else "").append(m).append('-')
+            .append(if (d < 10) "0" else "").append(d)
+            .toString()
+    }
 
     /**
      * 按"日记日"规则把 UTC 毫秒换算成 `day_key`：本地小时 < [dayStartHour] 时算前一天。

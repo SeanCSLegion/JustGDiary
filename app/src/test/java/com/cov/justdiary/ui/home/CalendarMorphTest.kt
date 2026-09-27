@@ -22,7 +22,7 @@ class CalendarMorphTest {
     /** Pixel 10 Pro AVD 的首页内容区可用高度（见 `CalendarLayoutTest`）。 */
     private val portraitH = 796f
     /** 月度整屏区高：可用高 − 顶栏 52（与 `HomeScreen` 一致）。 */
-    private val monthAreaH = CalendarLayout.monthAreaHeight(portraitH - 52f, rows = 6)
+    private val monthAreaH = CalendarLayout.monthAreaHeight(portraitH - 52f)
     /** 月层**实际**网格高 = 行数 × 行高（行高 = (区高 − 大标题槽 − 星期栏) / 6）。 */
     private val cellH = CalendarLayout.cellHeightFor(monthAreaH)
     private val gridH = CalendarLayout.monthGridHeight(6, cellH)
@@ -41,44 +41,6 @@ class CalendarMorphTest {
     private val miniGrid = CalendarLayout.miniGridRect(
         CalendarLayout.yearCardRect(1, portraitW, yearHeight),
     )
-
-    // ------------------------------------------------------------------ 年 ↔ 月
-
-    @Test
-    fun `year month morph starts exactly at the month grid`() {
-        val state = CalendarLayout.yearMonthMorph(0f, miniGrid, fullGrid, showLunar = true)
-
-        assertEquals(1f, state.t, 1e-6f)
-        assertEquals(fullGrid.x, state.grid.x, 1e-3f)
-        assertEquals(fullGrid.y, state.grid.y, 1e-3f)
-        assertEquals(fullGrid.w, state.grid.w, 1e-3f)
-        assertEquals(fullGrid.h, state.grid.h, 1e-3f)
-        // 落点必须与真实图层同源：cellH / dayFont 与 monthMetrics 完全一致
-        val real = CalendarLayout.monthMetrics(portraitW, monthAreaH, showLunar = true)
-        assertEquals(real.cellH, state.metrics.cellH, 1e-3f)
-        assertEquals(real.dayFont, state.metrics.dayFont, 1e-3f)
-        assertEquals(1f, state.lunarAlpha, 1e-6f)
-        assertEquals(1f, state.dividerAlpha, 1e-6f)
-        // 年历层完全隐藏
-        assertEquals(0f, state.yearOpacity, 1e-6f)
-        assertEquals(0f, state.sourceMiniTitleOpacity, 1e-6f)
-    }
-
-    @Test
-    fun `year month morph ends exactly at the mini month grid`() {
-        val state = CalendarLayout.yearMonthMorph(1f, miniGrid, fullGrid, showLunar = true)
-
-        assertEquals(0f, state.t, 1e-6f)
-        assertEquals(miniGrid.x, state.grid.x, 1e-3f)
-        assertEquals(miniGrid.y, state.grid.y, 1e-3f)
-        assertEquals(miniGrid.w, state.grid.w, 1e-3f)
-        assertEquals(miniGrid.h, state.grid.h, 1e-3f)
-        assertEquals(0f, state.lunarAlpha, 1e-6f)
-        assertEquals(0f, state.dividerAlpha, 1e-6f)
-        assertEquals(1f, state.yearOpacity, 1e-6f)
-        assertEquals(1f, state.yearScale, 1e-6f)
-        assertEquals(1f, state.sourceMiniTitleOpacity, 1e-6f)
-    }
 
     /**
      * 翻页方向：**向下拖回上一个月、向上拖到下一个月**。
@@ -121,40 +83,31 @@ class CalendarMorphTest {
         )
     }
 
+    /**
+     * 月层与年层的透明度必须**互补**：任一帧至少有一层可见，否则 morph 前段会整屏空白。
+     *
+     * 实际曲线就是 `CalendarLayout.yearLayerOpacity`（月层用 `1 - 它`），这条测试把它钉住。
+     */
     @Test
-    fun `year layer opacity and scale ramp up with progress`() {
-        // 两层交叉淡入淡出的前提：任一帧都至少有一层可见
+    fun `year layer opacity is complementary to the month layer`() {
         for (step in 0..20) {
             val p = step / 20f
-            val state = CalendarLayout.yearMonthMorph(p, miniGrid, fullGrid, showLunar = true)
             val monthAlpha = 1f - p
-            assertTrue(
-                "p=$p 时两层都不可见（月 $monthAlpha / 年 ${state.yearOpacity}）",
-                monthAlpha > 0f || state.yearOpacity > 0f,
-            )
+            val yearAlpha = CalendarLayout.yearLayerOpacity(p)
+            assertTrue("p=$p 时两层都不可见（月 $monthAlpha / 年 $yearAlpha）", monthAlpha > 0f || yearAlpha > 0f)
         }
-        val middle = CalendarLayout.yearMonthMorph(0.5f, miniGrid, fullGrid, showLunar = true)
-        assertEquals(0.5f, middle.t, 1e-6f)
-        assertEquals(1f + 0.5f * 0.6f, middle.yearScale, 1e-6f)
-        // 年层从 p=0.25 就淡入（不是 0.45）：月层的淡出是 1-p，
-        // 两条曲线必须在整段区间里至少有一层可见（否则 morph 前段整屏空白）
-        assertEquals((0.5f - 0.25f) / 0.75f, middle.yearOpacity, 1e-4f)
-        // 农历与分隔线的淡入都晚于中点
-        assertEquals(0f, middle.lunarAlpha, 1e-6f)
-        assertEquals(0f, middle.dividerAlpha, 1e-6f)
-
-        var previousOpacity = -1f
-        var previousScale = Float.MAX_VALUE
-        var previousWidth = Float.MAX_VALUE
+        // 端点：月态 p=0 年层不可见；年态 p=1 完全可见
+        assertEquals(0f, CalendarLayout.yearLayerOpacity(0f), 1e-6f)
+        assertEquals(1f, CalendarLayout.yearLayerOpacity(1f), 1e-6f)
+        // 从 p=0.25 开始淡入（不是 0.45），否则前段会有一段"两层都很淡"
+        assertEquals(0f, CalendarLayout.yearLayerOpacity(0.25f), 1e-6f)
+        assertTrue("0.5 处年层要过半可见", CalendarLayout.yearLayerOpacity(0.5f) > 0.3f)
+        // 单调不减
+        var prev = -1f
         for (step in 0..20) {
-            val p = step / 20f
-            val state = CalendarLayout.yearMonthMorph(p, miniGrid, fullGrid, showLunar = true)
-            assertTrue("年历层透明度应单调不减", state.yearOpacity >= previousOpacity - 1e-6f)
-            assertTrue("年历缩放应单调不增", state.yearScale <= previousScale + 1e-6f)
-            assertTrue("网格宽度应单调不增（月格 402 → 迷你月宽约 107）", state.grid.w <= previousWidth + 1e-3f)
-            previousOpacity = state.yearOpacity
-            previousScale = state.yearScale
-            previousWidth = state.grid.w
+            val v = CalendarLayout.yearLayerOpacity(step / 20f)
+            assertTrue("年层透明度应单调不减", v >= prev - 1e-6f)
+            prev = v
         }
     }
 
@@ -173,7 +126,7 @@ class CalendarMorphTest {
         val rows = 5
 
         // p = 0（月侧）：源矩形原样、字号就是月格字号
-        val atMonth = CalendarLayout.yearMonthGridMorph(0f, source, target, rows, flowMetrics, true)
+        val atMonth = CalendarLayout.yearMonthGridMorph(0f, source, target, flowMetrics, true)
         assertEquals(1f, atMonth.t, 1e-6f)
         assertEquals(source.x, atMonth.rect.x, 1e-3f)
         assertEquals(source.y, atMonth.rect.y, 1e-3f)
@@ -185,7 +138,7 @@ class CalendarMorphTest {
         assertEquals(1f, atMonth.dividerAlpha, 1e-3f)
 
         // p = 1（年侧）：正好落在迷你月网格上，字号收到 miniDayFont
-        val atYear = CalendarLayout.yearMonthGridMorph(1f, source, target, rows, flowMetrics, true)
+        val atYear = CalendarLayout.yearMonthGridMorph(1f, source, target, flowMetrics, true)
         assertEquals(0f, atYear.t, 1e-6f)
         assertEquals(target.x, atYear.rect.x, 1e-3f)
         assertEquals(target.y, atYear.rect.y, 1e-3f)
@@ -205,7 +158,7 @@ class CalendarMorphTest {
         var previousFont = Float.MAX_VALUE
         for (step in 0..20) {
             val p = step / 20f
-            val m = CalendarLayout.yearMonthGridMorph(p, source, target, rows, flowMetrics, true)
+            val m = CalendarLayout.yearMonthGridMorph(p, source, target, flowMetrics, true)
             assertEquals("列宽 = 网格宽 / 7", m.rect.w / 7f, m.metrics.cellW, 1e-3f)
             assertTrue("行高单调不增", m.metrics.cellH <= previousH + 1e-3f)
             assertTrue("宽度单调不增", m.rect.w <= previousW + 1e-3f)
@@ -214,22 +167,6 @@ class CalendarMorphTest {
             previousH = m.metrics.cellH
             previousFont = m.metrics.dayFont
         }
-    }
-
-    @Test
-    fun `year month morph forces seven by six cells at every progress`() {
-        for (step in 0..10) {
-            val state = CalendarLayout.yearMonthMorph(step / 10f, miniGrid, fullGrid, showLunar = true)
-            assertEquals("列宽必须等于网格宽 / 7", state.grid.w / 7f, state.metrics.cellW, 1e-3f)
-            assertEquals("行高必须等于网格高 / 6", state.grid.h / 6f, state.metrics.cellH, 1e-3f)
-        }
-    }
-
-    @Test
-    fun `lunar alpha is disabled when the language hides it`() {
-        val state = CalendarLayout.yearMonthMorph(0f, miniGrid, fullGrid, showLunar = false)
-        assertEquals(0f, state.lunarAlpha, 1e-6f)
-        assertEquals(0f, state.metrics.lunarLineH, 1e-6f)
     }
 
     // ------------------------------------------------------------------ 翻页

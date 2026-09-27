@@ -7,7 +7,6 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.cov.justdiary.app.AppContainer
 import com.cov.justdiary.model.DateUtil
-import com.cov.justdiary.model.DiaryRecord
 import com.cov.justdiary.model.EditBlock
 import com.cov.justdiary.service.Log
 import com.cov.justdiary.ui.home.CalendarGrid
@@ -35,7 +34,6 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         val flags: Set<String> = emptySet(),
         /** 选中日的片段；`null` 表示这一天还没有日记。 */
         val dayBlocks: List<EditBlock>? = null,
-        val selectedDiary: DiaryRecord? = null,
         val weekStart: String = "monday",
         /** `auto_time`：当日面板是否显示片段的开始时间（设置变化后要跟着刷新）。 */
         val autoTime: Boolean = true,
@@ -91,30 +89,6 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch { reloadDay() }
     }
 
-    /** 翻月：标记范围跟着年份走，选中日由界面层决定（与 iOS 的 `selectMonth` 一致）。 */
-    fun onMonthChanged(monthKey: Int, selectedKey: String?) {
-        if (monthKey == _state.value.monthKey) return
-        val year = CalendarGrid.yearOfMonthKey(monthKey)
-        _state.value = _state.value.copy(
-            monthKey = monthKey,
-            year = year,
-            selectedKey = selectedKey ?: _state.value.selectedKey,
-        )
-        viewModelScope.launch { reload() }
-    }
-
-    /** 回到今天。 */
-    fun resetToToday() {
-        val today = LocalDate.now()
-        _state.value = _state.value.copy(
-            today = today,
-            monthKey = CalendarGrid.monthKeyOf(today),
-            selectedKey = DateUtil.dayKeyOf(today),
-            year = today.year,
-        )
-        viewModelScope.launch { reload() }
-    }
-
     private suspend fun reload() {
         val current = _state.value
         val thisYear = LocalDate.now().year
@@ -141,7 +115,7 @@ class HomeViewModel(private val container: AppContainer) : ViewModel() {
                 .onFailure { Log.db.w("读取片段失败：${it.message}") }
                 .getOrDefault(emptyList())
         }
-        _state.value = _state.value.copy(selectedDiary = diary, dayBlocks = blocks)
+        _state.value = _state.value.copy(dayBlocks = blocks)
     }
 
     companion object {

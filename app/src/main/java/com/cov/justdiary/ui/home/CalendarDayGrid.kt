@@ -125,11 +125,18 @@ fun CalendarDayGrid(
             // 这一行里**真正属于当月**的列区间 —— 分割线只跨这段，不是整行。
             // （用户："分割线范围到日期为限，而不是一整行"。
             //   例：11 月 1 号落在周日，首行只有最右一格有日期，线就只画在那一格上。）
-            val monthCols = week.indices.filter {
-                val d = week[it]
-                d.year == anchorMonth.year && d.monthValue == anchorMonth.monthValue
+            // 只用首尾两列表达区间（原来是 `indices.filter`，每行多分配一个 List）。
+            var firstCol = -1
+            var lastCol = -1
+            for (i in week.indices) {
+                val d = week[i]
+                if (d.year == anchorMonth.year && d.monthValue == anchorMonth.monthValue) {
+                    if (firstCol < 0) firstCol = i
+                    lastCol = i
+                }
             }
-            val drawDivider = showDividers && m.dividerAlpha > 0.01f && monthCols.isNotEmpty() &&
+            val monthCols = firstCol..lastCol
+            val drawDivider = showDividers && m.dividerAlpha > 0.01f && firstCol >= 0 &&
                 (row > 0 || dividerAboveFirst)
             val rowH = m.cellH.dp
 
@@ -236,17 +243,21 @@ private fun CalendarDayCell(
     val key = DateUtil.dayKeyOf(date)
     val isFuture = key > todayKey
 
-    val dateLabel = DateFormats.dayTitleFor(date)
+    // `dayTitleFor` 要跑两次 `getDisplayName`（格式化的 ICU），按日期缓存即可。
+    val dateLabel = remember(date) { DateFormats.dayTitleFor(date) }
     val todayLabel = stringResource(R.string.index_today)
     val selectedLabel = stringResource(R.string.index_selected)
     val hasDiaryLabel = stringResource(R.string.index_has_diary)
     val noDiaryLabel = stringResource(R.string.index_no_diary)
 
-    val stateLabel = buildList {
-        if (isToday) add(todayLabel)
-        if (isSelected) add(selectedLabel)
-        add(if (hasDiary) hasDiaryLabel else noDiaryLabel)
-    }.joinToString(" · ")
+    // 无障碍串只在状态变化时重拼（原来每次重组都 buildList + joinToString）。
+    val stateLabel = remember(isToday, isSelected, hasDiary, todayLabel, selectedLabel, hasDiaryLabel, noDiaryLabel) {
+        buildList {
+            if (isToday) add(todayLabel)
+            if (isSelected) add(selectedLabel)
+            add(if (hasDiary) hasDiaryLabel else noDiaryLabel)
+        }.joinToString(" · ")
+    }
 
     // 文字**不压 alpha**：M3 的强调层级用语义色表达，不用透明度。
     // 实测 0.35 alpha 的日号在浅色下只有 2.19:1，连"大字 3:1"都不到（WCAG AA / Material 都不允许）；
@@ -272,7 +283,11 @@ private fun CalendarDayCell(
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
-                indication = ripple(bounded = false, radius = circleDiameter / 2),
+                // ⚠️ remember：`ripple(...)` 每次组合都新建 `RippleNodeFactory`，
+                // 会让整格重建指示节点、打断进行中的涟漪。
+                indication = remember(circleDiameter) {
+                    ripple(bounded = false, radius = circleDiameter / 2)
+                },
                 role = Role.Button,
                 onClick = onClick,
             )
@@ -331,7 +346,7 @@ private fun CalendarDayCell(
             }
             if (showLunar) {
                 Text(
-                    text = Lunar.dayLabelOf(date),
+                    text = Lunar.dayLabelCached(date),
                     fontSize = lunarFontSize,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -361,7 +376,7 @@ private fun DiaryMark(color: Color, width: Dp, visible: Boolean = true) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(color, RoundedCornerShape(Radius.hairline)),
+                    .background(color, DiaryUnderlineShape),
             )
         }
     }
@@ -410,3 +425,5 @@ fun CalendarWeekdayHeader(
     }
 }
 
+/** "有日记"下划线的形状（文件级常量：原来是每格新建一个 `RoundedCornerShape`）。 */
+private val DiaryUnderlineShape = RoundedCornerShape(Radius.hairline)

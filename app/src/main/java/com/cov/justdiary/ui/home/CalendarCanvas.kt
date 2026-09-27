@@ -59,7 +59,6 @@ fun YearCanvas(
     /** 选中的那一天：年历里它才是实心圆（此前错画成"今天"）。 */
     selectedKey: String = "",
     weekStart: String = DateUtil.WEEK_START_MONDAY,
-    showLunar: Boolean = false,
     onMonthClick: ((Int) -> Unit)? = null,
     /**
      * 迷你月的标题文案（**必传**）。

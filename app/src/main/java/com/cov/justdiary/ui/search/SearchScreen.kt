@@ -831,17 +831,9 @@ private val NO_RESULT_LABEL: String
     @Composable get() = stringResource(R.string.search_no_result)
 private val LOAD_MORE_LABEL: String
     @Composable get() = stringResource(R.string.search_load_more)
-private val SHEET_TIME_TITLE: String
-    @Composable get() = stringResource(R.string.search_time_title)
 private val LABEL_TIME_RANGE: String
     @Composable get() = stringResource(R.string.search_time_label)
 private val LABEL_LOCATION: String
     @Composable get() = stringResource(R.string.search_loc_label)
-private val LABEL_RANGE_FROM: String
-    @Composable get() = stringResource(R.string.search_time_from)
-private val LABEL_RANGE_TO: String
-    @Composable get() = stringResource(R.string.search_time_to)
-private val APPLY_LABEL: String
-    @Composable get() = stringResource(R.string.search_time_apply)
 private val CANCEL_LABEL: String
     @Composable get() = stringResource(R.string.cancel)

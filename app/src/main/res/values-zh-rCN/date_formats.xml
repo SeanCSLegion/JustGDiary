@@ -5,7 +5,6 @@
     <string name="date_month_title">%1$d年 %2$s</string>
     <string name="date_day_only">%1$s%2$d日</string>
     <string name="date_day_title">%1$s%2$d日 %3$s</string>
-    <string name="date_range">%1$s – %2$s</string>
     <string name="index_week_head">%1$d年%2$s%3$d日 %4$s</string>
 
     <string name="index_today">今天</string>
@@ -23,4 +22,5 @@
     <string name="time_label_noon">中午 12:00</string>
     <string name="time_label_afternoon">下午 %1$d:00</string>
     <string name="time_label_evening">晚上 %1$d:00</string>
+    <string name="date_range">%1$s – %2$s</string>
 </resources>

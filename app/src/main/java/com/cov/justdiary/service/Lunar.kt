@@ -119,4 +119,28 @@ object Lunar {
         zone: ZoneId = ZoneId.systemDefault(),
         provider: LunarCalendarProvider = ChineseCalendarProvider,
     ): String = dayLabel(provider.lunarDateOf(date, zone))
+
+    /**
+     * [dayLabelOf] 的缓存版 —— **绘制路径请一律用它**。
+     *
+     * `ChineseCalendar` 每次换算都要新建对象 + 读四个字段（农历月/闰月是天文推算），
+     * 是这几屏里单次最贵的调用；而结果只跟日期有关，与选中/主题/动画进度都无关。
+     * 未缓存时：月视图点一次日期要让 60~70 个格子各算一次（≈3~8ms），
+     * 年↔月 morph 每帧 30~60 次。
+     *
+     * 农历只跟**时区**有关（与语言无关），所以按 `dayOfEpoch` 缓存即可；
+     * 换时区时调用 [clearCache]。
+     */
+    private val dayLabelCache = object : LinkedHashMap<Long, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, String>) = size > 1024
+    }
+
+    fun dayLabelCached(date: LocalDate): String {
+        val key = date.toEpochDay()
+        dayLabelCache[key]?.let { return it }
+        return dayLabelOf(date).also { dayLabelCache[key] = it }
+    }
+
+    /** 时区变化后清空 [dayLabelCached] 的缓存。 */
+    fun clearCache() = dayLabelCache.clear()
 }

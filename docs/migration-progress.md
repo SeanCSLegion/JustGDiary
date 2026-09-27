@@ -2065,6 +2065,57 @@ iOS `MonthWeekMorphView` 是 `content().offset(y: contentOffset)`，其中
 与 iOS 逐字一致。**验证**：月→周尾帧 vs 周态静止 **0 个像素差异**；
 周→月起手帧 vs 周态静止 **0**、尾帧 vs 月视图 **0**。
 
+## R20 · 全面清理：死代码 / 冗余资源 / 性能；并确认动画**没有被限帧**
+
+用户："进行彻底的代码检查……精简代码，优化性能，删除无效冗余资源之类的"、
+"过渡动画帧率尽可能跑满，不要手动设定帧率上限，由系统决定"。
+
+### 帧率：**没有、也不应该有上限**
+
+逐项核过，全仓库**不存在**任何限帧手段：没有 `Surface.setFrameRate` /
+`preferredDisplayModeId` / `fixedFrameRate` / `Choreographer` 手工节拍 / `withFrameMillis`
+固定步长，manifest 与 theme 里也没有 `windowRefreshRate` 之类。三段 morph 全部由
+`Animatable` 驱动 → 走 Compose 的**帧时钟** → 由系统（与屏幕当前刷新率，含 LTPO）决定每帧
+何时到来；进度只在 `Modifier.offset {}` / `graphicsLayer {}` / Canvas 的 draw lambda 里读，
+不触发重组，所以动画期间每帧只做绘制。唯一的 `withFrameNanos` 是 `-morph-log` 打开时的
+**被动计数**（不改节奏），`MonthFlow` 里的 `delay(700)` 是滚动指示条的自动隐藏延时。
+
+### 删除的死代码 / 冗余（逐条 grep 复核过引用数）
+
+| 类别 | 内容 |
+| --- | --- |
+| 零引用常量 / 函数 | `QUICK_SETTLE_DURATION_MS`、`PORTRAIT_MIN_AREA_H`、`CELL_H_PER_COL_W`、`COMPACT_LABEL_DROP`、`MINIMUM_ROW_HEIGHT`（与 `MIN_CELL_H` 重复的 44）、`M3_EMPHASIZED`、`Rect.maxX`、`landscapePaneHeight`、`WEEK_PAGE_THRESHOLD`、`SLOW_MORPH_DURATION_MS`（`DebugFlags` 里那份才是活的） |
+| 被取代的旧实现 | `CalendarLayout.yearMonthMorph` + `YearMonthMorphState`（生产已换成 `yearMonthGridMorph`，只有旧单测在喂它）+ 4 条对应旧测试；`portraitAreaHeight`（旧名转发） |
+| 死状态 / 死方法 | `HomeViewModel.onMonthChanged`、`resetToToday`、`State.selectedDiary`（只写不读）；`HomeScreen.fadeProgress`、`val monthTitle` |
+| 无用参数 | `YearCanvas(showLunar)`、`MonthFlowLabel(bandH)`、`monthAreaHeight(rows)`、`cellHeightFor(rows, preferred)`、`yearMonthGridMorph(rowCount)` |
+| 孤立注释 | 指向已删声明的 5 处 KDoc（其中一处**未闭合**，把后面所有声明吞进注释里 —— 编译报错才暴露） |
+| 资源 | 10 个旧版启动图标 PNG（`minSdk 33` + `mipmap-anydpi-v26` 自适应图标 ⇒ 永不参与解析）、空 `res/drawable/` 目录、FileProvider 里两条无人使用的路径（`exports` 暴露整个 cacheDir、`images` 无消费方） |
+
+### 性能（按"每帧/每次重组"的实际开销排序改）
+
+1. **morph 期间的文本测量**：字号原先逐帧连续插值 ⇒ `TextMeasurer` 的缓存键（含 `TextStyle`）
+   每帧都是新的 ⇒ 每帧全 miss，31 格 × 2 次 ≈ 60 次文本整形/帧。现在字号**量化到 0.5dp**
+   并把缓存从 256 提到 2048（量化后键规模约 1500）。
+2. **农历换算**：`ChineseCalendar` 每次都要新建对象 + 天文推算，而结果只与日期有关。
+   新增 `Lunar.dayLabelCached`（LRU 1024，按 `toEpochDay()` 键），绘制路径一律走它 ——
+   此前"点一次日期要让 60~70 个格子各算一次 ICU"。
+3. **组合期解析 JSON**：`ContentFlatten.parseContent` 原本每次重组都跑（长日记 5~30ms，
+   主线程），改成 `remember(block.contentJson)`。
+4. **`DateUtil.dayKeyOf`**：`String.format` → 手写零填充（月视图一次重组 240~320 次、
+   年历一次绘制 365 次）。
+5. **`MonthFlowLayout.of` 的缓存**：行高先量化 0.5dp 再当 key（resize / 分屏 / 字号动画期间
+   行高逐帧变化，原本每帧重建 2412 个块），缓存满时改成淘汰最老一条而不是 `clear()` 全清。
+6. **每帧/每格的小分配**：`SelectedMorphRow` 的 `listOf(row.week)`、周态的 `weekOf(...)`、
+   每行的 `indices.filter`、每格的 `ripple(...)` 与 `RoundedCornerShape`、`dayTitleFor` 与
+   无障碍串 —— 全部 `remember` 或提到文件级常量。
+
+### 顺手修掉的两个真 bug
+
+- **小标题的透明度被覆盖**：`MonthFlow` 里同一 `graphicsLayer` 内 `alpha` 被赋值**两次**，
+  后一行（旧的 iOS 公式 `1 - clamp01(p * 2.2)`）把用户拍板的"直接出现"那版覆盖掉了 ——
+  这正是"周→月小标题还是最后出现"的残留原因。
+- **`DateUtil.dayKeyOf`** 改写时忘了年号也要补零（`DateUtilTest` 的 `0999-12-31` 挡住了）。
+
 ## R19 · 周条只能翻一次：`pointerInput` 协程里捕获了**组合期的值**
 
 用户："周视图……左右切换不能一直切换下去？只能切换一次似乎？"

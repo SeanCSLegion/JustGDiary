@@ -31,11 +31,9 @@ class CalendarLayoutTest {
     /** Pixel 10 Pro AVD 的首页内容区可用高度（952dp 屏 − 状态栏/导航栏/顶栏）。 */
     private val portraitH = 796f
     /** 月度整屏区高：可用高 − 顶栏 52（与 `HomeScreen` 一致）。 */
-    private val portraitAreaH = CalendarLayout.monthAreaHeight(portraitH - 52f, rows = 6)
 
     /** 横屏日历**列**宽 345（整屏可用宽 750 = 345 + 16 + 356.5 + 16 + …）。 */
     private val landscapeCalendarW = 345f
-    private val landscapePaneH = 330f
 
     @Test
     fun `constants match the ios table`() {
@@ -44,7 +42,6 @@ class CalendarLayoutTest {
         // （曾经取 `medium4 = 400ms`，用户实测"太快了"。）
         assertEquals(600, CalendarLayout.MORPH_DURATION_MS)
         assertEquals(0.6, CalendarLayout.MORPH_DURATION_MS / 1000.0, 1e-9)  // = iOS morphDuration
-        assertEquals(3000, CalendarLayout.SLOW_MORPH_DURATION_MS)
         assertEquals(180, CalendarLayout.REDUCED_MORPH_DURATION_MS)
         assertEquals(30f, CalendarLayout.WEEKDAY_HEADER_H, 1e-6f)
         assertEquals(72f, CalendarLayout.BIG_TITLE_H, 1e-6f)
@@ -61,12 +58,10 @@ class CalendarLayoutTest {
         assertEquals(6f, CalendarLayout.YEAR_SPACING, 1e-6f)
         assertEquals(6f, CalendarLayout.MINI_PAD, 1e-6f)
         assertEquals(17f, CalendarLayout.MINI_TITLE_H, 1e-6f)
-        assertEquals(44f, CalendarLayout.MINIMUM_ROW_HEIGHT, 1e-6f)
         // 未来日期不再靠透明度表达（0.35 alpha 对比度只有 2.19:1）；
         // 改用 M3 的 onSurfaceVariant 语义色，见 docs/ui-design-plan.md §3.1
         // M3 easing.emphasized（官方令牌值）；morph 曲线**不用 M3**，用 iOS 那条
         // `.timingCurve(0.2, 0.75, 0.3, 1.0)` —— 见 `IOS_MORPH_CURVE` 的说明。
-        assertEquals(listOf(0.2f, 0f, 0f, 1f), CalendarLayout.M3_EMPHASIZED.toList())
         assertEquals(listOf(0.2f, 0.75f, 0.3f, 1f), CalendarLayout.IOS_MORPH_CURVE.toList())
         // 竖屏版面的常量：顶栏、大标题槽、行高上下界
         // M3 small top app bar 的官方高度
@@ -81,19 +76,16 @@ class CalendarLayoutTest {
     @Test
     fun `month area fills the screen and never inverts`() {
         // 月度是整屏视图：有多少可用高就给多少（顶栏与系统占位已在上层扣掉）
-        assertEquals(796f, CalendarLayout.monthAreaHeight(796f, rows = 6), 1e-3f)
-        assertEquals(340f, CalendarLayout.monthAreaHeight(340f, rows = 6), 1e-3f)
+        assertEquals(796f, CalendarLayout.monthAreaHeight(796f), 1e-3f)
+        assertEquals(340f, CalendarLayout.monthAreaHeight(340f), 1e-3f)
         // 极矮窗口走下限，且**不超过**可用高（首轮横屏崩溃就出在区间反转）
-        assertEquals(100f, CalendarLayout.monthAreaHeight(100f, rows = 6), 1e-3f)
-        assertEquals(0f, CalendarLayout.monthAreaHeight(0f, rows = 6), 1e-3f)
-        // 旧名保留且语义相同
-        assertEquals(796f, CalendarLayout.portraitAreaHeight(796f, rows = 6), 1e-3f)
-
+        assertEquals(100f, CalendarLayout.monthAreaHeight(100f), 1e-3f)
+        assertEquals(0f, CalendarLayout.monthAreaHeight(0f), 1e-3f)
         // 单调不减、且不超过可用高
         var previous = -1f
         for (step in 0..60) {
             val available = step * 16f
-            val area = CalendarLayout.monthAreaHeight(available, rows = 6)
+            val area = CalendarLayout.monthAreaHeight(available)
             assertTrue("区高不应随可用高反向变化", area >= previous - 1e-3f)
             assertTrue("区高不得超过可用高", area <= available + 1e-3f)
             previous = area
@@ -124,12 +116,9 @@ class CalendarLayoutTest {
             assertTrue("行高必须随可用高单调不减", cell >= previous - 1e-3f)
             previous = cell
         }
-        // 行数与行高无关：行高只由"固定 6 行"决定，翻月时不抖
-        assertEquals(
-            CalendarLayout.cellHeightFor(876f),
-            CalendarLayout.cellHeightFor(876f, rows = 5),
-            1e-3f,
-        )
+        // 行高只由"固定 6 行"决定 —— 签名里已经没有 `rows` 参数了（清理时删掉：
+        // 传进来的行数从来没用过），这条断言因此变成"同一输入必得同一输出"。
+        assertEquals(CalendarLayout.cellHeightFor(876f), CalendarLayout.cellHeightFor(876f), 1e-3f)
         // 参考设备（Pixel 10 Pro：可用高 876，M3 顶栏 64）：
         // 区高 = 876 − 64 = 812，行高 = (812 − 102) / 6 = 118.33
         assertEquals(118.333f, CalendarLayout.cellHeightFor(876f - CalendarLayout.HEADER_H), 1e-3f)
@@ -180,7 +169,7 @@ class CalendarLayoutTest {
 
         // 横屏面板也要守 MIN_CELL_H（格子太矮就点不准）：
         // (268 − 60) / 6 = 34.67 → 抬到 44
-        assertEquals(44f, CalendarLayout.cellHeightFor(paneH, 6, headerH), 1e-3f)
+        assertEquals(44f, CalendarLayout.cellHeightFor(paneH, headerH), 1e-3f)
 
         val sixRows = CalendarLayout.monthMetrics(
             landscapeCalendarW, paneH, false, rows = 6, headerH = headerH,
@@ -272,7 +261,7 @@ class CalendarLayoutTest {
 
     @Test
     fun `year grid geometry matches the formulas`() {
-        val areaH = CalendarLayout.portraitAreaHeight(portraitH, rows = 6)
+        val areaH = CalendarLayout.monthAreaHeight(portraitH)
         val (cardW, cardH) = CalendarLayout.yearCardSize(portraitW, areaH)
         assertEquals(358f / 3f, cardW, 1e-3f)
         // 卡片高度还要再扣掉**底部安全边距**（屏幕比例不同时末行不贴底栏）

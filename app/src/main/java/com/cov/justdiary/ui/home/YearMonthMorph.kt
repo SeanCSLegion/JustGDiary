@@ -190,7 +190,6 @@ fun YearMonthMorph(
                 progress = p,
                 source = source,
                 target = targetGrid,
-                rowCount = block.rowCount,
                 sourceMetrics = flowMetrics,
                 showLunar = showLunar,
             )
@@ -585,10 +584,14 @@ private fun DrawScope.drawDayCell(
     } else {
         FontWeight.Normal
     }
+    // ⚠️ 字号**必须量化**再测量：`TextMeasurer` 的缓存键里含 `TextStyle`，而 morph 期间
+    // `metrics.dayFont` 是逐帧连续插值的 —— 不量化就每帧全 miss，每格每帧都要重新整形
+    //（31 格 × 2 次 ≈ 60 次/帧，实测占 2~5ms）。量化到 0.5dp 后同一档字号复用同一条缓存，
+    // 视觉上最多差 0.5dp（iOS 自己也是按 0.5pt 量化的）。
     val num = measurer.measure(
         day.dayOfMonth.toString(),
         TextStyle(
-            fontSize = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale),
+            fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.dayFont).dp, fontScale),
             color = textColor,
             fontWeight = weight,
         ),
@@ -603,9 +606,9 @@ private fun DrawScope.drawDayCell(
     )
     if (metrics.lunarAlpha > 0.01f) {
         val lunar = measurer.measure(
-            Lunar.dayLabelOf(day),
+            Lunar.dayLabelCached(day),
             TextStyle(
-                fontSize = DynamicTypeMetrics.calendarSp(metrics.lunarFont.dp, fontScale),
+                fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.lunarFont).dp, fontScale),
                 color = textColor.copy(alpha = 0.75f),
             ),
         )
@@ -668,7 +671,16 @@ private fun lunarBoxHDpFor(lunarFont: Float, flowLunarBoxH: Float): Float =
     if (flowLunarBoxH <= 0f) 0f else flowLunarBoxH * (lunarFont / FLOW_LUNAR_FONT_REF)
 
 /** morph 层的文本测量缓存（字号每帧都在变，缓存要够大）。 */
-private const val MORPH_TEXT_CACHE = 256
+/**
+ * morph 期间的文本测量缓存条数。
+ *
+ * 字号量化到 0.5dp 之后，键的规模是「日号 31 × 字号档 ~12 × 字重 2 × 颜色 2」≈ 1500，
+ * 再加农历与标题 —— 2048 才够一轮完整动画不淘汰（旧值 256 连一个月的日号都装不下）。
+ */
+private const val MORPH_TEXT_CACHE = 2048
+
+/** 把字号量化到 0.5dp（`TextMeasurer` 的缓存键含字号，连续值会导致每帧全 miss）。 */
+private fun quantizeFont(size: Float): Float = kotlin.math.round(size * 2f) / 2f
 
 /** 量农历盒子高度用的探针文本（两个汉字，和真实内容同宽同高）。 */
 private const val LUNAR_PROBE = "初一"
