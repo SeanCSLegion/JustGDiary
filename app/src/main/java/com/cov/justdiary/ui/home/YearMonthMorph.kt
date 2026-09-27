@@ -186,6 +186,10 @@ fun YearMonthMorph(
             }
 
             // ---- 本月网格（主角）：插值矩形 + 重排格子 ----
+            // ⚠️ 网格的**左边**必须一路传下去：格子与分割线都是以"网格左上角"为原点画的，
+            // 少了这个偏移，网格会永远贴在最左边（只有宽度在缩）—— 用户报的
+            // "计算位置比实际位置偏左"就是它。
+            val gridLeft = grid.rect.x * density.density
             CalendarGrid.displayedWeeks(block.monthFirst, weekStart).forEachIndexed { row, week ->
                 val rowY = gridTop + row * rowPx
                 // 分割线：本块第一行不画（整条流的第一块），其余都画 —— 与连续流一致
@@ -196,6 +200,7 @@ fun YearMonthMorph(
                         cellW = cellPx,
                         alpha = m.dividerAlpha,
                         color = dividerColor,
+                        originX = gridLeft,
                     )
                 }
                 week.forEachIndexed { col, day ->
@@ -216,6 +221,7 @@ fun YearMonthMorph(
                         onPrimary = onPrimary,
                         onSurface = onSurface,
                         onSurfaceVariant = onSurfaceVariant,
+                        originX = gridLeft,
                     )
                 }
             }
@@ -227,7 +233,7 @@ fun YearMonthMorph(
                 drawText(
                     textLayoutResult = text,
                     topLeft = Offset(
-                        x = grid.rect.x * density.density +
+                        x = gridLeft +
                             DateUtil.weekdayIndex(block.monthFirst, weekStart) * cellPx +
                             (cellPx - text.size.width) / 2f,
                         y = gridTop - labelBlockH * density.density,
@@ -409,13 +415,15 @@ private fun DrawScope.drawCellDividers(
     cellW: Float,
     alpha: Float,
     color: Color,
+    /** 网格左边缘的 x（px）。相邻月那两条 peek 传 0（它们铺满整宽）。 */
+    originX: Float = 0f,
 ) {
     if (columns.isEmpty() || alpha <= 0.01f) return
     val thickness = 1.dp.toPx()
     columns.forEach { col ->
         drawRect(
             color = color.copy(alpha = 0.35f * alpha),
-            topLeft = Offset(col * cellW, rowY),
+            topLeft = Offset(originX + col * cellW, rowY),
             size = Size(cellW, thickness),
         )
     }
@@ -439,6 +447,8 @@ private fun DrawScope.drawDayCell(
     onSurface: Color,
     onSurfaceVariant: Color,
     alpha: Float = 1f,
+    /** 网格左边缘的 x（px）。 */
+    originX: Float = 0f,
 ) {
     if (alpha <= 0.01f) return
     val key = DateUtil.dayKeyOf(day)
@@ -450,7 +460,7 @@ private fun DrawScope.drawDayCell(
     val rowYDp = rowY / density
     val metrics = m.copy(cellW = cellW / density, cellH = cellH / density)
     val top = CalendarLayout.contentTop(rowYDp, metrics)
-    val cx = CalendarLayout.cellCenterX(col, metrics.cellW) * density
+    val cx = originX + CalendarLayout.cellCenterX(col, metrics.cellW) * density
     val circleCy = CalendarLayout.circleCenterY(top, metrics) * density
     val radius = metrics.circleDiameter / 2f * density
 

@@ -1985,6 +1985,16 @@ LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
 **帧率顺带变好了**：morph 期间月历流不再参与（不再每帧重组 ~100 个日期格），
 模拟器实测 **17.1ms/帧（≈58fps）**，此前是 33ms/帧（≈30fps）。
 
+### 用户复测又抓到一条：**横向原点没传下去**
+
+用户："月视图切换到年视图的时候，计算位置比实际位置偏左。年视图到月视图的动画的起始
+位置计算也不对。" —— 一针见血：`drawDayCell` / `drawCellDividers` 是以"网格左上角"为
+原点画的（`cellCenterX(col, cellW) = (col+0.5)·cellW`），而我在 morph 里**没有把
+`grid.rect.x` 加回去** —— 于是整块网格永远贴在最左边、只有宽度在缩：
+月→年看起来"往左跑了"，年→月则"从左边长出来"而不是从卡片长出来。
+修法：把网格左边缘 `gridLeft` 一路传给格子 / 分割线 / 小标题（相邻月那两条 peek 传 0，
+它们本来就铺满整宽）。截图 `docs/ui-audit/r7-1…r7-3`（重拍）。
+
 ### 单测抓到的两个真 bug（都已修）
 
 1. **矩形插值方向反了**：`lerpRect(source, target, t)` 在 `t = 1`（月侧）给的是**目标** ——
