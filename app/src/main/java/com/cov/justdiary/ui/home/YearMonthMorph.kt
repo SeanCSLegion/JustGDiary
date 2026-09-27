@@ -425,7 +425,7 @@ private fun inMonth(day: LocalDate, anchorMonth: LocalDate): Boolean =
  * 有日记的短横线、按格的分割线 —— 只有"点击"是缺的（morph 层不接收点击）。
  * 单位：`rowY` / `cellW` 等几何量都是 **px**，绘制时不再换算。
  */
-private fun DrawScope.drawWeekRow(
+internal fun DrawScope.drawWeekRow(
     week: List<LocalDate>,
     anchorMonth: LocalDate,
     rowY: Float,

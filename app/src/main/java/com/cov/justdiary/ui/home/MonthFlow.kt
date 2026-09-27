@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.text.drawText
+import com.cov.justdiary.service.DateFormats
+import java.util.Locale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -1274,11 +1278,32 @@ fun MonthWeekMorph(
     compact: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val titleH = source.viewportTop - CalendarLayout.WEEKDAY_HEADER_H
-    val headH = CalendarLayout.WEEKDAY_HEADER_H
+    // ============================================================================
+    // **全部画在一块 Canvas 里**（2026-09-27 重写）
+    //
+    // 用户问："为什么月视图和年视图的切换是正确的，月视图和周视图就怎么也改不好？"
+    // 答案在两者的画法差异上：
+    //
+    //   年↔月：**一块全屏 Canvas**，位置全在 draw 里按 Canvas 本地 px 算 ——
+    //          只有一个坐标系，写 `y = X` 就是 `X`，天然正确。
+    //   月↔周（旧）：Compose 布局 + **9 个 `graphicsLayer`**，层窗口坐标 / 日历区坐标 /
+    //          布局坐标 / 绘制坐标混用，每个 `translationY` 都要心算父层合成结果 ——
+    //          所以每次"修好"只是把错误从偏上挪到偏下（实测圆心起点在 220dp 与 354dp
+    //          之间反复横跳，改了四次都没对）。
+    //
+    // 现在与年↔月**同构**：标题、星期栏、被点中那一周、小标题全在这一块 Canvas 上，
+    // 位置一律用 `source` 里那份"日历区坐标"（= Canvas 本地坐标，因为 morph 层的
+    // 左上角就是日历区的左上角），位移直接改 `y`，**没有任何 `graphicsLayer` 平移**。
+    // ============================================================================
+    val density = LocalDensity.current
+    val densityF = density.density
+    val fontScale = density.fontScale
+    val measurer = rememberTextMeasurer(cacheSize = 2048)
+    val textLayouts = MorphTextLayouts.shared
+
     val rowH = source.rowH
-    val density = LocalDensity.current.density
-    val fontScale = LocalDensity.current.fontScale
+    val headH = CalendarLayout.WEEKDAY_HEADER_H
+    val titleH = source.viewportTop - headH
     val mMetrics = remember(widthDp, rowH, showLunar) {
         CalendarLayout.flowMetrics(widthDp, rowH, showLunar)
     }
@@ -1286,182 +1311,133 @@ fun MonthWeekMorph(
         CalendarLayout.weekMetrics(widthDp, showLunar)
     }
     val cellW = CalendarLayout.monthCellW(widthDp)
-    val selectedTop = source.selectedRow?.top ?: source.viewportTop
-    // 当日内容顶端的**终态**位置：星期栏（30）+ 周条（80）。morph 收尾换回真实周层时
-    // 两边的排版完全一致，所以这里用终态高度做布局、只用位移表达"从下面顶上来"。
-    val contentTop = headH + CalendarLayout.WEEK_STRIP_H
+    val labelH = remember(compact) { CalendarLayout.flowLabelBandHeight(compact) }
+
+    val scheme = MaterialTheme.colorScheme
+    val weekdayLabels = remember(weekStart) {
+        DateFormats.weekdayInitials(Locale.getDefault(), weekStart)
+    }
+    val todayMonthKey = remember(todayKey) {
+        DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
+    }
+    val title = remember(source.topMonthKey, titleText) {
+        titleText(CalendarGrid.monthFirstOfMonthKey(source.topMonthKey))
+    }
 
     Box(
         modifier = modifier
             .width(widthDp.dp)
             .height(heightDp.dp)
-            // morph 层是**纯视觉**的过渡内容：无障碍树里只保留底下那个真实图层
             .clearAndSetSemantics { },
     ) {
-        // 大标题：向上移出并淡出
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(titleH.dp)
-                .graphicsLayer {
-                    val p = progress()
-                    translationY = -p * titleH * density
-                    alpha = 1f - CalendarLayout.clamp01(p * 2f)
-                },
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            Text(
-                text = titleText(CalendarGrid.monthFirstOfMonthKey(source.topMonthKey)),
-                modifier = Modifier.padding(horizontal = 20.dp),
-                fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale),
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // 星期栏：从「标题槽之后」上移到顶（月视图那侧的落点是 `titleH`，不是 `viewportTop`）
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(headH.dp)
-                .graphicsLayer {
-                    translationY = CalendarLayout.lerp(titleH, 0f, progress()) * density
-                },
-        ) {
-            CalendarWeekdayHeader(weekStart = weekStart)
-        }
-
-        morphDebugFrame++
-        // 行与小标题：裁在「跟着顶栏移动的边界」以下。
-        //
-        // 裁剪的做法是「占位 + frame + clipToBounds」：外层整体下移 `clipTop`、内层自己
-        // `clipToBounds`，于是**裁切窗跟着顶栏一起走**。⚠️ 不能写成
-        // `offset(...).clipToBounds()` —— `offset` 是渲染期平移，`clipToBounds` 会跟着
-        // 一起移，等于没裁（iOS 侧为这一条专门取过帧）。
-        val clipTop: () -> Float = {
-            CalendarLayout.lerp(source.viewportTop, headH, progress())
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(heightDp.dp)
-                .graphicsLayer { translationY = clipTop() * density },
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds(),
-            ) {
-                // ⚠️ 小标题画在**日期行之后**（= 在它们上层，但仍在那条当日内容之下）——
-                // 与连续流 `MonthFlowBlock` 的顺序一致（那里也是先网格、后小标题）。
-                // 原来画在行之前，morph 期间会被移动中的日期行整块盖住，等行让开才露出来，
-                // 看着就是"小标题最后才出现"（用户两次提到这一点）。
-                //
-                // 小标题的强调色（今天所在月 = 加粗 + 主色）**必须与连续流一致**：
-                // iOS 的 `MonthFlowLabel` 自己按日期算 `isCurrent`，morph 与流用的是同一个
-                // 视图；Android 这边 `isCurrent` 是入参，morph 里漏传 → 交班那一帧小标题
-                // 会突然由灰变蓝（用户："月视图下月份小标题你没有做动画"）。
-                val todayMonthKey = remember(todayKey) {
-                    DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
-                }
-                // ⚠️ **按"周首日"去重**：`CalendarGrid.displayedWeeks` 对相邻两个月都会把
-                // **跨月的那一周**算进去（上个月的最后一周 = 下个月的第一周），于是
-                // `morphSource` 会把同一条周收两遍 —— 两份行落点相近，同一格的日号与农历
-                // 就被画了两遍，看起来就是"日号叠字/重影"（用户 2026-09-27："非常明显有问题，
-                // 有重叠"）。实测行清单：`…3:2026-09-21* 4:2026-09-28* 5:2026-09-28 6:2026-10-05…`
-                // —— 第 4、5 行是同一条周。
-                // ⚠️ **morph 只画被点中那一周这一行**（2026-09-27 重做）。
-                //
-                // 原来这里把 `source` 里"本月所有行 + 相邻月所有行"都画出来，各自算位移与
-                // 透明度做"让位"动画。实测（12 秒慢放逐帧）那套行定位**每一帧都是错的**：
-                // 数字叠成一片、星期栏画两遍、行的落点与冻结位置对不上 —— 用户：
-                // "动画是完全不对的，一开始就跳到上方了，而不是从日期的实际位置开始移动"。
-                //
-                // 现在只保留一行：它的起手位置就是**冻结时它真实所在的位置**（`row.top`
-                // 是日历区坐标、已含标题槽与星期栏与滚动偏移），终点是周条的位置
-                // （星期栏下沿）。其余行整块不动、也不画 —— 交班时由真实周层接管。
-                // 这样"从日期的实际位置开始移动"是构造上成立的，而不是靠调参凑出来。
-                val selectedRow = source.selectedRow ?: return@Box
-                val sp = progress()
-                CalendarDayGrid(
-                    rows = remember(selectedRow.week) { listOf(selectedRow.week) },
-                    anchorMonth = selectedRow.anchorMonth,
-                    metrics = mMetrics.lerp(wMetrics, sp),
-                    selectedKey = selectedKey,
-                    todayKey = todayKey,
-                    flags = flags,
-                    onDayClick = {},
-                    showAdjacent = true,
-                    adjacentAlpha = { sp },
-                    showLunar = showLunar,
-                    showDividers = true,
-                    dividerAboveFirst = selectedRow.showDivider,
-                    canvasCells = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .graphicsLayer {
-                            // 起手 = 冻结时的真实位置（`row.top`），终点 = 星期栏下沿。
-                            //
-                            // ⚠️ **不要再减 `clipTop()`**：外层那个 Box 已经整体
-                            // `translationY = clipTop()` 了，`row.top` 又是**日历区坐标**
-                            // （相对日历区左上角），再减一次等于减两遍 —— 实测第一帧
-                            // `174 − 102 = 72`，整行直接跳到上方 102dp，正是用户反复说的
-                            // "一开始就跳到上方了，根本不是真实的起始位置"。
-                            val y = CalendarLayout.lerp(selectedRow.top, headH, progress())
-                            translationY = y * density
-                        },
-                )
-                source.labels.forEach { label ->
-                    MonthFlowLabel(
-                        cellW = cellW,
-                        column = DateUtil.weekdayIndex(label.monthFirst, weekStart),
-                        text = labelText(label.monthFirst),
-                        isCurrent = label.key == todayMonthKey,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .graphicsLayer {
-                                // 位置**钉在终点**、不加位移（用户拍板："让小标题直接在最终
-                                // 位置算了。这样比跳变更好。"）。
-                                //
-                                // 透明度：`p = 0.5` 以下**全不透明**，往上快速淡出 ——
-                                // 也就是"周→月时它一开始就在"（用户："现在周视图切换到月视图
-                                // 的时候，小标题还是最后出现的"），"月→周时它很快消失"。
-                                // ⚠️ 不能用 iOS 那条 `1 - clamp01(p * 2.2)`：那会让它在
-                                // `p < 0.45` 才开始出现、`p < 0.2` 才看得清，别的日期都动完了
-                                // 它才冒出来 —— 用户否掉两次的就是这个观感。
-                                // （这里原本**多写了一行** `alpha = 1 - clamp01(progress() * 2.2f)`，
-                                //   把上面的值覆盖掉了，等于用户否掉的那版一直在生效；
-                                //   2026-09-27 清理时删掉。）
-                                val pp = progress()
-                                alpha = CalendarLayout.clamp01((1f - pp) * 2f)
-                                translationY =
-                                    (label.bottom - source.labelBandH - clipTop()) * density
-                            },
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val p = progress()
+            // 裁切窗：从"月视图的内容区顶"上移到"星期栏下沿"。位移直接作用在 y 上。
+            val clipTop = CalendarLayout.lerp(source.viewportTop, headH, p) * densityF
+            clipRect(top = clipTop, bottom = size.height) {
+                // ---- 大标题：向上移出并淡出 ----
+                val titleAlpha = 1f - CalendarLayout.clamp01(p * 2f)
+                if (titleAlpha > 0.01f) {
+                    val layout = textLayouts.layout(
+                        measurer = measurer,
+                        text = title,
+                        fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale),
+                        fontWeight = FontWeight.Bold,
+                        color = scheme.onSurface,
                     )
+                    drawText(
+                        textLayoutResult = layout,
+                        topLeft = Offset(20f * densityF, -p * titleH * densityF),
+                        alpha = titleAlpha,
+                    )
+                }
+
+                // ---- 星期栏：从"标题槽之后"上移到顶 ----
+                val headY = CalendarLayout.lerp(titleH, 0f, p) * densityF
+                val cellPx = cellW * densityF
+                weekdayLabels.forEachIndexed { i, label ->
+                    val layout = textLayouts.layout(
+                        measurer = measurer,
+                        text = label,
+                        fontSize = DynamicTypeMetrics.calendarSp(13.dp, fontScale),
+                        color = scheme.onSurfaceVariant,
+                    )
+                    drawText(
+                        textLayoutResult = layout,
+                        topLeft = Offset(
+                            x = (i + 0.5f) * cellPx - layout.size.width / 2f,
+                            y = headY + (headH * densityF - layout.size.height) / 2f,
+                        ),
+                    )
+                }
+
+                // ---- 被点中那一周：从**冻结时的真实位置**走到星期栏下沿 ----
+                // 两端都是"日历区坐标"，与 Canvas 本地坐标同一套 ⇒ 直接插值，
+                // 不需要任何补偿项（旧实现要在这里减层偏移、减 clipTop，正是错误的来源）。
+                val selectedRow = source.selectedRow
+                if (selectedRow != null) {
+                    drawWeekRow(
+                        week = selectedRow.week,
+                        anchorMonth = selectedRow.anchorMonth,
+                        rowY = CalendarLayout.lerp(selectedRow.top, headH, p) * densityF,
+                        metrics = mMetrics.lerp(wMetrics, p),
+                        selectedKey = selectedKey,
+                        todayKey = todayKey,
+                        flags = flags,
+                        alpha = 1f,
+                        showDivider = selectedRow.showDivider,
+                        measurer = measurer,
+                        textLayouts = textLayouts,
+                        fontScale = fontScale,
+                        primary = scheme.primary,
+                        onPrimary = scheme.onPrimary,
+                        onSurface = scheme.onSurface,
+                        onSurfaceVariant = scheme.onSurfaceVariant,
+                        dividerColor = scheme.outlineVariant,
+                        hasLunar = showLunar,
+                        t = 1f,
+                    )
+                }
+
+                // ---- 小标题：位置钉在终点，只淡出（用户拍板："让小标题直接在最终位置算了"）----
+                val labelAlpha = CalendarLayout.clamp01((1f - p) * 2f)
+                if (labelAlpha > 0.01f) {
+                    source.labels.forEach { label ->
+                        val layout = textLayouts.layout(
+                            measurer = measurer,
+                            text = labelText(label.monthFirst),
+                            fontSize = DynamicTypeMetrics.calendarSp(15.dp, fontScale),
+                            fontWeight = if (label.key == todayMonthKey) {
+                                FontWeight.Bold
+                            } else {
+                                FontWeight.Normal
+                            },
+                            color = if (label.key == todayMonthKey) {
+                                scheme.primary
+                            } else {
+                                scheme.onSurfaceVariant
+                            },
+                        )
+                        drawText(
+                            textLayoutResult = layout,
+                            topLeft = Offset(
+                                x = DateUtil.weekdayIndex(label.monthFirst, weekStart) * cellPx,
+                                y = (label.bottom - labelH) * densityF,
+                            ),
+                            alpha = labelAlpha,
+                        )
+                    }
                 }
             }
         }
 
-        // 当日内容：**始终挂在选中行下面**（行底 + 周条高度）。挂在固定曲线上时，
-        // 反方向（周→月）行会从内容中间穿过去，日期标题就压在周行上（iOS 实测过）。
-        // 布局高度取「终态」（收尾换回真实图层时高度不会变），位移用延迟读取。
+        // 当日内容：真实 composable，只做淡入（它不属于"日期格排版"，不必进 Canvas）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // ⚠️ **布局**位置必须是终态的 `contentTop`（= 星期栏 + 周条高度）。
-                // 只写 `graphicsLayer.translationY` 是不够的：`graphicsLayer` 只改**绘制**，
-                // 布局仍在 y = 0，于是整个当日内容（日期标题 + 空态插画）在 morph 全程
-                // 高了 110dp，标题压在周条上 —— 用户报的"周视图的日期栏出现时机和位置问题"。
-                .offset(y = contentTop.dp)
-                .height((heightDp - contentTop).coerceAtLeast(0f).dp)
                 .graphicsLayer {
-                    val p = progress()
-                    // 内容顶 = 选中行当前所在的位置（`selectedY + 周条高度`），
-                    // 而它的**布局**位置已经是 `contentTop`（终态），所以位移取两者之差。
-                    translationY =
-                        (CalendarLayout.lerp(selectedTop, headH, p) - headH) * density
-                    alpha = CalendarLayout.clamp01((p - 0.3f) / 0.5f)
+                    translationY = (headH + CalendarLayout.WEEK_STRIP_H) * densityF
+                    alpha = CalendarLayout.clamp01((progress() - 0.3f) / 0.5f)
                 },
         ) {
             content()
