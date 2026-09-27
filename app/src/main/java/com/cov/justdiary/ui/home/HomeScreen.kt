@@ -934,6 +934,12 @@ fun HomeScreen(
                     // ⚠️ 前半句 `mode == WEEK` **不能省**：我一度写成 `mode != WEEK || …`，
                     // 结果月视图与年视图下都常驻了一层周条（用户 2026-09-27 当场发现）。
                     // 真实周层只在**周态**存在；月/年态下这一层必须完全不在场上。
+                    //
+                    // ⚠️ **必须带 `weekProgress.value >= 1f`**，否则交班会漏一帧：
+                    // morph 层在 `p >= 1` 撤掉，而 `morphing` 要到协程收尾才变 false ——
+                    // 中间那几帧**两层都不在场**，画面就是"跳一下/闪一下"
+                    //（用户 2026-09-27："切换时候的动画最后都有跳动闪现"）。
+                    // 带上进度条件后两边严格互补：任意时刻恰好一层在画。
                     val weekSettled = mode == HomeViewMode.WEEK &&
                         !morphing && weekProgress.value >= 1f
                     if (weekSettled) {

@@ -1395,7 +1395,12 @@ fun MonthWeekMorph(
                 val selectedBlockTop = selectedRow?.top ?: 0f
                 val drawnWeeks = HashSet<LocalDate>()
                 source.rows.forEachIndexed { i, row ->
-                    if (!row.inSelectedBlock) return@forEachIndexed
+                    // ⚠️ **不再按 `inSelectedBlock` 过滤**（用户 2026-09-27：
+                    // "周到月的时候，只有本月的日期有动画，但是实际上屏幕内还有其他月的日期，
+                    //  也应该有动画"）。屏幕里能看到的行都属于"让位"的一部分：
+                    // 选中周之上的全部向上移出、之下的全部向下淡出 —— 相邻月那些行同理。
+                    // 保留的只有"同一条周只画一次"的去重（`displayedWeeks` 会把跨月那一周
+                    // 在相邻两个月里各算一次）。
                     if (!drawnWeeks.add(row.week.first())) return@forEachIndexed
                     val isSelected = i == source.selectedIndex
                     val rowY: Float
@@ -1440,7 +1445,14 @@ fun MonthWeekMorph(
                     )
                 }
 
-                // ---- 小标题：位置钉在终点，只淡出（用户拍板："让小标题直接在最终位置算了"）----
+                // ---- 小标题：跟着自己的月份一起让位 ----
+                //
+                // 用户 2026-09-27："月到周的时候，小标题不动"。原来它位置钉死、只淡出，
+                // 而它上下的日期都在移动 —— 看着就像"少动了一个元素"。
+                // 现在按**与日期行同一条规则**位移（它是本月的第一行上方那一块，同属"让位"）：
+                //   · 小标题在选中周之上 ⇒ 向上移出；
+                //   · 在选中周之下 ⇒ 向下移出；
+                //   · 与选中周同一个月（即选中周上方那个）⇒ 与选中行同样往上走。
                 val labelAlpha = CalendarLayout.clamp01((1f - p) * 2f)
                 if (labelAlpha > 0.01f) {
                     source.labels.forEach { label ->
@@ -1459,11 +1471,18 @@ fun MonthWeekMorph(
                                 scheme.onSurfaceVariant
                             },
                         )
+                        // 位移规则与日期行一致：在选中周之上 ⇒ 向上移出；之下 ⇒ 向下移出。
+                        val labelTop = label.bottom - labelH
+                        val labelY = if (labelTop < selectedBlockTop) {
+                            labelTop - p * (labelTop + rowH)
+                        } else {
+                            labelTop + p * (heightDp - labelTop)
+                        }
                         drawText(
                             textLayoutResult = layout,
                             topLeft = Offset(
                                 x = DateUtil.weekdayIndex(label.monthFirst, weekStart) * cellPx,
-                                y = (label.bottom - labelH) * densityF,
+                                y = labelY * densityF,
                             ),
                             alpha = labelAlpha,
                         )
