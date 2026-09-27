@@ -459,6 +459,7 @@ private fun DrawScope.drawWeekRow(
     onSurfaceVariant: Color,
     dividerColor: Color,
     lunarBoxHDp: Float,
+    dayBoxHDp: Float = 0f,
     t: Float,
 ) {
     if (alpha <= 0.01f) return
@@ -493,6 +494,7 @@ private fun DrawScope.drawWeekRow(
             onSurface = onSurface,
             onSurfaceVariant = onSurfaceVariant,
             lunarBoxHDp = lunarBoxHDp,
+            dayBoxHDp = dayBoxHDp,
             t = t,
             alpha = alpha,
         )
@@ -540,10 +542,14 @@ internal fun DrawScope.drawDayCell(
     onSurfaceVariant: Color,
     /** 农历那一行 Text 的盒子高度（dp，与真实格子同一个 `LocalTextStyle` 量出来的）。 */
     lunarBoxHDp: Float,
+    /** 日号那一行 Text 的盒子高度（dp）。与 `lunarBoxHDp` 同源量法。 */
+    dayBoxHDp: Float = 0f,
     /** `1` = 月侧端点（月格模型）、`0` = 年侧端点（年历迷你月模型）。 */
     t: Float,
     /** 覆盖"月侧"那份排版（canvas 模式传真组件那套算出来的值）。 */
     monthSideLayout: CellLayout? = null,
+    /** 覆盖"年侧"那份排版（迷你月：圆心 = 格心）。 */
+    miniSideLayout: CellLayout? = null,
     alpha: Float = 1f,
     /** 网格左边缘的 x（px）。 */
     originX: Float = 0f,
@@ -561,11 +567,37 @@ internal fun DrawScope.drawDayCell(
     //  · 月侧（t=1）：`CalendarDayCell` —— Column[圆, 农历, 标记] 居中 + 3dp，农历 −6dp；
     //  · 年侧（t=0）：`YearCanvas` 的迷你月 —— 日号**直接居中在格子里**，
     //    圆半径 = `min(格宽, 格高) × 0.42`，标记挂在圆下方 0.86×半径处，选中/有日记加粗。
-    val layout = monthSideLayout ?: cellLayout(rowYDp, metrics, lunarBoxHDp)
+    // ---- 排版（**直接算在这里**，不经中间层）----
+    //
+    // 用户 2026-09-27 拍板：选中圆里装「日号 + 有日记标记 + 农历」，三样作为**一组**居中；
+    // 英文环境没有农历 ⇒ 自然退化成日号+标记居中。
+    //
+    // 单位约定（与原实现一致）：`m.cellW / cellH / dayFont / lunarFont` 是 **dp**，
+    // 而 `rowY / cellW / cellH` 这几个入参是 **px**；`layout.*` 一律是 **dp**。
+    val dayBox = if (dayBoxHDp > 0f) dayBoxHDp else metrics.dayFont
+    val dayTopDp = rowY / density + (metrics.cellH - dayBox) / 2f
+    val dayCenterDp = dayTopDp + dayBox / 2f
+    // 农历 + 记号 = 组的下半部分，整体下移 LUNAR_TIGHTEN（抵掉圆底的富余）
+    val groupBottomH = lunarBoxHDp + MARK_H
+    val lunarCenterDp = dayTopDp + dayBox + groupBottomH / 2f - CalendarLayout.LUNAR_TIGHTEN
+    val markTopDp = dayTopDp + dayBox + groupBottomH - MARK_H + 1f
+    val monthLayout = monthSideLayout ?: CellLayout(
+        // 圆心 = 整组的中心：上边界取"日号字形上沿"（日号盒子略高于字形）
+        circleCenterY = dayCenterDp + (groupBottomH - (dayBox - metrics.dayFont)) / 2f,
+        dayCenterY = dayCenterDp,
+        lunarCenterY = lunarCenterDp,
+        markTop = markTopDp,
+    )
+    val layout = monthLayout
     val miniBlend = CalendarLayout.clamp01(1f - t)
+    // 年侧：圆心 = 格心（迷你月里日号就是全部内容）。默认与旧的 `cellCenterY` 等价，
+    // 但允许调用方给出更精确的值（见 `miniCellLayout`）。
+    val miniLayout = miniSideLayout ?: miniCellLayout(rowYDp, metrics)
     val cellCenterY = (rowYDp + metrics.cellH / 2f) * density
     val cx = originX + CalendarLayout.cellCenterX(col, metrics.cellW) * density
-    val circleCy = CalendarLayout.lerp(layout.circleCenterY * density, cellCenterY, miniBlend)
+    val circleCy = CalendarLayout.lerp(layout.circleCenterY * density, miniLayout.circleCenterY * density, miniBlend)
+    // 日号跟着**同一族**的排版走（月侧 = 组心、年侧 = 格心），morph 时与圆同步
+    val dayCy = CalendarLayout.lerp(layout.dayCenterY * density, miniLayout.dayCenterY * density, miniBlend)
     val miniRadius = minOf(metrics.cellW, metrics.cellH) * 0.42f * density
     val radius = CalendarLayout.lerp(metrics.circleDiameter / 2f * density, miniRadius, miniBlend)
 
@@ -610,7 +642,7 @@ internal fun DrawScope.drawDayCell(
         textLayoutResult = num,
         topLeft = Offset(
             x = cx - num.size.width / 2f,
-            y = circleCy - num.size.height / 2f,
+            y = dayCy - num.size.height / 2f,
         ),
         alpha = alpha,
     )
@@ -661,7 +693,10 @@ internal fun DrawScope.drawDayCell(
  * 整片日期就会跳一下。
  */
 internal data class CellLayout(
+    /** 选中/今天那个圆的圆心。 */
     val circleCenterY: Float,
+    /** 日号**字形**的垂直中心（与 [circleCenterY] 一致，除非调用方另有要求）。 */
+    val dayCenterY: Float,
     val lunarCenterY: Float,
     val markTop: Float,
 )
@@ -683,11 +718,38 @@ internal fun realCellLayout(
 ): CellLayout {
     val markH = 3f
     val contentH = dayBoxHDp + lunarBoxHDp + markH
+    // 内容组（日号 / 农历 / 标记）在格子里居中
     val top = rowYDp + (m.cellH - contentH) / 2f + CalendarLayout.LUNAR_TIGHTEN / 2f
     return CellLayout(
-        circleCenterY = top + dayBoxHDp / 2f,
+        // ⚠️ **圆心 = 这一组（日号 + 农历 + 标记）的中心**，不是日号那一行的中心。
+        // 用户 2026-09-27 拍板："选中的圆会把日期、写日记标记和农历都放在圆内，
+        // 日期不是在圆的居中，而是**整体居中**"；英文环境没有农历 ⇒ 自然退化成日号居中。
+        // 圆直径本来就是按"内容高 + 14"撑开的，所以整组正好落在圆内且上下留白相等。
+        circleCenterY = top + contentH / 2f,
+        // 日号画在圆心
+        dayCenterY = top + contentH / 2f,
         lunarCenterY = top + dayBoxHDp + lunarBoxHDp / 2f - CalendarLayout.LUNAR_TIGHTEN,
         markTop = top + dayBoxHDp + lunarBoxHDp + 1f,
+    )
+}
+
+/**
+ * **年历那一侧**（[YearCanvas] 的迷你月）的排版：日号直接居中在格子里。
+ *
+ * 与 [realCellLayout] 的区别只有一处 —— 圆心取哪。年侧格子里**没有农历**，
+ * 日号就是全部内容，所以圆心 = 格心（`+ LUNAR_TIGHTEN/2`，与月侧同一个整体偏移）。
+ *
+ * ⚠️ morph 的两端必须都用"同一族"的公式：月侧端点交给 [realCellLayout]，
+ * 年侧端点交给这里 —— 这样 `lerp` 出来的农历位移才是"跟着日号一起动"，
+ * 而不是"日号在动、农历粘在原地"。
+ */
+internal fun miniCellLayout(rowYDp: Float, m: CalendarLayout.DayMetrics): CellLayout {
+    val center = rowYDp + m.cellH / 2f
+    return CellLayout(
+        circleCenterY = center,
+        dayCenterY = center,
+        lunarCenterY = center,
+        markTop = center,
     )
 }
 
@@ -696,11 +758,16 @@ private fun cellLayout(rowY: Float, m: CalendarLayout.DayMetrics, lunarBoxHDp: F
     val columnH = m.circleDiameter + lunarBoxHDp + markH
     val top = rowY + (m.cellH - columnH) / 2f + CalendarLayout.LUNAR_TIGHTEN / 2f
     return CellLayout(
-        circleCenterY = top + m.circleDiameter / 2f,
+        // 与 `realCellLayout` 同一条：圆心 = 整组（圆 + 农历 + 标记）的中心
+        circleCenterY = top + columnH / 2f,
+        dayCenterY = top + columnH / 2f,
         lunarCenterY = top + m.circleDiameter + lunarBoxHDp / 2f - CalendarLayout.LUNAR_TIGHTEN,
         markTop = top + m.circleDiameter + lunarBoxHDp + 1f,
     )
 }
+
+/** "有日记"标记那一行的高度：1dp padding + 2dp 短横线。 */
+private const val MARK_H = 3f
 
 /** 农历盒子高度按字号比例缩放（字号在 morph 里是插值的）。 */
 internal fun lunarBoxHDpFor(lunarFont: Float, flowLunarBoxH: Float): Float =

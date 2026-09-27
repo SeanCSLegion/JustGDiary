@@ -897,7 +897,7 @@ adb -s <serial> pull /sdcard/m.mp4 /tmp/m.mp4
 | 内联月标签 | 横向 = `1 号所在列 × cellW`；纵向占一整行 | §8.8 |
 | `dayFont` / `lunarFont` | `min(20, max(13, cellH×0.34))` / `min(11, max(9, cellH×0.18))` | iOS `MonthPane`；**与 cellH 同源**，改行高字号自动跟随 |
 | `miniDayFont` | `min(14, max(9, min(cellW×0.95, cellH×0.5)))` | iOS `CalendarLayout.miniDayFont` |
-| 今天圆环 / 选中圆 | 1.5dp / 实心，`circleD = min(cellW−3, 内容高+14, cellH−3)` | iOS `CalendarGrids` |
+| 今天圆环 / 选中圆 | 1.5dp / 实心，`circleD = min(cellW−3, 内容高+14, cellH−3)`。**内容 = 日号 + 有日记标记 + 农历三样**，这三样作为**一组居中在圆内**（用户 2026-09-27 拍板："选中圆会把日期、写日记标记和农历都放在圆内，日期不是在圆的居中，而是整体居中"；英文环境没有农历 ⇒ 自然退化成"日号 + 标记"居中） | iOS `CalendarGrids` |
 | 有日记短横线 | `min(20, cellW×0.5)` × 2dp，日号下方 2dp | iOS `CalendarGrids` |
 | 未来日期 | `onSurfaceVariant`（语义色，不用 alpha） | R3 修正；iOS 原为整格 alpha 0.35 |
 | 密度阈值 | ≥60 显示农历 / ≥38 不显示 / 否则周条 | iOS `CalendarDensity` |

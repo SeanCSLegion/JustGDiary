@@ -286,11 +286,18 @@ object CalendarLayout {
     /** 日号与农历之间的空档要收掉多少 dp（圆底比数字本身高出一截）。 */
     const val LUNAR_TIGHTEN = 6f
 
-    /** 一格"日号 + 农历"的自然高度（`CalendarDayCell` 注释实测 ≈ 70dp，留 2dp 余量）。 */
+    /**
+     * 一格「日号 + 农历 + 有日记标记」的自然高度。
+     *
+     * ⚠️ 2026-09-27：现在这个值直接当**行高**用（见 [flowCellHeightFor]），不再是
+     * "下限"。真机实测一格内容是：日号盒子 27 + 农历盒子 24 + 标记 3 ≈ **54dp**，
+     * 72 留出约 9dp/侧的呼吸 —— 与 iOS 那条 94pt 的行高尺子也基本吻合
+     *（`byArea` 在 Pixel 10 Pro / MEIZU 21 这类机器上约 95~101dp，取 `min` 后行高就是 72）。
+     */
     const val DAY_CELL_CONTENT_H = 72f
 
-    /** 一格只有日号（无农历）时的自然高度：以选中圆直径为据。 */
-    const val DAY_CELL_NO_LUNAR_H = 48f
+    /** 一格只有日号（无农历）时的自然高度：日号盒子 + 标记，同样按"整体居中"重新量的。 */
+    const val DAY_CELL_NO_LUNAR_H = 44f
 
     /** 网格的**实际**高度（当月行数 × 行高）。 */
     fun monthGridHeight(rows: Int, cellH: Float): Float = max(0, rows) * cellH
@@ -397,7 +404,7 @@ object CalendarLayout {
      * 连续性不受影响：块与块之间只是多出这一段，
      * `block.bottom`（最后一行底）与下一块的 `top` 之间隔着它，小标题正好落在这段里。
      */
-    const val MONTH_GAP = 10f
+    const val MONTH_GAP = 16f
 
     /**
      * 竖屏连续月历流的行高：**与 iOS 同一条尺子** —— `(区高 − 标题槽 − 星期栏) / 6`。
@@ -420,10 +427,16 @@ object CalendarLayout {
         fontScale: Float = 1f,
         showLunar: Boolean = true,
     ): Float {
-        val byFill = (areaH - headerH) / MONTH_ROWS
-        val natural = if (showLunar) DAY_CELL_CONTENT_H else DAY_CELL_NO_LUNAR_H
-        val byContent = natural * max(1f, fontScale)
-        return max(byFill, byContent).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
+        val byContent =
+            (if (showLunar) DAY_CELL_CONTENT_H else DAY_CELL_NO_LUNAR_H) * max(1f, fontScale)
+        // ⚠️ 2026-09-27：**行高改成跟内容走**，不再取 `max(视口均分, 内容)`。
+        // 用户："现在行高也要一并缩小了" —— 选中圆改成"三样整体居中"、圆不再被内容撑大
+        //（真机实测圆直径是被**格宽**夹住的：cellW 56.1 ⇒ 圆 53.1），一格里真正的内容
+        // 只有 ~54dp；再按"视口 6 等分"给到 ~101dp，一行就多出 ~47dp 的纯留白，
+        // 一个月凭空高出一大截。现在按内容给行高，一屏能踏实放下 6 行还富余一些。
+        // `areaH` 只作为**上限**：视口比内容还矮时才压缩（横屏左栏那种情况）。
+        val byArea = (areaH - headerH) / MONTH_ROWS
+        return minOf(byContent, byArea).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
     }
 
     /**

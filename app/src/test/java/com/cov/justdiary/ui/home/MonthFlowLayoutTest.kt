@@ -136,32 +136,49 @@ class MonthFlowLayoutTest {
      * 2b) **小标题与上个月最后一行要隔开**（用户 2026-09-27："小月份和上一个月的最后要
      * 稍微隔开一点，以小月份的上方为限"）。
      *
-     * 小标题整块高度 = 带高 + 3dp 间隙，必须**放得进**上一行底部的留白
-     * `(行高 − 内容高)/2`，这样它的**顶边**之上还剩一段真实的空档。
+     * ⚠️ 小标题落在**两个月的间隔**里，不是落在"行内留白"里 ——
+     * 它由 `MonthFlowBlock` 用 `offset(-(labelBandH + LABEL_TIGHT_GAP))` 摆到本月第一行
+     * 上方，所以真正要成立的不等式是：
+     *
+     * ```
+     * MONTH_GAP + 上一行底部留白 × 2 ≥ 小标题整块 + 一点真正的空档
+     * ```
+     *
+     * （旧断言写的是"留白 ≥ 小标题整块"，那只有在行高被视口均分撑到 ~95dp 时才成立；
+     *  2026-09-27 行高改成按内容给（~72dp）之后，行内留白只有 ~16dp，小标题的空间
+     *  由 `MONTH_GAP`（10 → 16）补上。真机上另用截图逐像素核过。）
      */
     @Test
     fun `the label keeps a gap above the previous month's last row`() {
-        val padding = contentTopPadding
-        // 小标题整块（带高 + 3dp 间隙）必须放得进上一行底部的留白
+        val room = CalendarLayout.MONTH_GAP + contentTopPadding * 2f
+        val needed = labelH + CalendarLayout.LABEL_TIGHT_GAP
         assertTrue(
-            "留白 ${'$'}padding 要放得下小标题 ${'$'}{labelH + CalendarLayout.LABEL_TIGHT_GAP}",
-            padding >= labelH + CalendarLayout.LABEL_TIGHT_GAP,
+            "月间隔 + 两侧留白 ${'$'}room 要放得下小标题 ${'$'}needed",
+            room >= needed,
         )
-        // 而且"小标题顶边"之上还有真正的空档（用户要的"稍微隔开一点"）
-        val gap = padding - labelH - CalendarLayout.LABEL_TIGHT_GAP
+        val gap = room - needed
         assertTrue("小标题上方要留出空档（当前 ${'$'}gap dp）", gap >= 4f)
     }
 
-    /** 行高 = iOS 那条尺子：一屏正好 6 行（分区高 = 标题槽 + 星期栏 + 6 行）。 */
+    /**
+     * 行高**按内容给**（2026-09-27 用户拍板改的规则）。
+     *
+     * 旧规则是"视口 6 等分（对齐 iOS 的 94pt）"；但选中圆改成"三样整体居中"之后，
+     * 一格真正的内容只有 ~54dp，再按均分给到 ~95dp 就多出近 40dp 纯留白。
+     * 现在 `flowCellHeightFor` 取 `min(内容高, 视口均分)` —— 视口只作为**上限**。
+     */
     @Test
-    fun `row height fills the viewport with six rows like ios`() {
-        assertEquals(
-            "六行正好铺满视口（iOS 同一条尺子）",
-            viewportH,
-            rowH * CalendarLayout.MONTH_ROWS,
-            0.001f,
+    fun `row height follows the content and the viewport only caps it`() {
+        assertTrue(
+            "行高不得超过视口均分（否则一个月的行数会被挤出屏幕）",
+            rowH <= viewportH / CalendarLayout.MONTH_ROWS + 0.001f,
         )
-        // 系统字号放大时行高要跟着长，否则"日号 + 农历"会被裁掉
+        val metrics = CalendarLayout.flowMetrics(calendarW, rowH, showLunar = true)
+        assertTrue(
+            "行高 ${'$'}rowH 要放得下这一组内容 ${'$'}{metrics.contentH}",
+            rowH >= metrics.contentH,
+        )
+        // 系统字号放大时行高要跟着长，否则内容会被裁掉
         val big = CalendarLayout.flowCellHeightFor(bandH, fontScale = 2f, showLunar = true)
         assertTrue("字号放大后行高要跟着长", big > rowH)
     }
@@ -186,7 +203,7 @@ class MonthFlowLayoutTest {
      * 「下一个月的日期会立即出现」。
      */
     @Test
-    fun `the viewport at rest shows six rows or the next month's first row`() {
+    fun `the viewport at rest shows the next month's first row when rows are compact`() {
         val l = layout()
         for (key in listOf(202608, 202609, 202602)) {
             val i = l.blockIndexForKey(key)
@@ -201,13 +218,10 @@ class MonthFlowLayoutTest {
                 nextTop,
                 0.001f,
             )
-            if (block.rowCount == 6) {
-                assertEquals("六行正好铺满视口", viewportH, rowsH, 0.001f)
-                assertEquals("六行月的下一行在视口之外（还多了 MONTH_GAP）", rest + viewportH, nextTop - CalendarLayout.MONTH_GAP, 0.001f)
-            } else {
-                assertTrue("五行月底下会露出下个月的开头", rowsH < viewportH)
-                assertTrue("所以下一行确实露在视口里", nextTop < rest + viewportH)
-            }
+            // 行高按内容给（~72dp）之后，视口（~700dp）里装得下 6 行还富余
+            // —— 所以任何月份底下都会露出下个月的开头，这正是"紧凑"的表现。
+            assertTrue("本月最后一行之下要留出视口余量", rowsH < viewportH)
+            assertTrue("所以下个月的第一行确实露在视口里", nextTop < rest + viewportH)
         }
     }
 

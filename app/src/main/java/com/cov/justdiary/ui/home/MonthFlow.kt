@@ -898,8 +898,8 @@ private fun BlockCanvas(
                         onSurface = scheme.onSurface,
                         onSurfaceVariant = scheme.onSurfaceVariant,
                         lunarBoxHDp = lunarBoxH,
+                        dayBoxHDp = dayBoxH,
                         t = 1f,
-                        monthSideLayout = layout,
                     )
                 }
             }
