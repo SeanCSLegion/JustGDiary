@@ -99,6 +99,15 @@ fun CalendarDayGrid(
     rowAlphas: FloatArray? = null,
     /** 月 ↔ 周 morph：每一行的度量（不传则全部用 [metrics]）。 */
     rowMetrics: Array<CalendarLayout.DayMetrics>? = null,
+    /**
+     * 相邻月日期的透明度（**读取器**，不传则恒为 1）。
+     *
+     * 月↔周 morph 里只有被点中的那一行会带相邻月日期，而且要按进度淡入
+     * （对应 iOS 的 `adjacentAlpha`）—— `p = 0` 时它们完全透明，morph 的第一帧
+     * 才能与月视图逐像素一致。传 lambda 是为了在 `graphicsLayer` 的延迟阶段读它，
+     * 不让那 3~4 个格子每帧重组。
+     */
+    adjacentAlpha: () -> Float = { 1f },
     /** 行之间是否画分隔线（周条不画）。 */
     showDividers: Boolean = true,
     /**
@@ -193,7 +202,14 @@ fun CalendarDayGrid(
                         diaryMarkWidth = minOf(20f, m.cellW * 0.5f).dp,
                         enabled = rowAlpha > 0.01f,
                         onClick = { onDayClick(date) },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            // 相邻月：按 `adjacentAlpha` 淡入（morph 的选中行用）。
+                            // 延迟读取 —— 进度变化只让这一层失效，格子不重组。
+                            .then(
+                                if (inMonth) Modifier
+                                else Modifier.graphicsLayer { alpha = adjacentAlpha() },
+                            ),
                     )
                 }
             }

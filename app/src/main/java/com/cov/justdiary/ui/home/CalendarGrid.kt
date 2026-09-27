@@ -75,6 +75,21 @@ object CalendarGrid {
         return rows
     }
 
+    /**
+     * [displayedWeeks] 的**行数**，O(1) 算出来。
+     *
+     * 连续月历流（[MonthFlowLayout]）要为 1900–2100 共 2412 个月建前缀偏移，
+     * 每个月都去展开一次周数组（6×7 次判断）会拖慢首次布局；行数只取决于
+     * 「1 号是星期几 + 这个月几天」：`ceil((前导天数 + 当月天数) / 7)`，
+     * 而最后一格一定含当月的一天，所以不会有需要裁掉的空尾行 —— 与
+     * [displayedWeeks] 等价（由 `MonthFlowLayoutTest` 在 2412 个月上守住）。
+     */
+    fun displayedWeekCount(monthFirst: LocalDate, weekStart: String): Int {
+        val lead = DateUtil.weekdayIndex(monthFirst, weekStart)
+        val days = monthFirst.lengthOfMonth()
+        return maxOf(1, ((lead + days + 6) / 7))
+    }
+
     /** 含该日期的那一周的第一天（周条的键）。 */
     fun weekKeyOf(date: LocalDate, weekStart: String): String =
         DateUtil.dayKeyOf(DateUtil.weekFirst(date, weekStart))

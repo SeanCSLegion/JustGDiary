@@ -44,39 +44,6 @@ class CalendarMorphTest {
 
     // ------------------------------------------------------------------ 年 ↔ 月
 
-    /**
-     * **不变量**：p = 0 时，每一行的目标 y 必须**逐行等于自然排布** `row × cellH`。
-     *
-     * 这条断言如果早就有，就不会出现"行位移一挂上就跳一格"的问题
-     * （原测试把错误值当期望值钉住了）。
-     */
-    @Test
-    fun `at rest every row offset equals its natural position`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
-        val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
-        for (selected in 0 until CalendarLayout.MONTH_ROWS) {
-            val baseRowY = metrics.cellH * selected
-            val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
-            val state = CalendarLayout.monthWeekMorph(0f, baseRowY, monthHeight, metrics, week)
-            val offsets = CalendarLayout.monthWeekRowOffsets(
-                state = state,
-                rows = CalendarLayout.MONTH_ROWS,
-                selectedWeekIndex = selected,
-                cellH = metrics.cellH,
-            )
-            for (row in 0 until CalendarLayout.MONTH_ROWS) {
-                assertEquals(
-                    "selected=$selected row=$row",
-                    row * metrics.cellH,
-                    offsets[row],
-                    1e-3f,
-                )
-            }
-        }
-    }
-
     @Test
     fun `year month morph starts exactly at the month grid`() {
         val state = CalendarLayout.yearMonthMorph(0f, miniGrid, fullGrid, showLunar = true)
@@ -209,80 +176,22 @@ class CalendarMorphTest {
 
     // ------------------------------------------------------------------ 月 ↔ 周
 
+    /**
+     * 月↔周 morph 现在由**冻结的连续流几何**驱动（`MonthFlowMorphSource`），
+     * 唯一还留在这一层的是周条自身的淡入曲线：它必须比内容区**更陡**
+     * （`p ≈ 0.55` 就退干净），否则返回月态时会留下残影（用户实测过）。
+     *
+     * 几何那一侧（行位置、落点、方向对称）由 `MonthFlowLayoutTest` 与
+     * `MonthFlow.kt` 里的 `morphSource` 守着。
+     */
     @Test
-    fun `month week morph starts at the month layout`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
-        val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
-        val baseRowY = metrics.cellH * 2
-        val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
-
-        val state = CalendarLayout.monthWeekMorph(0f, baseRowY, monthHeight, metrics, week)
-
-        assertEquals(baseRowY, state.selectedRowY, 1e-3f)
-        assertEquals(metrics.cellH, state.metrics.cellH, 1e-3f)
-        assertEquals(metrics.dayFont, state.metrics.dayFont, 1e-3f)
-        // p=0：两侧位移都为 0 -> 每一行都在**自然位置**（差一格的 bug 就出在这里）
-        assertEquals(0f, state.upShift, 1e-3f)
-        assertEquals(0f, state.downShift, 1e-3f)
-        assertEquals(0f, state.titleOffsetY, 1e-6f)
-        assertEquals(1f, state.titleOpacity, 1e-6f)
-        assertEquals(0f, state.contentT, 1e-6f)
-        assertEquals(0f, state.contentAlpha, 1e-6f)
-        // 内容区起点 = stripBottom 98 + (40 + 20)
-        assertEquals(158f, state.contentOffsetY, 1e-3f)
-    }
-
-    @Test
-    fun `month week morph ends at the week strip layout`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
-        val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
-        val baseRowY = metrics.cellH * 2
-        val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
-
-        val state = CalendarLayout.monthWeekMorph(1f, baseRowY, monthHeight, metrics, week)
-
-        // 选中行上移到星期栏高度处
-        assertEquals(CalendarLayout.WEEKDAY_HEADER_H, state.selectedRowY, 1e-3f)
-        assertEquals(week.cellH, state.metrics.cellH, 1e-3f)
-        assertEquals(week.dayFont, state.metrics.dayFont, 1e-3f)
-        // p=1：上移量刚好把选中行送到周条位置；下移量刚好把下方首行推出底部
-        assertEquals(baseRowY - CalendarLayout.WEEKDAY_HEADER_H, state.upShift, 1e-3f)
-        assertEquals(monthHeight - baseRowY, state.downShift, 1e-3f)
-        assertEquals(-CalendarLayout.BIG_TITLE_H, state.titleOffsetY, 1e-3f)
-        assertEquals(0f, state.titleOpacity, 1e-6f)
-        assertEquals(1f, state.contentT, 1e-6f)
-        assertEquals(98f, state.contentOffsetY, 1e-3f)
-        assertEquals(1f, state.contentAlpha, 1e-6f)
-    }
-
-    @Test
-    fun `month week morph interpolates monotonically`() {
-        val metrics = CalendarLayout.monthMetrics(
-            portraitW, monthAreaH, showLunar = true, headerH = CalendarLayout.WEEKDAY_HEADER_H,
-        )
-        val week = CalendarLayout.weekMetrics(portraitW, showLunar = false)
-        val baseRowY = metrics.cellH * 2
-        val monthHeight = metrics.cellH * CalendarLayout.MONTH_ROWS
-
-        var previousRowY = Float.MAX_VALUE
-        var previousUpShift = -1f
-        var previousDownShift = -1f
-        var previousContentAlpha = -1f
-        for (step in 0..20) {
-            val state = CalendarLayout.monthWeekMorph(step / 20f, baseRowY, monthHeight, metrics, week)
-            assertTrue("选中行应持续上移", state.selectedRowY <= previousRowY + 1e-3f)
-            // 两侧位移都**单调递增**（用户要的是"整体位移"，不是"压缩+淡出"）
-            assertTrue("上方整体应持续上移", state.upShift >= previousUpShift - 1e-3f)
-            assertTrue("下方整体应持续下移", state.downShift >= previousDownShift - 1e-3f)
-            assertTrue("内容区应持续淡入", state.contentAlpha >= previousContentAlpha - 1e-6f)
-            previousRowY = state.selectedRowY
-            previousUpShift = state.upShift
-            previousDownShift = state.downShift
-            previousContentAlpha = state.contentAlpha
+    fun `week strip fades out steeper than the content`() {
+        assertEquals(0f, CalendarLayout.weekStripAlpha(0f), 1e-6f)
+        assertEquals(1f, CalendarLayout.weekStripAlpha(1f), 1e-6f)
+        assertTrue("过半之前就要退干净", CalendarLayout.weekStripAlpha(0.55f) >= 0.99f)
+        for (step in 0..10) {
+            val p = step / 10f
+            assertTrue("单调不减", CalendarLayout.weekStripAlpha(p) >= CalendarLayout.weekStripAlpha(p - 0.1f) - 1e-6f)
         }
     }
 

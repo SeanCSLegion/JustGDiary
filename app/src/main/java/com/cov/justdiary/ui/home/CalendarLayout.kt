@@ -412,6 +412,39 @@ object CalendarLayout {
         dividerAlpha = 0f,
     )
 
+    // ------------------------------------------------------- 连续月历流（MonthFlow）
+
+    /**
+     * 小标题与它下面那条分割线之间的间隙（「紧贴」的那个「紧」）。
+     *
+     * iOS `MonthFlowView.labelTightGap`：小标题底边 = 本月第一行顶 − 3dp，
+     * 于是它整个落在**上个月最后一行底部的留白**里，不额外占高度。
+     */
+    const val LABEL_TIGHT_GAP = 3f
+
+    /** 连续月历流里小标题的字号（竖屏 15 / 横屏紧凑 13）。 */
+    fun flowLabelFontSize(compact: Boolean): Float = if (compact) 13f else 15f
+
+    /**
+     * 连续月历流里「月份之间那一带」的高度 = **小标题这一行字本身的高度**。
+     *
+     * 用户看过第一版（一个整行高 ≈ 94dp）说「间隔太多」，看过第二版（35dp）又说
+     * 「还是太高，应该紧贴月份高度」，所以这里不再加任何上下留白：
+     * 竖屏 15dp 字 → **21dp**；横屏紧凑 13dp 字 → **18dp**。
+     * 上下看起来的空白来自日期行自身的垂直居中留白，不需要带子再让一份。
+     */
+    fun flowLabelBandHeight(compact: Boolean): Float =
+        (flowLabelFontSize(compact) * 1.4f).roundToInt().toFloat()
+
+    /**
+     * 连续月历流单行的绘制参数。
+     *
+     * 字号跟着行高走：竖屏行高 ~94dp 时仍是设计里的 20/11；横屏左栏一格只有 40dp，
+     * 20dp 日号 + 11dp 农历会上下叠在一起（横屏左栏一直是按格高推导字号）。
+     */
+    fun flowMetrics(width: Float, rowH: Float, showLunar: Boolean): DayMetrics =
+        monthPaneMetrics(cellW = monthCellW(width), cellH = rowH, showLunar = showLunar)
+
     /** 迷你月（年历）的日号字号：`clamp(min(cellW*0.95, cellH*0.5), 9, 14)`。 */
     fun miniDayFont(cellW: Float, cellH: Float): Float = clamp(min(cellW * 0.95f, cellH * 0.5f), 9f, 14f)
 
@@ -646,111 +679,16 @@ object CalendarLayout {
     // ------------------------------------------------------------------ morph：月 ↔ 周
 
     /**
-     * 月 ↔ 周 morph 在进度 `progress`（0 = 月历、1 = 周态）时的插值量。
-     *
-     * 对应 `MorphViews.MonthWeekMorphView`：选中行上移到周条位置，上下两行向两侧移出，
-     * 大标题上移淡出，内容区上移淡入。
-     */
-    data class MonthWeekMorphState(
-        /** 选中行在当前进度下的 y。 */
-        val selectedRowY: Float,
-        /** 选中行的度量（在月格与周条之间插值）。 */
-        val metrics: DayMetrics,
-        /** 选中行的透明度。 */
-        val selectedRowAlpha: Float,
-        /**
-         * 两侧的**整体位移量**（用户 2026-09-26 明确描述的动效模型）。
-         *
-         * 选中行及其**上方**各行一起上移 [upShift]（相对间距**不变**），
-         * 直到选中行到达周条位置；选中行**下方**各行一起下移 [downShift] 直到移出屏幕。
-         *
-         * 原来是"上方各行向选中行压缩并淡出"，那会让观感变成
-         * "先上移压缩、再展开周视图"两段动画 —— 用户否掉了那个模型。
-         */
-        val upShift: Float,
-        val downShift: Float,
-        /** 大标题的位移与透明度。 */
-        val titleOffsetY: Float,
-        val titleOpacity: Float,
-        /** 周条自身的透明度（比内容区更陡，避免返回时留残影）。 */
-        val stripAlpha: Float,
-        /** 内容区的进度、位移与透明度。 */
-        val contentT: Float,
-        val contentOffsetY: Float,
-        val contentAlpha: Float,
-    )
-
-    /**
-     * @param baseRowY 选中行在月格里的基准 y（= row * cellH）
-     * @param monthHeight 月格区域的总高（= rows * cellH）
-     * @param monthMetrics 月格度量
-     * @param weekMetrics 周条度量
-     * @param stripBottom 周条下方内容区的目标 y（iOS 用 98）
-     * @param dayTitleH 周态日期标题行高度（40），内容区上移量含它 + 20
-     * @param stripTopY 选中行在**自己容器里的落点**。
-     *   iOS 的周条容器在星期栏**之后**，所以落点是 `WEEKDAY_HEADER_H`（30）；
-     *   Android 的周条容器紧跟在（会淡出的）星期栏下方，落点是 **0** ——
-     *   用 30 会让选中行在动画中段从星期栏文字上穿过去（实测"日号叠在周一上"）。
-     */
-    /**
-     * 周条自身的透明度：比内容区**更陡**（p 到 0.55 左右就退干净）。
+     * 周条自身的透明度：比内容区**更陡**（`p` 到 0.55 左右就退干净）。
      *
      * 用户实测："周视图切换到月视图的时候，周视图的消失慢了点，能看到动画残影。"
+     *
+     * ⚠️ 2026-09-27：月态改成**连续月历流**之后，月↔周 morph 的几何不再由
+     * 「第几行 × 行高」推导 —— 起点是按下那一刻**屏幕上的真实行几何**
+     * （`MonthFlowMorphSource`，见 `MonthFlow.kt`），所以那条老的
+     * `monthWeekMorph` / `monthWeekRowOffsets` 已删除。这里只剩这一条与几何无关的曲线。
      */
     fun weekStripAlpha(progress: Float): Float = clamp01(progress * 1.8f)
-
-    fun monthWeekMorph(
-        progress: Float,
-        baseRowY: Float,
-        monthHeight: Float,
-        monthMetrics: DayMetrics,
-        weekMetrics: DayMetrics,
-        stripBottom: Float = 98f,
-        dayTitleH: Float = DAY_TITLE_H,
-        stripTopY: Float = WEEKDAY_HEADER_H,
-    ): MonthWeekMorphState {
-        val p = clamp01(progress)
-        val contentT = clamp01((p - 0.25f) / 0.75f)
-
-        return MonthWeekMorphState(
-            selectedRowY = lerp(baseRowY, stripTopY, p),
-            metrics = monthMetrics.lerp(weekMetrics, p),
-            selectedRowAlpha = 1f,
-            // 上移量：选中行从 `baseRowY` 走到 `stripTopY`；上方各行**同步同量**上移
-            // （所以它们之间的相对间距完全不变 -> 观感是"整块往上走"）。
-            upShift = (baseRowY - stripTopY) * p,
-            // 下移量：下方第一行从 `baseRowY + cellH` 走到 `monthHeight + cellH`，即刚好移出底部。
-            downShift = (monthHeight - baseRowY) * p,
-            titleOffsetY = -p * BIG_TITLE_H,
-            titleOpacity = 1f - clamp01(p * 2f),
-            // 周条的淡入淡出比内容区**更陡**：返回时它必须在 p 还比较大时就退干净，
-            // 否则会留下"残影"（用户实测："周视图的消失慢了点，能看到动画残影"）。
-            stripAlpha = weekStripAlpha(p),
-            contentT = contentT,
-            contentOffsetY = stripBottom + (dayTitleH + 20f) * (1f - contentT),
-            // 当日面板：返回时也要**早退**（原来 p 降到 0.3 才开始淡出，尾巴拖得长，
-            // 与周条一起构成"残影"）。阈值抬到 0.5，返回时前 20% 就退干净。
-            contentAlpha = clamp01((p - 0.5f) / 0.3f),
-        )
-    }
-
-    /**
-     * 每一行的**绝对**网格局部 y（[CalendarDayGrid] 的 `rowOffsets` 用的就是它）。
-     *
-     * 抽成纯函数是为了可测：**p = 0 时它必须逐行等于自然排布 `row × cellH`**，
-     * 否则行位移一挂上就会整块跳一格（这个 bug 就是这么漏出去的）。
-     */
-    fun monthWeekRowOffsets(
-        state: MonthWeekMorphState,
-        rows: Int,
-        selectedWeekIndex: Int,
-        cellH: Float,
-    ): FloatArray = FloatArray(rows) { row ->
-        val natural = row * cellH
-        // 选中行与它上方的行：**同一个位移量**（整体上移，相对间距不变）
-        // 选中行下方的行：整体下移
-        if (row <= selectedWeekIndex) natural - state.upShift else natural + state.downShift
-    }
 
     // ------------------------------------------------------------------ 翻页
 

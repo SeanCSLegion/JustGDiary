@@ -1832,6 +1832,81 @@ LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
    `if (true) ... else` 分支、只被它们读的拖动状态）尚未清理；
 3. 年态的翻年也已换成列表（与月/周一致），但用户尚未专门复测过。
 
+## R6 · 月态改「连续月历流」：去掉吸附、无级跟手、周/年切换从哪来到哪去
+
+**用户（2026-09-27）**："我需要你重新去掉吸附效果，重新尝试实现滑动无级，并且跟手。
+周视图的月视图的切换都要从哪来到哪去，注意做好动画切换的位置计算和动画效果。
+月视图和年视图的切换也要一并进行检查。对应的 iOS 版本已经基本实现了我的需求，
+你可以参照 iOS 版本来实现 Android 版本的动画。"
+
+### 做法：逐条移植 iOS `Views/Home/MonthFlow.swift`（commit `fbbfb83`）
+
+| iOS | Android |
+| --- | --- |
+| `MonthFlowLayout`（纯几何，2400 个月的前缀偏移） | `MonthFlowLayout`（同结构，dp，可 JVM 断言） |
+| `MonthFlowView`（`Animatable` 逐帧插值） | `MonthFlow`（`FlowScroll` + 延迟读取，见下） |
+| `MonthFlowMorphSource`（冻结"按下那一刻屏幕上的行几何"） | 同名 data class + `MonthWeekMorph` |
+| `dominantBlockIndex`（顶部大标题 = 占视口最多的那一块） | 同 |
+| 拖动 2pt 起手 / 橡皮筋 / `stiffness 130 · damping 26` 弹簧 | `MonthFlowPhysics`（三个常数与 iOS 逐字相同） |
+| 右缘滚动指示条 | `FlowScrollIndicator` |
+
+**删掉的东西**：月态的 `LazyColumn` + `rememberSnapFlingBehavior` + "停稳后拨回项起点"
+的兜底吸附；`CalendarSection` / `CalendarSectionArgs` / `neighborMonthArgs` /
+`CalendarLayout.monthWeekMorph` / `monthWeekRowOffsets` / `MonthWeekMorphState`
+（那套"第几行 × 行高"的推导正是 §8.9.2 那个严重 bug 的根因）。
+
+### 关键实现点（踩过的坑都记在这里）
+
+1. **偏移只在延迟 lambda 里读**：`Modifier.offset { }`（块位置）、`graphicsLayer { }`
+   （年 morph 的缩放 / morph 层每一行）。组合期只读两个 `derivedStateOf`：
+   "画哪几块"（收敛成 `IntRange`）与"顶部是哪个月"（收敛成块序号）——
+   滚动过程中**这条流不重组**。首轮"不跟手、卡顿"的根因就是组合期读了位移。
+2. **`AwaitPointerEventScope` 是受限协程作用域**：里面不能调 `Animatable.snapTo`
+   这类 suspend 函数。所以偏移是普通快照状态，动画由协程里的 `Animatable`
+   逐帧回写（`animateOffset`）。
+3. **内容层的原点必须落在钉住层之下**：钉住层与内容是同一个 `Box` 里的叠层
+   （不是 iOS 那种 `VStack`），少了 `offset(y = headerH)` 这一句，
+   每个月都会画到标题底下去 —— 静止时那 72+30dp 正好把本月第一行整个盖掉。
+4. **钉住层的透明度 = 可见性 × 年 morph 曲线**：少了"可见性"那一半，周态 / 年态里
+   那颗大标题会穿在周条后面（周层没有底色，一眼可见）。
+5. **小标题不能加固定高度**：Compose 在高度放不下**一整行**（含 `includeFontPadding`）
+   时会把整行字**一个都不画** —— 21dp 带高下节点在、语义在、屏幕上什么都没有；
+   把高度放到 60dp 立刻正常。现在让它自己量高，只用 `offset` 摆顶边。
+6. **小标题要带底色**：Android 竖屏行高由列宽推出（73dp），上一行底部留白只有 ~19dp，
+   放不下 21+3dp 的小标题 —— "1 号正好是周首日"的月份（约 1/7）会压到前一行的农历上。
+   给这一行字一块 `surface` 底，压住的部分干净让位（iOS 行高 94pt 留白 29.5pt，不受影响）。
+7. **`MonthWeekMorph` 只让"被点中的那一行"逐帧重组**（它的度量要从月格缩到周条），
+   其余行的位置 / 透明度全在延迟 lambda 里算；进周态的 morph 起点与屏幕上那一帧
+   **逐像素一致**（这是"从哪来到哪去"的前提）。
+
+### 真机（Pixel 10 Pro AVD）实测
+
+| 用例 | 结果 |
+| --- | --- |
+| 慢拖 300px 松手 | **停在原地不吸附**；标题按"占屏最多"换成十月；右胶囊改显示"9月27日" |
+| 快甩 | 平滑减速到预测落点停住（`v=-7698dp/s → 跨 4249dp / 1.4s`，`--ez morph-log` 量到） |
+| 滚到半月位置 → 点日期 ×2 → 返回 | **9月15日 回到完全相同的 bounds**（`[182,842][365,1061]`，改动前 / 改动后逐字相同）|
+| 月 → 年 | 连续流原地缩小进"当前月那张卡"，年历 1.6 → 1 淡入（源卡片为锚点）|
+| 年 → 月 | 点迷你月：网格从卡片长出来，**下个月的日期立即出现**（月末露在视口底部）|
+| 今天 / 翻年 / 返回键 | 都正常（翻年的手势在这一轮重构里掉过一次，已补回）|
+| 平板分栏（`wm size 2000x1200`） | 左栏同一套连续流（紧凑小标题），右栏当日内容；行高按 6 行等分（与 iOS 相同）|
+| 深色 | 内联小标题的底色跟着 `surface` 走，遮挡干净 |
+
+### 测试
+
+- 新增 `MonthFlowLayoutTest`（**17 条**，逐条移植 iOS `MonthFlowLayoutTests`
+  + 手感物理）：行高一致 / 月份之间不留空隙 / 小标题在分割线上方 / 静止偏移 /
+  视口内容 / 可见块 / 小标题列号 / 顶部月份"过半才换" / `displayedWeekCount`
+  与 `displayedWeeks` 在 **2412 个月**上逐月一致 / 弹簧三常数。
+- `CalendarMorphTest` 里"第几行 × 行高"的那几条随数学一起删除，只留
+  `weekStripAlpha`（周条的淡出必须比内容区更陡）。
+- 全量 **416** 条 JVM 单测通过。
+
+### 与 iOS 的两处刻意差异（平台要求，不是省事）
+
+1. 每一个日期都是**真实的 Compose 组件**（TalkBack 逐格可读），不是 Canvas；
+2. 钉住层带 `surface` 底色（iOS 靠 `clipped()` 切齐，不需要底色）。
+
 ### 已知遗留
 
 - 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见

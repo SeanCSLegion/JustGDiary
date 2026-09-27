@@ -1,0 +1,1284 @@
+package com.cov.justdiary.ui.home
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import com.cov.justdiary.app.DebugFlags
+import com.cov.justdiary.model.DateUtil
+import com.cov.justdiary.service.Log
+import com.cov.justdiary.ui.theme.DynamicTypeMetrics
+import com.cov.justdiary.ui.theme.TypeSize
+import java.time.LocalDate
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+// ===========================================================================
+// 连续月历流（月视图：竖屏整屏 / 平板分栏左栏）
+//
+// **逐条移植**自 iOS `Views/Home/MonthFlow.swift`（commit fbbfb83）。
+//
+// 改造前：一个月一页，上下滑**整页翻月**（`LazyColumn` + `rememberSnapFlingBehavior`
+// + 「停稳后拨回项起点」的兜底吸附）。用户：「吸附效果其实效果很不好」。
+// 改造后：顶部「大月份标题 + 星期栏」钉住不动，下面是**一条连续滚动的月份流**：
+//
+//     ┌ 九月 ◀── 大标题：钉住，跟着滚动实时切成「占住视口最多的那一个月」
+//     │ 一 二 三 四 五 六 日 ◀── 星期栏：钉住
+//     ├──────────────────────────────────────────────
+//     │ 28 29 30                       ← 上个月的最后一行
+//     │              10月              ← 小标题：在**分割线上方**、紧贴它
+//     │  ──  ──  ──  ──                ← 按格画的分割线（只画有日期的那几格）
+//     │                 1  2  3  4      ← 本月第一行（分割线在日期上面）
+//     │  5  6  7  8  9 10 11
+//     └──────────────────────────────────────────────
+//
+// 三条几何约定（全部由 [MonthFlowLayout] 精确算出来 —— morph 的起点必须与屏幕上
+// 画的东西逐像素一致，所以不能依赖懒加载测量）：
+//
+// 1. **行高全局一致**：每个月 = 一行小标题带 + 若干周行，都是同一个 `rowH`。
+// 2. **月份之间不留空隙**：两个月的行紧挨着；小标题画在**分割线上方**（贴着
+//    [CalendarLayout.LABEL_TIGHT_GAP]），分割线画在本月第一行的顶。
+//    所以从上到下的次序是「上个月的日期 → 小标题 → 分割线 → 本月日期」。
+// 3. **静止位置 = 该月第一行的顶**：进入某个月（初始 / 今天 / 年历点月）时把该月
+//    第一行顶到视口顶部，小标题刚好落在视口上沿之外（被钉住层盖住）。
+//
+// 与 iOS 的三处**刻意的差异**（都是平台要求，不是省事）：
+//  - 每一个日期都是**真实的 Compose 组件**（TalkBack 逐格可读），不是 Canvas；
+//  - 钉住层带 `surface` 底色（iOS 那边无底色，靠 `clipped()` 切齐）；
+//  - 惯性由 `Animatable` 驱动（Android 没有 SwiftUI 那种「逐帧插值 view」），
+//    弹簧刚度 / 阻尼比 / 投影时长三个数都照抄 iOS。
+//
+// ## 性能上的关键约定（踩过坑，别再改回去）
+//
+// 滚动偏移存在 [FlowScroll] 里，**滚动过程中这条流不参与重组**：
+//  - 每一块的位置走 `Modifier.offset { }`（延迟到放置阶段读偏移）；
+//  - 「画哪几块」用 `derivedStateOf` 收敛成 [IntRange]，跨块才变；
+//  - 顶部大标题同样用 `derivedStateOf` 收敛成「哪一块」，换月才变；
+//  - 年 morph 的缩放 / 透明度、morph 层的每一行位置，都在 `graphicsLayer` 的
+//    延迟 lambda 里读进度。
+// 反过来（在组合期读偏移或进度）会让整屏每帧重组 —— 那正是首轮「不跟手、卡顿」的根因。
+// ===========================================================================
+
+/**
+ * 一条连续月历流的几何。对应 iOS `MonthFlowLayout`。
+ *
+ * 纯数值计算、不依赖 Compose：`MonthFlowLayoutTest` 在 JVM 上逐条断言
+ * （行高一致 / 月份之间不留空隙 / 静止偏移 / 可见块 / 顶部月份）。
+ */
+class MonthFlowLayout private constructor(
+    val weekStart: String,
+    val rowH: Float,
+    val blocks: List<Block>,
+) {
+
+    /** 一块 = 一个月（本月第一行的顶就是这一块的顶）。 */
+    data class Block(
+        /** 在 [blocks] 里的序号。 */
+        val index: Int,
+        /** `yyyyMM`。 */
+        val key: Int,
+        val monthFirst: LocalDate,
+        /** 本块在内容坐标里的顶 —— 也是**本块的起点**、「静止」时滚动偏移该取的值。 */
+        val top: Float,
+        /** 要画的周行数（[CalendarGrid.displayedWeeks] 的行数，4…6）。 */
+        val rowCount: Int,
+        /** 本块的底（= 下个月第一行的顶）。 */
+        val bottom: Float,
+    )
+
+    /** 整条流的总高。 */
+    val contentH: Float = blocks.lastOrNull()?.bottom ?: 0f
+
+    /** 内容坐标 `y` 落在哪一块。二分，越界时夹到两端。 */
+    fun blockIndexAt(y: Float): Int {
+        if (blocks.isEmpty()) return 0
+        var lo = 0
+        var hi = blocks.size - 1
+        var ans = 0
+        while (lo <= hi) {
+            val mid = (lo + hi) / 2
+            if (blocks[mid].top <= y) {
+                ans = mid
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return ans
+    }
+
+    /**
+     * 视口里**占得最多**的那一块（顶部大标题用它）。
+     *
+     * iOS 的注释：不能用「视口顶部落在哪一块」—— 后者在下一月刚露一行时就换标题，
+     * 快速滑动会乱跳；「占多数」在整屏里只会过半时切一次。
+     */
+    fun dominantBlockIndex(offset: Float, viewportH: Float): Int {
+        if (blocks.isEmpty()) return 0
+        val top = offset
+        val bottom = offset + viewportH
+        var best = blockIndexAt(offset)
+        var bestShare = -1f
+        var i = best
+        while (i > 0 && blocks[i - 1].bottom > top) i--
+        while (i < blocks.size && blocks[i].top < bottom) {
+            val share = min(blocks[i].bottom, bottom) - max(blocks[i].top, top)
+            if (share > bestShare) {
+                bestShare = share
+                best = i
+            }
+            i++
+        }
+        return best
+    }
+
+    /** 月份键 → 块序号（找不到返回 -1）。 */
+    fun blockIndexForKey(key: Int): Int {
+        var lo = 0
+        var hi = blocks.size - 1
+        while (lo <= hi) {
+            val mid = (lo + hi) / 2
+            val cmp = blocks[mid].key
+            when {
+                cmp == key -> return mid
+                cmp < key -> lo = mid + 1
+                else -> hi = mid - 1
+            }
+        }
+        return -1
+    }
+
+    /** 某个月的「静止」偏移：该月第一行顶到视口顶部。 */
+    fun restOffset(key: Int): Float? =
+        blockIndexForKey(key).takeIf { it >= 0 }?.let { blocks[it].top }
+
+    fun maxOffset(viewportH: Float): Float = max(0f, contentH - viewportH)
+
+    /**
+     * 与 `[offset - margin, offset + viewportH + margin]` 相交的块序号区间。
+     *
+     * 返回 [IntRange] 而不是 `List<Block>`：组合层要把它包进 `derivedStateOf`，
+     * 区间**相等**时（滚动过程中的绝大多数帧）不触发重组，列表则每帧都是新实例。
+     */
+    fun visibleBlockRange(offset: Float, viewportH: Float, margin: Float): IntRange {
+        if (blocks.isEmpty()) return IntRange.EMPTY
+        val first = blockIndexAt(max(0f, offset - margin))
+        val limit = offset + viewportH + margin
+        var last = first
+        while (last + 1 < blocks.size && blocks[last + 1].top < limit) last++
+        return first..last
+    }
+
+    fun visibleBlocks(offset: Float, viewportH: Float, margin: Float): List<Block> =
+        visibleBlockRange(offset, viewportH, margin).map { blocks[it] }
+
+    /** 某一行在内容坐标里的顶。 */
+    fun rowTop(block: Block, row: Int): Float = block.top + row * rowH
+
+    companion object {
+        /**
+         * `weekStart # rowH` 的缓存。
+         *
+         * 行数只随 (weekStart, rowH) 变：旋转 / 密度变化时重建一次，滚动过程中直接复用
+         * （每个月一次 O(1) 的行数计算 × 2412 个月，每帧重算也能跑，但没必要）。
+         */
+        private val cache = LinkedHashMap<String, MonthFlowLayout>()
+
+        fun of(weekStart: String, rowH: Float): MonthFlowLayout {
+            val h = rowH.coerceAtLeast(1f)
+            val key = "$weekStart#${(h * 100f).roundToInt()}"
+            cache[key]?.let { return it }
+            val built = MonthFlowLayout(weekStart, h, buildBlocks(weekStart, h))
+            if (cache.size > 8) cache.clear()
+            cache[key] = built
+            return built
+        }
+
+        private fun buildBlocks(weekStart: String, rowH: Float): List<Block> {
+            val out = ArrayList<Block>(CalendarGrid.MONTH_KEYS.size)
+            var cursor = 0f
+            CalendarGrid.MONTH_KEYS.forEachIndexed { i, key ->
+                val first = CalendarGrid.monthFirstOfMonthKey(key)
+                val rows = CalendarGrid.displayedWeekCount(first, weekStart)
+                val bottom = cursor + rows * rowH
+                out.add(Block(i, key, first, cursor, rows, bottom))
+                cursor = bottom
+            }
+            return out
+        }
+    }
+}
+
+// --------------------------------------------------------------------------- 小标题
+
+/** 小标题与它下面那条分割线之间的间隙（「紧贴」的那个「紧」，iOS 同名常量）。 */
+private const val LABEL_TIGHT_GAP = 3f
+
+/**
+ * 月份小标题：站在**当月 1 号那一列的正上方**（不是整行居中），并且紧贴 1 号那一行。
+ *
+ * 带高就是这一行字的高度（[CalendarLayout.flowLabelBandHeight]），上下不再留白：
+ * 用户看过两版（整行高 → 35pt）都嫌高，明确要求「紧贴月份高度」。
+ */
+@Composable
+fun MonthFlowLabel(
+    cellW: Float,
+    /** 小标题所在的列（0…6）。 */
+    column: Int,
+    bandH: Float,
+    text: String,
+    modifier: Modifier = Modifier,
+    isCurrent: Boolean = false,
+    /** 横屏左栏的紧凑形态（小一号字）。 */
+    compact: Boolean = false,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    Text(
+        text = text,
+        // ⚠️ **不要**给这一行字加固定高度（`height(bandH.dp)`）。
+        //
+        // Compose 在高度放不下**一整行**（连 `includeFontPadding` 那一圈也算）时会把
+        // 整行字**一个都不画**：实测 21dp 带高下节点在、语义在、屏幕上却什么都没有；
+        // 把高度放到 60dp 立刻正常。所以这里让它自己量高，只用 offset 把**顶边**
+        // 摆到带子该在的位置（带高 21dp 只是设计值，字自己 ~22dp，差 1dp 看不出来）。
+        modifier = modifier
+            .offset(x = (column * cellW).dp)
+            .width(cellW.dp)
+            // 底色 = 页面底色：小标题那一行字高 21dp，而上一个月最后一行的**底部留白**
+            // 只有 (行高 − 内容高)/2 ≈ 19dp（Android 的行高由列宽推出，比 iOS 矮），
+            // 所以「1 号正好是周首日」的月份（约 1/7）里小标题会压到前一行的农历上。
+            // 给这一行字一块同色底，压住的部分就干净地让位（而不是叠字）。
+            .background(MaterialTheme.colorScheme.surface),
+        fontSize = DynamicTypeMetrics.calendarSp(
+            CalendarLayout.flowLabelFontSize(compact).dp,
+            fontScale,
+        ),
+        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
+        color = if (isCurrent) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        maxLines = 1,
+        overflow = TextOverflow.Clip,
+        softWrap = false,
+    )
+}
+
+/**
+ * 外部要求「跳到某个月」的一次请求（今天 / 年历点月 / 旋转复位）。
+ *
+ * 滚动位置由 [MonthFlow] 自己持有（惯性要交给 `Animatable` 逐帧插值），所以跳转要
+ * 显式发起；`token` 让「连续两次跳到同一个月」也能被 `LaunchedEffect` 看到。
+ */
+data class MonthFlowJump(val key: Int, val animated: Boolean, val token: Int)
+
+// --------------------------------------------------------------------------- morph 源
+
+/**
+ * 月→周 morph 的源几何：把按下那一刻**屏幕上真实画着的东西**冻结下来。
+ *
+ * morph 视图照这份数字重画，所以切换的那一帧与原画面逐像素一致；反方向（周→月）
+ * 用同一份源、同一条进度曲线倒放 —— 这就是用户要的「从哪来到哪去」。
+ */
+data class MonthFlowMorphSource(
+    val rows: List<Row>,
+    val labels: List<Label>,
+    /** [rows] 里被点中的那一行。 */
+    val selectedIndex: Int,
+    /** 冻结时**顶部大标题显示的那个月**（点中的日期可能属于下一个月的行）。 */
+    val topMonthKey: Int,
+    val rowH: Float,
+    val labelBandH: Float,
+    /** 视口在日历区里的顶（= 标题槽 + 星期栏）。 */
+    val viewportTop: Float,
+    /** 整块日历区的高度。 */
+    val height: Float,
+) {
+    val selectedRow: Row? get() = rows.getOrNull(selectedIndex)
+
+    /** 冻结时的一行日期。 */
+    data class Row(
+        val week: List<LocalDate>,
+        /** 冻结时这一行在**日历区坐标**里的顶（已含标题槽、星期栏与滚动偏移）。 */
+        val top: Float,
+        val anchorMonth: LocalDate,
+        /** 本块第一行不画分隔线（与流里的判断一致）。 */
+        val showDivider: Boolean,
+    )
+
+    /** 冻结时的一个月份小标题。 */
+    data class Label(
+        val monthFirst: LocalDate,
+        /** 冻结时小标题**底边**在日历区坐标里的 y（紧贴日期数字上方）。 */
+        val bottom: Float,
+    )
+}
+
+/** 年↔月 morph 的全部入参（null = 没有年 morph）。 */
+data class MonthFlowYearMorph(
+    /** 顶部大标题/年历源卡片对应的月份（= 父层的 `monthKey`）。 */
+    val monthKey: Int,
+    /** 目标：年历里那张迷你月的**网格**矩形（日历区坐标 dp）。 */
+    val miniGrid: CalendarLayout.Rect,
+    /** 进度读取器（**不是值**：要在延迟 lambda 里读）。 */
+    val progress: () -> Float,
+)
+
+// --------------------------------------------------------------------------- 滚动状态
+
+/**
+ * 连续月历流的滚动状态。
+ *
+ * 同时承担四件事，所以值得单独一个类：
+ *  1. 滚动位置是**跨形态保持**的（月→年→月、月→周→月 都不重置）：它挂在这条流上，
+ *     而这条流**始终挂载**（morph 期间只是把不透明度压到 0）；
+ *  2. 偏移是**唯一来源**，只在延迟 lambda（`Modifier.offset {}` / `graphicsLayer {}`）
+ *     里被读 —— 拖动时不让任何组合失效，这是「跟手」的前提；
+ *  3. `animJob` 让「手指追上正在滑行的惯性」成为可能（按下即取消）；
+ *  4. [dragging] 驱动右缘的滚动指示条。
+ *
+ * ⚠️ 偏移本身是**普通快照状态**而不是 `Animatable`：手指拖动要写在
+ * `AwaitPointerEventScope`（受限协程作用域）里，那里**不允许调用任意 suspend 函数**
+ * （`Animatable.snapTo` 就是 suspend）。所以拖动只写状态，动画交给协程里的
+ * `Animatable` 逐帧回写。
+ */
+class FlowScroll(initialOffsetDp: Float) {
+    /** 屏幕上这一帧的滚动偏移（内容坐标 dp）。 */
+    var offsetDp by mutableFloatStateOf(initialOffsetDp)
+
+    /** 正在跑的惯性 / 跳月动画（拖动或点按时取消它）。 */
+    var animJob: Job? = null
+
+    /** 是否正在被手指拖着（滚动指示条用）。 */
+    var dragging by mutableStateOf(false)
+        internal set
+}
+
+// --------------------------------------------------------------------------- 主视图
+
+/**
+ * 连续月历流（月视图）。
+ *
+ * @param layout 几何（由 `rowH` 与 `weekStart` 缓存得到）。
+ * @param viewportH 内容视口高度 = 日历区高度 − 标题槽 − 星期栏。
+ * @param initialOffsetDp 初始滚动偏移（内容坐标 dp），只在**第一次**组合时生效。
+ * @param resetKey 布局复位键（行高 / 周起始变了要回到当前月的静止位置）。
+ * @param jump 外部跳月请求。
+ * @param enabled morph 期间为 false：整条手势撤下（规范 §1 规则 2）。
+ * @param visible 月态为 true。false 时不透明度压到 0，但**仍然挂载** ——
+ *   滚动位置是它自己的状态，卸载就丢（用户要求「返回的时候月视图就留在哪」）。
+ */
+@Composable
+fun MonthFlow(
+    layout: MonthFlowLayout,
+    viewportH: Float,
+    widthDp: Float,
+    heightDp: Float,
+    titleHeight: Float,
+    weekdayHeight: Float,
+    weekStart: String,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    showLunar: Boolean,
+    initialOffsetDp: Float,
+    resetKey: Any?,
+    resetMonthKey: Int,
+    jump: MonthFlowJump?,
+    enabled: Boolean,
+    visible: Boolean,
+    onDayTap: (LocalDate, MonthFlowMorphSource) -> Unit,
+    onTopMonthChange: (Int) -> Unit,
+    onSettle: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    yearMorph: MonthFlowYearMorph? = null,
+    /** 横屏左栏的紧凑形态（小标题小一号）。 */
+    compact: Boolean = false,
+    titleText: (LocalDate) -> String,
+    labelText: (LocalDate) -> String,
+) {
+    val density = LocalDensity.current.density
+    val scope = rememberCoroutineScope()
+    val scroll = remember { FlowScroll(initialOffsetDp) }
+    val labelBandH = remember(compact) { CalendarLayout.flowLabelBandHeight(compact) }
+
+    // 几何变了（旋转 / 密度 / 周起始）→ 回到当前月的静止位置（iOS 的 `flowOffset = nil`）。
+    // ⚠️ `resetMonthKey` **不能**当 key：滚动过程中它会跟着顶部月份变，
+    // 那样每跨一个月就会把流硬拨回该月起点。
+    val latestResetMonth by rememberUpdatedState(resetMonthKey)
+    LaunchedEffect(resetKey, layout) {
+        val rest = layout.restOffset(latestResetMonth) ?: 0f
+        scroll.animJob?.cancel()
+        if (abs(scroll.offsetDp - rest) > 0.5f) scroll.offsetDp = rest
+    }
+
+    // 外部跳月（今天 / 年历点月）。token 让「连续两次跳到同一个月」也能被看到。
+    LaunchedEffect(jump) {
+        val request = jump ?: return@LaunchedEffect
+        val target = layout.restOffset(request.key) ?: return@LaunchedEffect
+        scroll.animJob?.cancel()
+        if (!request.animated) {
+            scroll.offsetDp = target
+            return@LaunchedEffect
+        }
+        scroll.animJob = launch {
+            animateOffset(scroll, target, tween(CalendarLayout.PAGE_SETTLE_DURATION_MS, easing = FastOutSlowInEasing))
+        }
+    }
+
+    // 可见块窗口：**只在跨块时**才变，于是滚动过程中这条流不重组
+    val range by remember(layout, viewportH) {
+        derivedStateOf { layout.visibleBlockRange(scroll.offsetDp, viewportH, layout.rowH) }
+    }
+    // 顶部大标题：占视口最多的那一块（滑动中途就换字，且不会乱跳）
+    val topIndex by remember(layout, viewportH) {
+        derivedStateOf { layout.dominantBlockIndex(scroll.offsetDp, viewportH) }
+    }
+    val topBlock = layout.blocks.getOrNull(topIndex) ?: return
+    // 顶部月份变化 → 告诉父层（monthKey / 年份 / 分栏的选中日都跟着它）
+    LaunchedEffect(layout, viewportH) {
+        androidx.compose.runtime.snapshotFlow { topIndex }
+            .collect { i -> layout.blocks.getOrNull(i)?.let { onTopMonthChange(it.key) } }
+    }
+
+    val yearP = yearMorph?.progress
+    val contentAlpha: () -> Float = remember(yearP, visible) {
+        {
+            val base = if (yearP == null) 1f else 1f - CalendarLayout.yearLayerOpacity(yearP())
+            if (visible) base else 0f
+        }
+    }
+    // 钉住层的透明度 = **可见性** × 年 morph 的淡出曲线。
+    // ⚠️ 少了 `visible` 这一半：周态 / 年态下整条流的不透明度是 0（它必须常驻以保住
+    // 滚动位置），但钉住层是**另一个** Box，会照旧画在顶上 —— 实测周态里那颗大标题
+    // 穿在周条后面（周层没有底色，一眼就能看见）。
+    val headerAlpha: () -> Float = remember(yearP, visible) {
+        {
+            val base = if (yearP == null) 1f else CalendarLayout.clamp01((0.45f - yearP()) / 0.45f)
+            if (visible) base else 0f
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .width(widthDp.dp)
+            .height(heightDp.dp)
+            .clipToBounds(),
+    ) {
+        // ---------------- 内容层（可滚动） ----------------
+        //
+        // ⚠️ 内容层的坐标原点必须落在**钉住层之下**（`titleHeight + weekdayHeight`）：
+        // 钉住层与它是同一个 Box 里的叠层（不是 iOS 那种 VStack），少了这个位移，
+        // 每个月都会画到标题底下去 —— 静止时那 72+30 正好把本月第一行整个盖掉。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(viewportH.dp)
+                .offset(y = (titleHeight + weekdayHeight).dp)
+                .graphicsLayer {
+                    // 年 morph：把「顶部月份那一块网格」仿射变换到年历里那张迷你月的网格上。
+                    // `p = 0` 时是恒等变换 —— 无论流滚到哪儿，morph 的第一帧都不会跳。
+                    val ym = yearMorph
+                    val p = ym?.progress?.invoke() ?: 0f
+                    // morph 期间**不裁**：缩小的网格要能落到内容区之上（年历第一行的卡片
+                    // 就在标题槽那一带）。平时必须裁，否则日期会画到钉住层上面。
+                    clip = ym == null || p <= 0.001f
+                    alpha = contentAlpha()
+                    if (ym != null && p > 0f) {
+                        val block = layout.blocks.getOrNull(layout.blockIndexForKey(ym.monthKey))
+                        if (block != null) {
+                            val sY = block.top - scroll.offsetDp
+                            val sH = max(1f, block.rowCount * layout.rowH)
+                            val t = 1f - p
+                            val rY = CalendarLayout.lerp(sY, ym.miniGrid.y - (titleHeight + weekdayHeight), t)
+                            val rH = CalendarLayout.lerp(sH, ym.miniGrid.h, t)
+                            val rX = CalendarLayout.lerp(0f, ym.miniGrid.x, t)
+                            val rW = CalendarLayout.lerp(widthDp, ym.miniGrid.w, t)
+                            scaleX = rW / max(1f, widthDp)
+                            scaleY = rH / sH
+                            transformOrigin = TransformOrigin(0f, sY / max(1f, viewportH))
+                            translationX = rX * density
+                            translationY = (rY - sY) * density
+                        }
+                    }
+                }
+                .pointerInput(layout, viewportH, enabled) {
+                    if (!enabled) return@pointerInput
+                    flowDrag(scroll, layout, viewportH, density, scope, onSettle)
+                }
+                .semantics { if (!visible) hideFromAccessibility() },
+        ) {
+            for (i in range) {
+                val block = layout.blocks.getOrNull(i) ?: continue
+                key(block.key) {
+                    MonthFlowBlock(
+                        block = block,
+                        rowH = layout.rowH,
+                        widthDp = widthDp,
+                        weekStart = weekStart,
+                        selectedKey = selectedKey,
+                        todayKey = todayKey,
+                        flags = flags,
+                        showLunar = showLunar,
+                        labelBandH = labelBandH,
+                        labelText = labelText,
+                        compact = compact,
+                        onDayTap = { date, row ->
+                            // morph 源必须与**屏幕上这一帧**一致：先把惯性停在当前帧，
+                            // 再按同一份数字建源（iOS 的 `morphSource` 开头就是 freeze）。
+                            scroll.animJob?.cancel()
+                            onDayTap(
+                                date,
+                                morphSource(
+                                    layout = layout,
+                                    offsetDp = scroll.offsetDp,
+                                        tappedBlockIndex = block.index,
+                                        tappedRow = row,
+                                        titleHeight = titleHeight,
+                                        weekdayHeight = weekdayHeight,
+                                        viewportH = viewportH,
+                                        heightDp = heightDp,
+                                    labelBandH = labelBandH,
+                                    weekStart = weekStart,
+                                ),
+                            )
+                        },
+                        modifier = Modifier.offset {
+                            IntOffset(0, ((block.top - scroll.offsetDp) * density).roundToInt())
+                        },
+                    )
+                }
+            }
+
+            // 滚动指示条：贴在右缘（iOS 的 `scrollIndicator`）
+            FlowScrollIndicator(scroll = scroll, layout = layout, viewportH = viewportH)
+        }
+
+        // ---------------- 钉住层（画在最后 = 最上面） ----------------
+        MonthFlowHeader(
+            title = titleText(topBlock.monthFirst),
+            widthDp = widthDp,
+            titleHeight = titleHeight,
+            weekdayHeight = weekdayHeight,
+            weekStart = weekStart,
+            alpha = headerAlpha,
+        )
+    }
+}
+
+/** 一整块（一个月）：小标题 + 各行日期。 */
+@Composable
+private fun MonthFlowBlock(
+    block: MonthFlowLayout.Block,
+    rowH: Float,
+    widthDp: Float,
+    weekStart: String,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    showLunar: Boolean,
+    labelBandH: Float,
+    labelText: (LocalDate) -> String,
+    compact: Boolean,
+    onDayTap: (LocalDate, Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val weeks = remember(block.key, weekStart) {
+        CalendarGrid.displayedWeeks(block.monthFirst, weekStart)
+    }
+    val metrics = remember(widthDp, rowH, showLunar) {
+        CalendarLayout.flowMetrics(widthDp, rowH, showLunar)
+    }
+    val cellW = CalendarLayout.monthCellW(widthDp)
+    val label = labelText(block.monthFirst)
+    // 小标题的强调色跟**今天**所在的那个月走（iOS `MonthFlowLabel.isCurrent`）
+    val todayMonthKey = remember(todayKey) {
+        DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
+    }
+
+    Box(
+        modifier = modifier
+            .width(widthDp.dp)
+            .height((block.rowCount * rowH).dp),
+    ) {
+        CalendarDayGrid(
+            rows = weeks,
+            anchorMonth = block.monthFirst,
+            metrics = metrics,
+            selectedKey = selectedKey,
+            todayKey = todayKey,
+            flags = flags,
+            onDayClick = { date ->
+                val row = weeks.indexOfFirst { it.contains(date) }.coerceAtLeast(0)
+                onDayTap(date, row)
+            },
+            showAdjacent = false,
+            showLunar = showLunar,
+            showDividers = true,
+            // 每个月（除整条流的第一块）在首行上方也画一条 ——「月份开始之前」的那条
+            dividerAboveFirst = block.index != 0,
+        )
+        // 小标题在**分割线上方**（用户的次序：上个月日期 → 小标题 → 分割线 → 本月日期）。
+        // 它借用的是上一行底部那段留白，不额外占高度。
+        MonthFlowLabel(
+            cellW = cellW,
+            column = DateUtil.weekdayIndex(block.monthFirst, weekStart),
+            bandH = labelBandH,
+            text = label,
+            compact = compact,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .offset(y = (-(labelBandH + LABEL_TIGHT_GAP)).dp),
+            isCurrent = block.key == todayMonthKey,
+        )
+    }
+}
+
+/** 钉住层：大月份标题 + 星期栏。**不随滚动移动**，只跟着换字。 */
+@Composable
+private fun MonthFlowHeader(
+    title: String,
+    widthDp: Float,
+    titleHeight: Float,
+    weekdayHeight: Float,
+    weekStart: String,
+    alpha: () -> Float,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    Box(
+        modifier = Modifier
+            .width(widthDp.dp)
+            .graphicsLayer { this.alpha = alpha() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(titleHeight.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    text = title,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            CalendarWeekdayHeader(
+                weekStart = weekStart,
+                modifier = Modifier.height(weekdayHeight.dp),
+            )
+        }
+    }
+}
+
+/** 右缘的滚动指示条（对应 iOS 的 `scrollIndicator`：拖动时出现、松手 0.7s 后淡出）。 */
+@Composable
+private fun BoxScope.FlowScrollIndicator(
+    scroll: FlowScroll,
+    layout: MonthFlowLayout,
+    viewportH: Float,
+) {
+    var show by remember { mutableStateOf(false) }
+    LaunchedEffect(scroll.dragging) {
+        if (scroll.dragging) {
+            show = true
+        } else {
+            delay(700)
+            show = false
+        }
+    }
+    val alpha by animateFloatAsState(if (show) 0.35f else 0f, tween(180))
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(end = 2.dp)
+            .graphicsLayer {
+                this.alpha = alpha
+                val maxOff = layout.maxOffset(viewportH)
+                val h = max(36f, viewportH * viewportH / max(layout.contentH, 1f))
+                val t = if (maxOff > 0f) (scroll.offsetDp / maxOff).coerceIn(0f, 1f) else 0f
+                translationY = (viewportH - h) * t * density
+            }
+            .width(3.dp)
+            .height(48.dp)
+            .background(color, RoundedCornerShape(2.dp)),
+    )
+}
+
+// --------------------------------------------------------------------------- 手势
+
+/**
+ * 连续滚动的拖动 + 惯性（**无级、不吸附**）。
+ *
+ * 逐条对齐 iOS `MonthFlowView.dragGesture`：
+ *  - 起手阈值 2dp（iOS 是 `DragGesture(minimumDistance: 2)`）—— 6dp 的阈值会让内容
+ *    在手指动了 6dp 之后才开始跟，明显「不跟手」；
+ *  - 拖动中 [MonthFlowPhysics.rubberClamped]：两端是橡皮筋，不是硬墙（硬夹会让拖到头和拖到一半手感一样）；
+ *  - 松手：按**预测落点**滑到位，把甩出的速度当作弹簧初速；阻尼比 ≈ 1.14（略过阻尼）
+ *    —— 松手后是一条平滑减速的滑行、到点即停，**没有回弹/过冲**。
+ *
+ * 惯性放在**另一个协程**里跑：手势循环要立刻能接住下一次按下（否则「手指追上滑行」
+ * 会等动画跑完才响应）。
+ *
+ * ⚠️ 这个 lambda 的接收者是 `AwaitPointerEventScope`（**受限协程作用域**）：里面
+ * 只能写状态，不能调用 `Animatable.snapTo` 这类 suspend 函数。
+ */
+private suspend fun PointerInputScope.flowDrag(
+    scroll: FlowScroll,
+    layout: MonthFlowLayout,
+    viewportH: Float,
+    density: Float,
+    scope: CoroutineScope,
+    onSettle: (Int) -> Unit,
+) {
+    val slopPx = 2.dp.toPx()
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        // 手指追上正在滑行的惯性：立刻把动画停在**当前帧**（iOS 的 `freezeAnimation`）
+        scroll.animJob?.cancel()
+        scroll.dragging = true
+        val origin = scroll.offsetDp
+        var accumulatedPx = 0f
+        var started = false
+        val tracker = VelocityTracker()
+        tracker.addPosition(down.uptimeMillis, down.position)
+        var sampleCount = 1
+        var firstTime = down.uptimeMillis
+        var lastTime = down.uptimeMillis
+
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            tracker.addPosition(change.uptimeMillis, change.position)
+            sampleCount++
+            lastTime = change.uptimeMillis
+            if (!change.pressed) {
+                accumulatedPx += change.positionChange().y
+                break
+            }
+            val dy = change.positionChange().y
+            accumulatedPx += dy
+            if (!started) {
+                // 还没起手：不消费事件，日期格的点击照常（与 iOS 的 2dp 阈值同一个意图）
+                if (abs(accumulatedPx) < slopPx) continue
+                started = true
+            }
+            change.consume()
+            scroll.offsetDp = MonthFlowPhysics.rubberClamped(
+                raw = origin - accumulatedPx / density,
+                maxOff = layout.maxOffset(viewportH),
+                viewportH = viewportH,
+            )
+        }
+
+        scroll.dragging = false
+        if (DebugFlags.morphLog) {
+            Log.app.d("monthflow drag: 样本=%d 首个=%d 末个=%d 末速度=%.0fpx/s".format(
+                sampleCount, firstTime, lastTime, tracker.calculateVelocity().y,
+            ))
+        }
+        if (started) {
+            val velocityDp = tracker.calculateVelocity().y / density
+            val translationDp = accumulatedPx / density
+            scope.launch {
+                settle(scroll, layout, viewportH, origin, translationDp, velocityDp)
+                val index = layout.dominantBlockIndex(scroll.offsetDp, viewportH)
+                layout.blocks.getOrNull(index)?.let { onSettle(it.key) }
+            }
+        }
+    }
+}
+
+/**
+ * 松手后的滑行。
+ *
+ * `target` 用**预测落点**（iOS 的 `predictedEndTranslation` ≈ 位移 + 速度 × 0.5s），
+ * 弹簧只负责「以这个速度平滑地滑到那个点」。位移很小（< 4dp）时不传初速，
+ * 免得弹簧一上来就飞（iOS 的注释专门讲过这一条）。
+ */
+private suspend fun settle(
+    scroll: FlowScroll,
+    layout: MonthFlowLayout,
+    viewportH: Float,
+    origin: Float,
+    translationDp: Float,
+    velocityDpPerSec: Float,
+) {
+    val maxOff = layout.maxOffset(viewportH)
+    val projected = origin - translationDp - velocityDpPerSec * MonthFlowPhysics.PROJECTION_SECONDS
+    val target = MonthFlowPhysics.projectedTarget(origin, translationDp, velocityDpPerSec, maxOff)
+    val initial = MonthFlowPhysics.initialVelocity(origin, target, velocityDpPerSec)
+    if (DebugFlags.morphLog) {
+        Log.app.d(
+            "monthflow fling: v=%.0fdp/s 拖了%.0fdp 预测落点%.0fdp（夹取后%.0f，上限%.0f）".format(
+                velocityDpPerSec, translationDp, projected, target, maxOff,
+            ),
+        )
+    }
+    animateOffset(
+        scroll = scroll,
+        target = target,
+        spec = spring(
+            dampingRatio = MonthFlowPhysics.SPRING_DAMPING_RATIO,
+            stiffness = MonthFlowPhysics.SPRING_STIFFNESS,
+            visibilityThreshold = 0.5f,
+        ),
+        initialVelocity = initial,
+    )
+}
+
+/**
+ * 用 `Animatable` 逐帧把偏移写回 [FlowScroll]。
+ *
+ * 之所以不把 `Animatable` 直接当状态存着：拖动要在受限协程作用域里写值，
+ * 而 `Animatable.snapTo` 是 suspend 的。这里让动画单向地把值推给状态。
+ */
+private suspend fun animateOffset(
+    scroll: FlowScroll,
+    target: Float,
+    spec: androidx.compose.animation.core.AnimationSpec<Float>,
+    initialVelocity: Float = 0f,
+) {
+    val anim = Animatable(scroll.offsetDp)
+    anim.animateTo(
+        targetValue = target,
+        animationSpec = spec,
+        initialVelocity = initialVelocity,
+    ) {
+        scroll.offsetDp = value
+    }
+    if (DebugFlags.morphLog) {
+        Log.app.d("monthflow settle: 落在 %.1fdp（目标 %.1fdp）".format(scroll.offsetDp, target))
+    }
+}
+
+/**
+ * 连续月历流的**手感物理**。抽成纯函数是为了能在 JVM 上断言
+ * （真机上"甩一下滑多远"很难量，但公式可以逐条钉住）。
+ *
+ * 三个常数都直接来自 iOS `MonthFlowView.dragGesture`：
+ * `stiffness: 130` / `damping: 26`（阻尼比 ≈ 1.14，略过阻尼）/ 预测落点 ≈ 速度 × 0.5s。
+ */
+object MonthFlowPhysics {
+
+    /** `predictedEndTranslation` 的投影时长：iOS 用 UIKit 的减速度模型，≈ 速度 × 0.5s。 */
+    const val PROJECTION_SECONDS = 0.5f
+
+    /** 弹簧刚度：与 iOS `interpolatingSpring(mass: 1, stiffness: 130, damping: 26)` 同一个数。 */
+    const val SPRING_STIFFNESS = 130f
+
+    /** 阻尼比 ≈ 26 / (2√130) ≈ 1.14 —— **略过阻尼**：平滑减速、到点即停，没有回弹。 */
+    const val SPRING_DAMPING_RATIO = 1.14f
+
+    /** 位移小于这个值就不传初速（免得弹簧一上来就飞，iOS 用的是 4pt）。 */
+    const val MIN_VELOCITY_DELTA = 4f
+
+    /**
+     * 松手后的**预测落点**：`起点 − 位移 − 速度 × 0.5s`，再夹在 `[0, maxOff]`。
+     *
+     * 符号约定与 [FlowScroll.offsetDp] 一致：offset 越大 = 内容越往上走（看更晚的月份），
+     * 手指上滑（`translation < 0`）→ offset 增大。
+     */
+    fun projectedTarget(
+        origin: Float,
+        translationDp: Float,
+        velocityDpPerSec: Float,
+        maxOff: Float,
+    ): Float = (origin - translationDp - velocityDpPerSec * PROJECTION_SECONDS).coerceIn(0f, maxOff)
+
+    /** 弹簧初速（内容坐标系，dp/s）：**位移很小就不给初速**。 */
+    fun initialVelocity(origin: Float, target: Float, velocityDpPerSec: Float): Float =
+        if (abs(target - origin) > MIN_VELOCITY_DELTA) -velocityDpPerSec else 0f
+
+    /** 越界时的橡皮筋：`c = viewportH × 0.25`，与 iOS 的 `rubber(_:)` 同一个公式。 */
+    fun rubberClamped(raw: Float, maxOff: Float, viewportH: Float): Float = when {
+        raw < 0f -> -rubber(-raw, viewportH)
+        raw > maxOff -> maxOff + rubber(raw - maxOff, viewportH)
+        else -> raw
+    }
+
+    /** 橡皮筋的阻尼曲线：`c·x / (x + c)`（x 越大越拖不动，且永远不越过 c）。 */
+    fun rubber(x: Float, viewportH: Float): Float {
+        val c = max(1f, viewportH * 0.25f)
+        return c * x / (x + c)
+    }
+}
+
+// --------------------------------------------------------------------------- morph 源构造
+
+/** 把当前可见的行 / 小标题冻结成 morph 源（对应 iOS 的 `morphSource`）。 */
+private fun morphSource(
+    layout: MonthFlowLayout,
+    offsetDp: Float,
+    tappedBlockIndex: Int,
+    tappedRow: Int,
+    titleHeight: Float,
+    weekdayHeight: Float,
+    viewportH: Float,
+    heightDp: Float,
+    labelBandH: Float,
+    weekStart: String,
+): MonthFlowMorphSource {
+    val visible = layout.visibleBlocks(offsetDp, viewportH, margin = 0f)
+    val topIndex = layout.dominantBlockIndex(offsetDp, viewportH)
+    val topKey = layout.blocks.getOrNull(topIndex)?.key ?: 0
+    val rows = ArrayList<MonthFlowMorphSource.Row>()
+    val labels = ArrayList<MonthFlowMorphSource.Label>()
+    var selected = 0
+    visible.forEach { block ->
+        labels.add(
+            MonthFlowMorphSource.Label(
+                monthFirst = block.monthFirst,
+                bottom = block.top - offsetDp + titleHeight + weekdayHeight - LABEL_TIGHT_GAP,
+            ),
+        )
+        CalendarGrid.displayedWeeks(block.monthFirst, weekStart).forEachIndexed { i, week ->
+            if (block.index == tappedBlockIndex && i == tappedRow) selected = rows.size
+            rows.add(
+                MonthFlowMorphSource.Row(
+                    week = week,
+                    top = block.top + i * layout.rowH - offsetDp + titleHeight + weekdayHeight,
+                    anchorMonth = block.monthFirst,
+                    showDivider = !(block.index == 0 && i == 0),
+                ),
+            )
+        }
+    }
+    return MonthFlowMorphSource(
+        rows = rows,
+        labels = labels,
+        selectedIndex = selected.coerceIn(0, max(0, rows.size - 1)),
+        topMonthKey = topKey,
+        rowH = layout.rowH,
+        labelBandH = labelBandH,
+        viewportTop = titleHeight + weekdayHeight,
+        height = heightDp,
+    )
+}
+
+// --------------------------------------------------------------------------- 月 ↔ 周 morph
+
+/**
+ * 月↔周 morph：把**冻结下来的连续月历流**里选中那一行抬到星期栏下方、其余行移出屏幕，
+ * 同时当日内容从下面顶上来。
+ *
+ * 行的位置不再由「第几行 × 行高」推出来，而是直接用冻结时的绝对 y —— 月视图改成连续
+ * 滚动之后，按下那一刻屏幕上的行可能停在任意位置（半行、跨月），只有照抄这些数字，
+ * 切换那一帧才不会跳。反方向（周→月）用同一份源、同一条进度曲线倒放，
+ * 于是那一行会**回到它原来的位置**（用户：「从哪来到哪去」）。
+ *
+ * ⚠️ 这里**不在组合期读进度**：行的位置 / 透明度全在 `graphicsLayer` 的延迟 lambda 里
+ * 算，所以 600ms 的 morph 期间不重组任何日期格（只让 layer 失效）。
+ */
+@Composable
+fun MonthWeekMorph(
+    progress: () -> Float,
+    source: MonthFlowMorphSource,
+    widthDp: Float,
+    heightDp: Float,
+    weekStart: String,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    showLunar: Boolean,
+    titleText: (LocalDate) -> String,
+    labelText: (LocalDate) -> String,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val titleH = source.viewportTop - CalendarLayout.WEEKDAY_HEADER_H
+    val headH = CalendarLayout.WEEKDAY_HEADER_H
+    val rowH = source.rowH
+    val density = LocalDensity.current.density
+    val fontScale = LocalDensity.current.fontScale
+    val mMetrics = remember(widthDp, rowH, showLunar) {
+        CalendarLayout.flowMetrics(widthDp, rowH, showLunar)
+    }
+    val wMetrics = remember(widthDp, showLunar) {
+        CalendarLayout.weekMetrics(widthDp, showLunar)
+    }
+    val cellW = CalendarLayout.monthCellW(widthDp)
+    val selectedTop = source.selectedRow?.top ?: source.viewportTop
+    // 当日内容顶端的**终态**位置：星期栏（30）+ 周条（80）。morph 收尾换回真实周层时
+    // 两边的排版完全一致，所以这里用终态高度做布局、只用位移表达"从下面顶上来"。
+    val contentTop = headH + CalendarLayout.WEEK_STRIP_H
+
+    Box(
+        modifier = modifier
+            .width(widthDp.dp)
+            .height(heightDp.dp)
+            // morph 层是**纯视觉**的过渡内容：无障碍树里只保留底下那个真实图层
+            .clearAndSetSemantics { },
+    ) {
+        // 大标题：向上移出并淡出
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(titleH.dp)
+                .graphicsLayer {
+                    val p = progress()
+                    translationY = -p * titleH * density
+                    alpha = 1f - CalendarLayout.clamp01(p * 2f)
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = titleText(CalendarGrid.monthFirstOfMonthKey(source.topMonthKey)),
+                modifier = Modifier.padding(horizontal = 20.dp),
+                fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale),
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // 星期栏：从「标题槽之后」上移到顶（月视图那侧的落点是 `titleH`，不是 `viewportTop`）
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(headH.dp)
+                .graphicsLayer {
+                    translationY = CalendarLayout.lerp(titleH, 0f, progress()) * density
+                },
+        ) {
+            CalendarWeekdayHeader(weekStart = weekStart)
+        }
+
+        // 行与小标题：裁在「跟着顶栏移动的边界」以下。
+        //
+        // 裁剪的做法是「占位 + frame + clipToBounds」：外层整体下移 `clipTop`、内层自己
+        // `clipToBounds`，于是**裁切窗跟着顶栏一起走**。⚠️ 不能写成
+        // `offset(...).clipToBounds()` —— `offset` 是渲染期平移，`clipToBounds` 会跟着
+        // 一起移，等于没裁（iOS 侧为这一条专门取过帧）。
+        val clipTop: () -> Float = {
+            CalendarLayout.lerp(source.viewportTop, headH, progress())
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(heightDp.dp)
+                .graphicsLayer { translationY = clipTop() * density },
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds(),
+            ) {
+                source.labels.forEach { label ->
+                    MonthFlowLabel(
+                        cellW = cellW,
+                        column = DateUtil.weekdayIndex(label.monthFirst, weekStart),
+                        bandH = source.labelBandH,
+                        text = labelText(label.monthFirst),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .graphicsLayer {
+                                translationY =
+                                    (label.bottom - source.labelBandH - clipTop()) * density
+                                alpha = 1f - CalendarLayout.clamp01(progress() * 2.2f)
+                            },
+                    )
+                }
+                source.rows.forEachIndexed { i, row ->
+                    val isSelected = i == source.selectedIndex
+                    if (isSelected) {
+                        // 被点中的那一行要**逐帧改度量**（月格行高 → 周条高度），
+                        // 所以单独放一个组合作用域读进度：每帧只重组这 7 个日期格，
+                        // 其余行完全不重组。
+                        SelectedMorphRow(
+                            row = row,
+                            mMetrics = mMetrics,
+                            wMetrics = wMetrics,
+                            progress = progress,
+                            clipTop = clipTop,
+                            selectedKey = selectedKey,
+                            todayKey = todayKey,
+                            flags = flags,
+                            showLunar = showLunar,
+                        )
+                    } else {
+                        MorphRow(
+                            row = row,
+                            metrics = mMetrics,
+                            progress = progress,
+                            selectedTop = selectedTop,
+                            clipTop = clipTop,
+                            heightDp = heightDp,
+                            selectedKey = selectedKey,
+                            todayKey = todayKey,
+                            flags = flags,
+                            showLunar = showLunar,
+                            density = density,
+                        )
+                    }
+                }
+            }
+        }
+
+        // 当日内容：**始终挂在选中行下面**（行底 + 周条高度）。挂在固定曲线上时，
+        // 反方向（周→月）行会从内容中间穿过去，日期标题就压在周行上（iOS 实测过）。
+        // 布局高度取「终态」（收尾换回真实图层时高度不会变），位移用延迟读取。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height((heightDp - contentTop).coerceAtLeast(0f).dp)
+                .graphicsLayer {
+                    val p = progress()
+                    // 内容顶 = 选中行当前所在的位置（`selectedY + 周条高度`），
+                    // 而它的**布局**位置已经是 `contentTop`（终态），所以位移取两者之差。
+                    translationY =
+                        (CalendarLayout.lerp(selectedTop, headH, p) - headH) * density
+                    alpha = CalendarLayout.clamp01((p - 0.3f) / 0.5f)
+                },
+        ) {
+            content()
+        }
+    }
+}
+
+/** morph 里**被点中的那一行**：度量逐帧插值（月格行高 → 周条高度）。 */
+@Composable
+private fun SelectedMorphRow(
+    row: MonthFlowMorphSource.Row,
+    mMetrics: CalendarLayout.DayMetrics,
+    wMetrics: CalendarLayout.DayMetrics,
+    progress: () -> Float,
+    clipTop: () -> Float,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    showLunar: Boolean,
+) {
+    // 只有这一个组合作用域在组合期读进度（下面那条注释解释了为什么其余行不必）
+    val p = progress()
+    val density = LocalDensity.current.density
+    val metrics = remember(p, mMetrics, wMetrics) { mMetrics.lerp(wMetrics, p) }
+    CalendarDayGrid(
+        rows = listOf(row.week),
+        anchorMonth = row.anchorMonth,
+        metrics = metrics,
+        selectedKey = selectedKey,
+        todayKey = todayKey,
+        flags = flags,
+        onDayClick = {},
+        // 被点中的这一行就是正在变成周条的那一行：它要带相邻月的日期（周条一直这么画），
+        // 并按进度淡入 —— `p = 0` 时它们完全透明，与月视图那一帧逐像素一致。
+        showAdjacent = true,
+        adjacentAlpha = { p },
+        showLunar = showLunar,
+        showDividers = row.showDivider,
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                val y = CalendarLayout.lerp(row.top, CalendarLayout.WEEKDAY_HEADER_H, p)
+                translationY = (y - clipTop()) * density
+            },
+    )
+}
+
+/** morph 里**其余的行**：位置与透明度全部在延迟 lambda 里读进度（不触发重组）。 */
+@Composable
+private fun MorphRow(
+    row: MonthFlowMorphSource.Row,
+    metrics: CalendarLayout.DayMetrics,
+    progress: () -> Float,
+    selectedTop: Float,
+    clipTop: () -> Float,
+    heightDp: Float,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    showLunar: Boolean,
+    density: Float,
+) {
+    CalendarDayGrid(
+        rows = listOf(row.week),
+        anchorMonth = row.anchorMonth,
+        metrics = metrics,
+        selectedKey = selectedKey,
+        todayKey = todayKey,
+        flags = flags,
+        onDayClick = {},
+        // 其余行和月视图一样只画本月：月份边界那一周由两个月各画自己那一半，
+        // 否则同一批日期会在两行里各画一遍（iOS 的注释专门记过这条）。
+        showAdjacent = false,
+        showLunar = showLunar,
+        showDividers = row.showDivider,
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                val p = progress()
+                val y = if (row.top < selectedTop) {
+                    // 选中行**上方**的行：一起往上滑出屏幕
+                    row.top - p * (row.top + metrics.cellH)
+                } else {
+                    // 下方各行：往下滑出去，把位置让给当日内容
+                    row.top + p * (heightDp - row.top)
+                }
+                translationY = (y - clipTop()) * density
+                alpha = 1f - CalendarLayout.clamp01(p * 1.4f)
+            },
+    )
+}
