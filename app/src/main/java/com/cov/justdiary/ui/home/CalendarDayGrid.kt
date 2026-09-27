@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ripple
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -277,17 +276,21 @@ private fun CalendarDayCell(
             // 不写 fillMaxHeight 时 Box 只包住内容（日号 + 农历 ≈ 70dp），
             // 于是内容贴在行顶、下面空一截，分隔线看起来离内容很远。
             .fillMaxHeight()
-            // Material 要求交互元素有**状态层/涟漪**；首轮这里是 `indication = null`
-            // （日历格子完全没有任何触摸反馈）。做成"以日号圆为直径的圆形涟漪"，
-            // 与 M3 date picker 的 40dp 圆形状态层同一种表达。
+            // ⚠️ **`indication = null`：格子不要涟漪/状态层**。
+            //
+            // 用户 2026-09-27："月视图和周视图的点击特效有点多余了，去掉吧"
+            //（年历那边更早就去过一次：点卡片缩放的动画本身就是反馈）。
+            // 日历格是**高频、密排**的点按目标，涟漪会出现两组：
+            // ① 与"选中日"的实心圆叠加，看起来像点出了两个圆；
+            // ② 在连续流里滚动时，指尖划过的格子会各亮一下。
+            // 点击本身仍有反馈 —— 选中圆会立刻移到新日期。
+            //
+            // `interactionSource` 保留：`clickable` 需要它来派发 press/release，
+            // 无障碍（TalkBack 的"已激活"播报）也走它；只是不再画出来。
             .clickable(
                 enabled = enabled,
                 interactionSource = interaction,
-                // ⚠️ remember：`ripple(...)` 每次组合都新建 `RippleNodeFactory`，
-                // 会让整格重建指示节点、打断进行中的涟漪。
-                indication = remember(circleDiameter) {
-                    ripple(bounded = false, radius = circleDiameter / 2)
-                },
+                indication = null,
                 role = Role.Button,
                 onClick = onClick,
             )
