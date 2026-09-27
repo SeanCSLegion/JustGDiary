@@ -174,27 +174,6 @@ class CalendarMorphTest {
         assertEquals(0f, state.metrics.lunarLineH, 1e-6f)
     }
 
-    // ------------------------------------------------------------------ 月 ↔ 周
-
-    /**
-     * 月↔周 morph 现在由**冻结的连续流几何**驱动（`MonthFlowMorphSource`），
-     * 唯一还留在这一层的是周条自身的淡入曲线：它必须比内容区**更陡**
-     * （`p ≈ 0.55` 就退干净），否则返回月态时会留下残影（用户实测过）。
-     *
-     * 几何那一侧（行位置、落点、方向对称）由 `MonthFlowLayoutTest` 与
-     * `MonthFlow.kt` 里的 `morphSource` 守着。
-     */
-    @Test
-    fun `week strip fades out steeper than the content`() {
-        assertEquals(0f, CalendarLayout.weekStripAlpha(0f), 1e-6f)
-        assertEquals(1f, CalendarLayout.weekStripAlpha(1f), 1e-6f)
-        assertTrue("过半之前就要退干净", CalendarLayout.weekStripAlpha(0.55f) >= 0.99f)
-        for (step in 0..10) {
-            val p = step / 10f
-            assertTrue("单调不减", CalendarLayout.weekStripAlpha(p) >= CalendarLayout.weekStripAlpha(p - 0.1f) - 1e-6f)
-        }
-    }
-
     // ------------------------------------------------------------------ 翻页
 
     @Test

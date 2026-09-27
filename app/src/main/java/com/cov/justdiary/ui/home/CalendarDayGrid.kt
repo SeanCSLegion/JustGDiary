@@ -90,16 +90,6 @@ fun CalendarDayGrid(
     showAdjacent: Boolean = false,
     showLunar: Boolean = true,
     /**
-     * 月 ↔ 周 morph：每一行的 y 偏移（dp，**绝对**网格局部 y）与透明度；null 表示等距排布。
-     *
-     * 注意是"绝对 y"而不是"位移量"：行高在 morph 中会变（选中行缩到周条尺寸），
-     * 流动排布的 y 于是不再是 `row × cellH`，位移必须由"目标 y − 该行的流动 y"算出来。
-     */
-    rowOffsets: FloatArray? = null,
-    rowAlphas: FloatArray? = null,
-    /** 月 ↔ 周 morph：每一行的度量（不传则全部用 [metrics]）。 */
-    rowMetrics: Array<CalendarLayout.DayMetrics>? = null,
-    /**
      * 相邻月日期的透明度（**读取器**，不传则恒为 1）。
      *
      * 月↔周 morph 里只有被点中的那一行会带相邻月日期，而且要按进度淡入
@@ -122,10 +112,12 @@ fun CalendarDayGrid(
     val outlineVariant = MaterialTheme.colorScheme.outlineVariant
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // 该行在**流动排布**下的顶部 y（含前面各行的高度与分隔线厚度）。
-        var flowY = 0f
         rows.forEachIndexed { row, week ->
-            val m = rowMetrics?.getOrNull(row) ?: metrics
+            val m = metrics
+            // 每一行都是**独立的 `CalendarDayGrid` 调用**（连续月历流里一行一块、
+            // morph 层里一行一层），所以行与行之间的位移由调用方的 `graphicsLayer` 负责，
+            // 这里只按自然排布画一行。
+            //
             // 分隔线：只画在"这一行至少有一个当月日期"的位置。
             // 不能用 `!showAdjacent || ...` 短路 —— showAdjacent=false 时那会变成恒真，
             // 于是整行都是相邻月的空行也会画一条线（实测缺陷 D12）。
@@ -139,9 +131,6 @@ fun CalendarDayGrid(
             }
             val drawDivider = showDividers && m.dividerAlpha > 0.01f && monthCols.isNotEmpty() &&
                 (row > 0 || dividerAboveFirst)
-            // 目标 y（绝对）− 流动 y = 需要施加的位移
-            val offsetY = rowOffsets?.getOrNull(row)?.let { absY -> absY - flowY } ?: 0f
-            val rowAlpha = rowAlphas?.getOrNull(row) ?: 1f
             val rowH = m.cellH.dp
 
             // ⚠️ 分割线画在**行自己的顶部**（叠层），**不占布局高度**。
@@ -149,16 +138,12 @@ fun CalendarDayGrid(
             // 原来它是 Column 里的一个兄弟节点并 `flowY += 1f`，于是网格实际高度 =
             // 行数 × 行高 + (行数 − 1)，比容器多出 4~5dp —— **最后一行被挤出容器、
             // 农历被切掉**（用户实测："最后一行日期的农历显示还是有被遮挡"）。
-            // 改成叠层后高度恒等于 `行数 × 行高`，与 `calendarGridHeight` 及 morph 的
-            // 几何完全一致，那两个函数也不必动（动了会让 morph 的度量推导失配）。
+            // 改成叠层后高度恒等于 `行数 × 行高`，与连续月历流的块高、morph 的行距
+            // 完全一致（动了会让 morph 的度量推导失配）。
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(rowH)
-                    .graphicsLayer {
-                        translationY = offsetY * density
-                        alpha = rowAlpha
-                    },
+                    .height(rowH),
             ) {
             if (drawDivider) {
                 Box(
@@ -200,7 +185,7 @@ fun CalendarDayGrid(
                         lunarFontSize = lunarFontSize,
                         circleDiameter = m.circleDiameter.dp,
                         diaryMarkWidth = minOf(20f, m.cellW * 0.5f).dp,
-                        enabled = rowAlpha > 0.01f,
+                        enabled = true,
                         onClick = { onDayClick(date) },
                         modifier = Modifier
                             .weight(1f)
@@ -214,7 +199,6 @@ fun CalendarDayGrid(
                 }
             }
             }
-            flowY += m.cellH
         }
     }
 }
@@ -426,6 +410,3 @@ fun CalendarWeekdayHeader(
     }
 }
 
-/** 日格网格的高度（dp）：`行数 × 行高`。让这条公式只有一个实现。 */
-fun calendarGridHeight(rows: Int, cellHeight: Float = CalendarLayout.PORTRAIT_CELL_H): Dp =
-    (rows.coerceAtLeast(1) * cellHeight).dp
