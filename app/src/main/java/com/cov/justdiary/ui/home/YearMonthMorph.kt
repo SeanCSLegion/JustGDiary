@@ -295,20 +295,35 @@ fun YearMonthMorph(
                 }
             }
 
-            // 本月小标题：跟着网格一起缩、一起淡（它在静止位置本来就藏在钉住层后面）
+            // ---- 本月小标题：跟着网格一起缩、一起淡 ----
+            //
+            // ⚠️ 必须**裁在内容区之内**（`top = bodyTop`），不能跟网格一样放开。
+            // 真实月视图里，**顶部那一块**的小标题是画在"内容区上沿之上"的 ——
+            // 它借用上个月最后一行的留白，被钉住栏盖住、也被内容层裁掉，**本来就不可见**
+            //（这正是 iOS 的年 morph 干脆不画它的原因）。
+            // 不裁的话，年→月时它会出现在**顶栏上方**、一路挪到最终位置，交班后又被真实
+            // 图层藏起来 —— 看起来就是"多了个本来不该有的动画，走完立刻消失"
+            //（用户 2026-09-27）。网格保留不裁（见上一条注释）。
             val labelAlpha = (1f - CalendarLayout.clamp01(p * 2.2f)) * t
             if (labelAlpha > 0.01f) {
-                val text = measurer.measure(labelText(block.monthFirst), labelStyle)
-                drawText(
-                    textLayoutResult = text,
-                    topLeft = Offset(
-                        x = gridLeft +
-                            DateUtil.weekdayIndex(block.monthFirst, weekStart) * cellPx +
-                            (cellPx - text.size.width) / 2f,
-                        y = gridTop - labelBlockH * density.density,
-                    ),
-                    alpha = labelAlpha,
-                )
+                clipRect(
+                    left = 0f,
+                    top = bodyTop,
+                    right = size.width,
+                    bottom = size.height,
+                ) {
+                    val text = measurer.measure(labelText(block.monthFirst), labelStyle)
+                    drawText(
+                        textLayoutResult = text,
+                        topLeft = Offset(
+                            x = gridLeft +
+                                DateUtil.weekdayIndex(block.monthFirst, weekStart) * cellPx +
+                                (cellPx - text.size.width) / 2f,
+                            y = gridTop - labelBlockH * density.density,
+                        ),
+                        alpha = labelAlpha,
+                    )
+                }
             }
 
             // ---- 下个月那一条（小标题 + 能看见的每一行）----
