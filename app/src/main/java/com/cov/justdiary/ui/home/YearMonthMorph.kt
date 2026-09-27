@@ -304,7 +304,12 @@ fun YearMonthMorph(
                 CalendarLayout.clamp01((t - 0.55f) / 0.45f)
             }
             if (nextBlock != null && peekAlpha > 0.01f) {
-                val nextTop = bodyTop + (block.bottom - off) * density.density
+                // ⚠️ 用**下一块自己的块顶**（`nextBlock.top`），不能用 `block.bottom` ——
+                // 加了 `CalendarLayout.MONTH_GAP` 之后两者相差一个间隔，peek 会画高 10dp，
+                // morph 收尾换回真实图层时"下个月的日期 + 小标题"就会跳一下
+                // （用户 2026-09-27："下一个月的日期和小标题在最后会发生跳变，原因很可能是
+                //   你没有把新的间隔放到动画位置计算中"）。
+                val nextTop = bodyTop + (nextBlock.top - off) * density.density
                 CalendarGrid.displayedWeeks(nextBlock.monthFirst, weekStart).forEachIndexed { i, week ->
                     val rowY = nextTop + i * layout.rowH * density.density
                     if (rowY < size.height - 0.5f) {
