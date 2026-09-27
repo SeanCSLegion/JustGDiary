@@ -114,6 +114,10 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 
+/** 当前屏幕刷新率（Hz）；取不到返回 0。`-morph-log` 用它确认"面板是不是被限帧"。 */
+private fun screenRefreshRate(context: android.content.Context): Float =
+    runCatching { context.display.refreshRate }.getOrDefault(0f)
+
 /**
  * 首页的三种形态。对应 iOS `HomeView` 的 `CalendarMode`。
  *
@@ -235,6 +239,14 @@ fun HomeScreen(
     // 年↔月 morph 的方向：true = 月→年（下个月那一条要淡出）、false = 年→月。
     var yearZoomingIn by remember { mutableStateOf(false) }
 
+    /** 触发点（点击 / 返回键）的墙钟时刻：`-morph-log` 用它量"按下列动画第一帧"的延迟。 */
+    var lastTriggerNs by remember { mutableStateOf(0L) }
+    fun markTrigger(label: String) {
+        if (!DebugFlags.morphLog) return
+        lastTriggerNs = System.nanoTime()
+        Log.app.i("触发 %s @ %d".format(label, lastTriggerNs / 1_000_000))
+    }
+
     // 「减弱动态效果」：系统关掉动画时两条 morph 退化为 180ms 纯交叉淡入（规范 §6.1）。
     // 判据同时认 `LocalReduceMotion`（设置里的"移除动画"）与
     // `ValueAnimator.areAnimatorsEnabled()`（开发者选项 / 无障碍），任一为真即降级。
@@ -283,6 +295,35 @@ fun HomeScreen(
         }
     }
 
+    /**
+     * 跑一次 morph 动画；`-morph-log` 下顺带打一行**真实墙钟耗时**。
+     *
+     * `animateTo` 是挂起函数，返回即代表动画跑完 —— 因此「返回时刻 − 触发时刻」就是这条
+     * 动画真正占用的时间，与组合 / 重组无关（这是排查"动画是不是被改短了"的唯一可靠口径）。
+     */
+    suspend fun runMorph(
+        name: String,
+        progress: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>,
+        target: Float,
+    ) {
+        if (!DebugFlags.morphLog) {
+            progress.animateTo(target, morphSpec)
+            return
+        }
+        val t0 = System.nanoTime()
+        progress.animateTo(target, morphSpec)
+        val t1 = System.nanoTime()
+        Log.app.i(
+            "动画 %s：%d ms（触发→动画开始 %d ms，触发→动画结束 %d ms）"
+                .format(
+                    name,
+                    (t1 - t0) / 1_000_000,
+                    (t0 - lastTriggerNs) / 1_000_000,
+                    (t1 - lastTriggerNs) / 1_000_000,
+                ),
+        )
+    }
+
     // 「跳到某个月」= 给连续月历流发一次显式请求（今天 / 年历点月 / 复位）。
     // token 让"连续两次跳到同一个月"也能被看到。
     var jumpToken by remember { mutableIntStateOf(0) }
@@ -313,22 +354,55 @@ fun HomeScreen(
     LaunchedEffect(year) { onYearChange(year) }
     val selectedDate = remember(selectedKey) { DateUtil.parseDayKey(selectedKey) ?: monthFirst }
 
+    val context = LocalContext.current
+
     // morph 帧率日志（`-morph-log`）
     if (DebugFlags.morphLog) {
         LaunchedEffect(morphing) {
             if (!morphing) return@LaunchedEffect
-            var frames = 0
             val start = System.nanoTime()
+            val trigger = lastTriggerNs
+            Log.app.i("屏幕刷新率 %.1f Hz".format(screenRefreshRate(context)))
+            Log.app.i(
+                "morph 开始：距触发 %d ms（含重组）spec=%s"
+                    .format((start - trigger) / 1_000_000, morphSpec),
+            )
+            // ⚠️ 判据必须直接读**快照状态对象**，不能读组合期捕获的那个布尔值：
+            // 后者在动画结束的那次重组里才更新，循环会晚一帧退出。
+            var frames = 0
+            var maxGap = 0L
+            var prev = start
+            var firstFrameNs = 0L
+            val gaps = ArrayList<String>()
             while (weekMorphing || yearMorphing) {
-                withFrameNanos { frames++ }
+                withFrameNanos { now ->
+                    frames++
+                    if (frames == 1) firstFrameNs = now
+                    val gap = (now - prev) / 1_000_000
+                    if (gap > maxGap) maxGap = gap
+                    prev = now
+                    gaps.add("%d:+%d".format(frames, gap))
+                }
             }
-            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            val end = System.nanoTime()
+            val elapsedMs = (end - start) / 1_000_000
             val average = if (frames > 0) elapsedMs.toDouble() / frames else 0.0
-            Log.app.d("morph: %d 帧 / %d ms（平均 %.1f ms/帧）".format(frames, elapsedMs, average))
+            Log.app.i(
+                "morph 结束：%d 帧 / %d ms（平均 %.2f ms/帧 = %.1f fps，最长帧 %d ms）"
+                    .format(frames, elapsedMs, average, 1000.0 / average, maxGap),
+            )
+            Log.app.i("morph 逐帧间隔：" + gaps.joinToString(" "))
+            Log.app.i(
+                "morph 关键点：触发→首帧 %d ms，首帧→结束 %d ms，总墙钟 %d ms"
+                    .format(
+                        (firstFrameNs - trigger) / 1_000_000,
+                        (end - firstFrameNs) / 1_000_000,
+                        (end - trigger) / 1_000_000,
+                    ),
+            )
         }
     }
 
-    val context = LocalContext.current
     // 未来日期用 Snackbar 反馈（规范 §6.3）。iOS 侧的同类提示是"声明了却从未调用"的死代码，
     // 而且挂在底部 overlay 上只留 24dp —— 真触发会压住浮条。这里用 M3 的 SnackbarHost。
     val snackbarHostState = remember { SnackbarHostState() }
@@ -387,10 +461,11 @@ fun HomeScreen(
         // ⚠️ `weekMorphing` 必须**同步**置位（不能放进 `scope.launch`）：图层的可见性由
         // `mode` + `morphing` 决定，两者若不在同一帧生效，中间就会有一帧"两层都不盖"
         // —— 表现为月↔周切换的第一帧直接跳过去（用户报的"完全是跳变"就是这一类）。
+        if (DebugFlags.morphLog) markTrigger(if (expand) "enterWeek" else "exitWeek")
         weekMorphing = true
         mode = if (expand) HomeViewMode.WEEK else HomeViewMode.MONTH
         scope.launch {
-            weekProgress.animateTo(if (expand) 1f else 0f, morphSpec)
+            runMorph(if (expand) "月→周" else "周→月", weekProgress, if (expand) 1f else 0f)
             weekMorphing = false
             if (!expand) weekSource = null
         }
@@ -414,12 +489,13 @@ fun HomeScreen(
     /** 月态 → 年历（缩放 morph）。 */
     fun openYear() {
         if (mode == HomeViewMode.YEAR || morphing) return
+        markTrigger("openYear")
         yearZoomingIn = true
         // 同上：标志位与 `mode` 必须同一帧生效
         yearMorphing = true
         mode = HomeViewMode.YEAR
         scope.launch {
-            yearProgress.animateTo(1f, morphSpec)
+            runMorph("月→年", yearProgress, 1f)
             yearMorphing = false
         }
     }
@@ -427,14 +503,18 @@ fun HomeScreen(
     /** 年态 / 周态 → 月态。 */
     fun backToMonth() {
         when (mode) {
-            HomeViewMode.WEEK -> setWeekMode(false)
+            HomeViewMode.WEEK -> {
+                markTrigger("backToMonth-week")
+                setWeekMode(false)
+            }
             HomeViewMode.YEAR -> {
                 if (yearMorphing) return
+                markTrigger("backToMonth-year")
                 yearZoomingIn = false
                 yearMorphing = true
                 mode = HomeViewMode.MONTH
                 scope.launch {
-                    yearProgress.animateTo(0f, morphSpec)
+                    runMorph("年→月", yearProgress, 0f)
                     yearMorphing = false
                 }
             }
@@ -452,6 +532,7 @@ fun HomeScreen(
      */
     fun openMonthFromYear(month: Int) {
         if (yearMorphing) return
+        markTrigger("openMonthFromYear")
         val key = CalendarGrid.monthKey(year, month)
         monthKey = key
         // ⚠️ **不动选中日** —— 与 iOS 的 `HomeViewModel.selectMonth(_:)` 一致（它只写
@@ -466,7 +547,7 @@ fun HomeScreen(
         yearMorphing = true
         mode = HomeViewMode.MONTH
         scope.launch {
-            yearProgress.animateTo(0f, morphSpec)
+            runMorph("年→月(点月)", yearProgress, 0f)
             yearMorphing = false
         }
     }
@@ -870,35 +951,68 @@ fun HomeScreen(
                         )
                     }
 
-                    // ③ 年层（**年态静止**）：上下滑翻年的手势挂在它上面。
-                    // morph 期间不画这一份 —— 那一段由 ④ 的 morph 层自己带一份年历，
-                    // 两份同时在场会白画一遍 12 张迷你月。
-                    if (mode == HomeViewMode.YEAR && !yearMorphing) {
-                        Box(modifier = pagerGesture) {
-                        PagerViewport(
-                            bandH = bandH,
-                            offsetPx = { pageOffset() },
-                            showNext = dragNext,
-                            showPrev = dragPrev,
-                            page = { offsetYears ->
-                                val neighbor = offsetYears != 0
-                                YearLayer(
-                                    year = year + offsetYears,
-                                    selectedMonth = monthFirst.monthValue,
-                                    selectedKey = selectedKey,
-                                    todayKey = todayKey,
-                                    flags = flags,
-                                    weekStart = weekStart,
-                                    showLunar = showLunarHere,
-                                    yearHeight = bandH,
-                                    yearWidth = calendarW,
-                                    // 当前年跟着 morph；邻年恒为"年态已就位"
-                                    yearProgress = if (neighbor) ({ 1f }) else yearProgressReader,
-                                    dateFormats = dateFormats,
-                                    onMonthClick = { month -> openMonthFromYear(month) },
-                                )
+                    // ③ 年层（**常驻**）：年态静止时看得见；月态 / 周态下 alpha = 0 但仍挂载。
+                    //
+                    // ⚠️ 原来这一层是 `if (mode == YEAR && !yearMorphing)` —— 只在年态
+                    // **之外**才挂载。于是"第一次点年份"那次 morph 里，年历的首次排版
+                    // （字形加载 + 12 张迷你月文本整形）全压在动画最前面：真机实测
+                    // `触发→首帧 387ms`（进程冷启动那一次），首帧落地时进度已经跑掉 1/3，
+                    // 观感就是"点下去先卡一下、然后动画飞快地走完"。
+                    // 常驻之后这份开销落在启动时（见下面 `LaunchedEffect` 的预热）。
+                    //
+                    // ⚠️ 透明层**不阻止命中测试**（与 `MonthFlow` 的 `visible` 同一条坑）：
+                    // 月态 / 周态下年历那 12 个点击层必须自己让开，否则会偷走月历的点击。
+                    // Compose 没有 `allowsHitTesting(false)` 的对等物，这里用"回调里判模式"
+                    // 兜住（点下去没有任何效果，等于让开）。
+                    Box {
+                        YearLayer(
+                            year = year,
+                            selectedMonth = monthFirst.monthValue,
+                            selectedKey = selectedKey,
+                            todayKey = todayKey,
+                            flags = flags,
+                            weekStart = weekStart,
+                            showLunar = showLunarHere,
+                            yearHeight = bandH,
+                            yearWidth = calendarW,
+                            yearProgress = yearProgressReader,
+                            dateFormats = dateFormats,
+                            visible = mode == HomeViewMode.YEAR && !yearMorphing,
+                            onMonthClick = { month ->
+                                if (mode == HomeViewMode.YEAR && !yearMorphing) {
+                                    openMonthFromYear(month)
+                                }
                             },
                         )
+                    }
+
+                    // ③b 上下滑翻年：只在年态静止时挂手势（多画一年由 ③ 的 PagerViewport 负责）
+                    if (mode == HomeViewMode.YEAR && !yearMorphing) {
+                        Box(modifier = pagerGesture) {
+                            PagerViewport(
+                                bandH = bandH,
+                                offsetPx = { pageOffset() },
+                                showNext = dragNext,
+                                showPrev = dragPrev,
+                                page = { offsetYears ->
+                                    val neighbor = offsetYears != 0
+                                    YearLayer(
+                                        year = year + offsetYears,
+                                        selectedMonth = monthFirst.monthValue,
+                                        selectedKey = selectedKey,
+                                        todayKey = todayKey,
+                                        flags = flags,
+                                        weekStart = weekStart,
+                                        showLunar = showLunarHere,
+                                        yearHeight = bandH,
+                                        yearWidth = calendarW,
+                                        // 当前年跟着 morph；邻年恒为"年态已就位"
+                                        yearProgress = if (neighbor) ({ 1f }) else yearProgressReader,
+                                        dateFormats = dateFormats,
+                                        onMonthClick = { month -> openMonthFromYear(month) },
+                                    )
+                                },
+                            )
                         }
                     }
 
@@ -1040,6 +1154,14 @@ private fun YearLayer(
     onMonthClick: (Int) -> Unit,
     /** 年↔月 morph 期间不画这一张迷你月（morph 层正在同一矩形里画它，见 `YearCanvas`）。 */
     hiddenMonth: Int? = null,
+    /**
+     * 年历是否**当前可见**（年态 / 年 morph 期间 / 启动预热那一帧）。
+     *
+     * ⚠️ 这一层是**常驻**的（见 [HomeScreen] 里的说明）：年历首次排版要加载字形 +
+     * 排 12 张迷你月的文本，实测 230~390ms —— 正好压在 morph 的起跑段，
+     * 观感就是"点下去先卡一下、动画只剩一小截"。常驻 + 启动预热把这份开销提前付掉。
+     */
+    visible: Boolean = true,
 ) {
     val context = LocalContext.current
     // 与进度无关的那部分几何：算一次就够（它只跟尺寸和选中月有关）
@@ -1063,11 +1185,13 @@ private fun YearLayer(
             .width(yearWidth.dp)
             .height(yearHeight.dp)
             .graphicsLayer {
-                // 进度在 layer 里读（延迟）：动画每一帧只让 layer 失效，Canvas 不重画
+                // 进度在 layer 里读（延迟）：动画每一帧只让 layer 失效，Canvas 重画由
+                // 上面的常驻挂载决定（内容不变时 Canvas 每帧重画的成本见 YearCanvas 注释）。
                 val p = yearProgress()
                 // 年层的淡入曲线与月层的淡出曲线**互补**（月层用 `1 - yearOpacity`），
                 // 两者在整段区间里和为 1，不会"双重曝光"、也不会"前 25% 什么都不见"。
-                alpha = CalendarLayout.yearLayerOpacity(p)
+                // 常驻但不在年态时：直接压到 0（原样调用也得到 0，这里只是写明白）。
+                alpha = if (visible) CalendarLayout.yearLayerOpacity(p) else 0f
                 // 1.6 → 1：从"源卡片炸开"的起点略大一点，收尾正好与真实年历同尺寸。
                 val k = 1f + (1f - p) * 0.6f
                 scaleX = k

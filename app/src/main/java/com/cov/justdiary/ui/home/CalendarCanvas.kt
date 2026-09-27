@@ -82,6 +82,10 @@ fun YearCanvas(
 ) {
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer(cacheSize = TEXT_CACHE_SIZE)
+    // ⚠️ 年历是 Canvas：**每帧重画就每帧重新测量**（12 个月标题 + 当月 30 个日号）。
+    // 实测每帧 15ms 里 11ms 是这些测量，而内容在这段动画里完全静止 —— 因此按
+    // 「文本 + 字号档 + 字重 + 颜色」自己存一份，跨帧复用（见 `MorphTextLayouts`）。
+    val textLayouts = MorphTextLayouts.shared
 
     // Canvas 的绘制 lambda 不是 @Composable 上下文，主题色必须在这里先取出
     val primary = MaterialTheme.colorScheme.primary
@@ -116,7 +120,14 @@ fun YearCanvas(
                     fontWeight = FontWeight.Bold,
                     color = primary,
                 )
-                val titleText = measurer.measure(yearTitle, titleStyle)
+                val titleText = textLayouts.layout(
+                    measurer = measurer,
+                    text = yearTitle,
+                    fontSize = titleStyle.fontSize,
+                    fontWeight = titleStyle.fontWeight ?: FontWeight.Bold,
+                    color = titleStyle.color,
+                    style = titleStyle,
+                )
                 drawText(
                     textLayoutResult = titleText,
                     topLeft = Offset(
@@ -129,7 +140,13 @@ fun YearCanvas(
                         fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.caption, density.fontScale),
                         color = onSurfaceVariant,
                     )
-                    val zodiacText = measurer.measure(zodiacLabel, zodiacStyle)
+                    val zodiacText = textLayouts.layout(
+                        measurer = measurer,
+                        text = zodiacLabel,
+                        fontSize = zodiacStyle.fontSize,
+                        color = zodiacStyle.color,
+                        style = zodiacStyle,
+                    )
                     drawText(
                         textLayoutResult = zodiacText,
                         topLeft = Offset(
@@ -161,9 +178,13 @@ fun YearCanvas(
                 //  - 2026-09-27 用户："当前选中的月份卡片背景也去掉"（连选中月那层淡底也不要了）。
                 // 选中月仍然可辨：**标题用 `primary`**（见上面的 `titleColor`）。
 
-                val titleText = measurer.measure(
-                    monthLabel(monthFirst),
-                    monthTitleStyle.copy(color = titleColor),
+                val titleText = textLayouts.layout(
+                    measurer = measurer,
+                    text = monthLabel(monthFirst),
+                    fontSize = monthTitleStyle.fontSize,
+                    fontWeight = monthTitleStyle.fontWeight ?: FontWeight.Normal,
+                    color = titleColor,
+                    style = monthTitleStyle,
                 )
                 drawText(
                     textLayoutResult = titleText,
@@ -182,9 +203,7 @@ fun YearCanvas(
                 val cellW = grid.w.dp.toPx() / 7f
                 val cellH = grid.h.dp.toPx() / CalendarLayout.MONTH_ROWS
                 val dayFont = CalendarLayout.miniDayFont(grid.w / 7f, grid.h / CalendarLayout.MONTH_ROWS)
-                val dayStyle = TextStyle(
-                    fontSize = DynamicTypeMetrics.calendarSp(dayFont.dp, density.fontScale),
-                )
+                val dayFontSize = DynamicTypeMetrics.calendarSp(dayFont.dp, density.fontScale)
                 val rows = CalendarGrid.displayedWeeks(monthFirst, weekStart)
                 // 「今天」的实心圆：半径按格子的短边取，封顶保证不碰到上下两行
                 val todayRadius = minOf(cellW, cellH) * 0.42f
@@ -206,11 +225,17 @@ fun YearCanvas(
                         // ⚠️ 这里原来只画"今天"（`isToday`），于是年历里高亮的永远是今天 ——
                         // 用户 2026-09-27："年视图下，选中日期不对，没有变为真实的选中日期，
                         // 而是一直都是选中的今天。"
-                        val style = dayStyle.copy(
+                        val layout = textLayouts.layout(
+                            measurer = measurer,
+                            text = date.dayOfMonth.toString(),
+                            fontSize = dayFontSize,
+                            fontWeight = if (isSelected || hasDiary) {
+                                FontWeight.Bold
+                            } else {
+                                FontWeight.Normal
+                            },
                             color = if (isSelected) onPrimary else onSurface,
-                            fontWeight = if (isSelected || hasDiary) FontWeight.Bold else FontWeight.Normal,
                         )
-                        val layout = measurer.measure(date.dayOfMonth.toString(), style)
                         val cx = grid.x.dp.toPx() + (col + 0.5f) * cellW
                         val cy = grid.y.dp.toPx() + (row + 0.5f) * cellH
 

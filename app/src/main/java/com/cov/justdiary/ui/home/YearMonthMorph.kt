@@ -93,6 +93,9 @@ fun YearMonthMorph(
     val density = LocalDensity.current
     val fontScale = density.fontScale
     val measurer = rememberTextMeasurer(cacheSize = MORPH_TEXT_CACHE)
+    // 整段动画复用同一张布局表（见 `MorphTextLayouts`）：日号/农历每帧都要画，
+    // 但真正**需要重新排版**的只有"字号跳档"那几次，实测能把每帧 12ms 的测量降到 <2ms。
+    val textLayouts = MorphTextLayouts.shared
     val blockIndex = remember(layout, monthKey) { layout.blockIndexForKey(monthKey) }
     if (blockIndex < 0) return
     val block = layout.blocks[blockIndex]
@@ -235,6 +238,7 @@ fun YearMonthMorph(
                             alpha = neighborAlpha,
                             showDivider = !(prevBlock.index == 0 && i == 0),
                             measurer = measurer,
+                            textLayouts = textLayouts,
                             fontScale = fontScale,
                             primary = primary,
                             onPrimary = onPrimary,
@@ -282,6 +286,7 @@ fun YearMonthMorph(
                         todayKey = todayKey,
                         flags = flags,
                         measurer = measurer,
+                        textLayouts = textLayouts,
                         fontScale = fontScale,
                         primary = primary,
                         onPrimary = onPrimary,
@@ -355,6 +360,7 @@ fun YearMonthMorph(
                             alpha = peekAlpha,
                             showDivider = true,
                             measurer = measurer,
+                            textLayouts = textLayouts,
                             fontScale = fontScale,
                             primary = primary,
                             onPrimary = onPrimary,
@@ -445,6 +451,7 @@ private fun DrawScope.drawWeekRow(
     alpha: Float,
     showDivider: Boolean,
     measurer: TextMeasurer,
+    textLayouts: MorphTextLayouts,
     fontScale: Float,
     primary: Color,
     onPrimary: Color,
@@ -479,6 +486,7 @@ private fun DrawScope.drawWeekRow(
             todayKey = todayKey,
             flags = flags,
             measurer = measurer,
+            textLayouts = textLayouts,
             fontScale = fontScale,
             primary = primary,
             onPrimary = onPrimary,
@@ -524,6 +532,7 @@ private fun DrawScope.drawDayCell(
     todayKey: String,
     flags: Set<String>,
     measurer: TextMeasurer,
+    textLayouts: MorphTextLayouts,
     fontScale: Float,
     primary: Color,
     onPrimary: Color,
@@ -588,13 +597,12 @@ private fun DrawScope.drawDayCell(
     // `metrics.dayFont` 是逐帧连续插值的 —— 不量化就每帧全 miss，每格每帧都要重新整形
     //（31 格 × 2 次 ≈ 60 次/帧，实测占 2~5ms）。量化到 0.5dp 后同一档字号复用同一条缓存，
     // 视觉上最多差 0.5dp（iOS 自己也是按 0.5pt 量化的）。
-    val num = measurer.measure(
-        day.dayOfMonth.toString(),
-        TextStyle(
-            fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.dayFont).dp, fontScale),
-            color = textColor,
-            fontWeight = weight,
-        ),
+    val num = textLayouts.layout(
+        measurer = measurer,
+        text = day.dayOfMonth.toString(),
+        fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.dayFont).dp, fontScale),
+        fontWeight = weight,
+        color = textColor,
     )
     drawText(
         textLayoutResult = num,
@@ -605,12 +613,13 @@ private fun DrawScope.drawDayCell(
         alpha = alpha,
     )
     if (metrics.lunarAlpha > 0.01f) {
-        val lunar = measurer.measure(
-            Lunar.dayLabelCached(day),
-            TextStyle(
-                fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.lunarFont).dp, fontScale),
-                color = textColor.copy(alpha = 0.75f),
-            ),
+        // ⚠️ 颜色里**不要**带 `metrics.lunarAlpha`：它是逐帧连续值，带进去等于每帧都是新键、
+        // 缓存完全失效（这正是原来每帧 12ms 测量的根因）。alpha 交给 `drawText` 的参数。
+        val lunar = textLayouts.layout(
+            measurer = measurer,
+            text = Lunar.dayLabelCached(day),
+            fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.lunarFont).dp, fontScale),
+            color = textColor,
         )
         drawText(
             textLayoutResult = lunar,
