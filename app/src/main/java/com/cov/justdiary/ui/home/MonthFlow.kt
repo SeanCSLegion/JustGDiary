@@ -387,6 +387,15 @@ data class MonthFlowMorphSource(
         val anchorMonth: LocalDate,
         /** 本块第一行不画分隔线（与流里的判断一致）。 */
         val showDivider: Boolean,
+        /**
+         * 这一行是否属于**被点中的那个月块**。
+         *
+         * ⚠️ `visibleBlocks` 会返回 2~4 个块（含预挂载），而月流里相邻月块是**首尾相接**
+         * 排的 —— 把它们的行全都塞进 morph 层，就会出现"同一条周被画两遍、数字叠在一起"
+         *（用户 2026-09-27："好多日号都重叠起来了"，截图里 `17/18`、`26/26` 这种叠字）。
+         * 月↔周 morph 只需要本月这些行（相邻月由真实图层负责）。
+         */
+        val inSelectedBlock: Boolean,
     )
 
     /** 冻结时的一个月份小标题。 */
@@ -1203,6 +1212,7 @@ private fun morphSource(
                     top = block.top + i * layout.rowH - offsetDp + titleHeight + weekdayHeight,
                     anchorMonth = block.monthFirst,
                     showDivider = !(block.index == 0 && i == 0),
+                    inSelectedBlock = block.index == tappedBlockIndex,
                 ),
             )
         }
@@ -1341,6 +1351,9 @@ fun MonthWeekMorph(
                     DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
                 }
                 source.rows.forEachIndexed { i, row ->
+                    // 只画**被点中那个月**的行：相邻月的行与本月行在流里是接着排的，
+                    // 一起画会出现"同一条周画两遍、日号叠字"（见 Row.inSelectedBlock）。
+                    if (!row.inSelectedBlock) return@forEachIndexed
                     val isSelected = i == source.selectedIndex
                     if (isSelected) {
                         // 被点中的那一行要**逐帧改度量**（月格行高 → 周条高度），
