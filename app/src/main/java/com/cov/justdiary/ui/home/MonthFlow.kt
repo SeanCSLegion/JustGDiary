@@ -486,10 +486,27 @@ fun MonthFlow(
     // ⚠️ `resetMonthKey` **不能**当 key：滚动过程中它会跟着顶部月份变，
     // 那样每跨一个月就会把流硬拨回该月起点。
     val latestResetMonth by rememberUpdatedState(resetMonthKey)
+    //
+    // ⚠️ **启动时会组合两次**：首帧视口高度与最终不同，`rowH` 会 101dp → 95dp。
+    // `MonthFlowLayout` 的 `block.top` 是"前面所有块的行数 × rowH"累加出来的，rowH 一变
+    // **同一个偏移就落到完全不同的月份上**（真机实测：偏移 814312 在 rowH=101 时是 9 月、
+    // 在 rowH=95 时是 **7 月**，差 4 个多月）—— 于是屏幕上会看到"先闪出一个 7 月的日历、
+    // 再跳到 9 月"（用户报的"启动先跳出来一个默认日历"）。
+    //
+    // 所以这里不能拿"数字偏移"当跨布局的锚（它在两个坐标系里不是同一个位置），
+    // 要拿**月份**当锚：[intendedMonth] = "用户期望待着的那个月"（初始 = 进月态时那个月）。
+    // 布局变 = 坐标系变了 ⇒ 用锚月份在新布局里重算偏移；锚月份本身跟着可见月份滚动更新
+    //（复位之后用户看到的就是锚月份，于是下一次变化的锚永远是他当前在看的月）。
+    var intendedMonth by remember { mutableStateOf(resetMonthKey) }
     LaunchedEffect(resetKey, layout) {
-        val rest = layout.restOffset(latestResetMonth) ?: 0f
         scroll.animJob?.cancel()
-        if (abs(scroll.offsetDp - rest) > 0.5f) scroll.offsetDp = rest
+        val target = layout.restOffset(intendedMonth) ?: return@LaunchedEffect
+        val block = layout.blocks.getOrNull(layout.blockIndexAt(scroll.offsetDp))
+        // 用户已经滑到锚月份之外的块里（正常滚动）⇒ 把锚挪到他实际在看的月，别把他拽回去
+        if (block != null && block.key != intendedMonth && scroll.offsetDp - block.top <= layout.rowH) {
+            intendedMonth = block.key
+        }
+        if (abs(scroll.offsetDp - target) > 0.5f) scroll.offsetDp = target
     }
 
     // 外部跳月（今天 / 年历点月）。token 让「连续两次跳到同一个月」也能被看到。
