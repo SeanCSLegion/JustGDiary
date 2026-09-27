@@ -18,6 +18,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -157,9 +158,26 @@ fun YearMonthMorph(
             val cellPx = m.cellW * density.density
             val rowPx = m.cellH * density.density
 
+            // ⚠️ **一切日期都裁在钉住栏之下**（内容区），与连续流的裁剪逐像素一致。
+            //
+            // 少了这一层裁剪：上个月露在视口里的那几行会画到**大标题与星期栏上面**，
+            // 而动画收尾换回真实图层时，流是按内容区裁的 —— 那些日期就"突然消失"
+            // （用户 2026-09-27 的原话）。年→月时更明显：目标月被无动画地拨到静止位置，
+            // 上个月整块都在内容区之上，本来就一行都不该画。
+            clipRect(
+                left = 0f,
+                top = bodyTop,
+                right = size.width,
+                bottom = size.height,
+            ) {
+
             // ---- 上个月露在视口里的那几行：不变换、快速淡出 ----
             val neighborAlpha = 1f - CalendarLayout.clamp01(p * 3f)
-            if (prevBlock != null && neighborAlpha > 0.01f) {
+            // 上个月那几行只在"源矩形之上确实还露着"时才画：年→月时目标月已经被拨到
+            // 静止位置，上个月整块都在内容区之上 —— 一行都不该画（用户：
+            // "特别是前一个月的日期，你现在前一个月的日期也有动画"）。
+            val prevBottom = prevBlock?.let { bodyTop + (it.bottom - off) * density.density } ?: 0f
+            if (prevBlock != null && neighborAlpha > 0.01f && prevBottom > bodyTop + 0.5f) {
                 CalendarGrid.displayedWeeks(prevBlock.monthFirst, weekStart).forEachIndexed { i, week ->
                     val rowY = bodyTop + (prevBlock.top + i * layout.rowH - off) * density.density
                     if (rowY + layout.rowH * density.density > bodyTop - 1f && rowY < size.height) {
@@ -287,6 +305,8 @@ fun YearMonthMorph(
                     alpha = peekAlpha,
                 )
             }
+
+            }   // clipRect：内容区（钉住栏之下）
         }
 
         // ---- 大标题 + 星期栏：位置不动，只按 `late` 淡入 ----

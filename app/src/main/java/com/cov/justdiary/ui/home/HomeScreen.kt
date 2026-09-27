@@ -441,7 +441,11 @@ fun HomeScreen(
         if (yearMorphing) return
         val key = CalendarGrid.monthKey(year, month)
         monthKey = key
-        selectedKey = DateUtil.dayKeyOf(LocalDate.of(year, month, 1))
+        // ⚠️ **不动选中日** —— 与 iOS 的 `HomeViewModel.selectMonth(_:)` 一致（它只写
+        // `monthPage`）。这里曾经顺手把选中日设成该月 1 号，于是"从年历进月视图"会在
+        // 1 号上冒出一个选中效果，而那一天根本没被选过（用户 2026-09-27 反馈）。
+        // 选中日仍是原来那天：若它不在当前显示的月里，月视图就不该有任何高亮
+        // （顶栏右胶囊会照实显示具体日期，见 `todayPillLabel`）。
         jumpToMonth(key, animated = false)
         yearZoomingIn = false
         // ⚠️ 这三行必须**同一帧**生效：`mode` 翻成月态、`yearMorphing` 置位、进度从 1 起。
