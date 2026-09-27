@@ -858,6 +858,7 @@ fun HomeScreen(
                                 YearLayer(
                                     year = year + offsetYears,
                                     selectedMonth = monthFirst.monthValue,
+                                    selectedKey = selectedKey,
                                     todayKey = todayKey,
                                     flags = flags,
                                     weekStart = weekStart,
@@ -907,6 +908,7 @@ fun HomeScreen(
                                 YearLayer(
                                     year = year,
                                     selectedMonth = monthFirst.monthValue,
+                                    selectedKey = selectedKey,
                                     todayKey = todayKey,
                                     flags = flags,
                                     weekStart = weekStart,
@@ -984,6 +986,7 @@ fun HomeScreen(
 private fun YearLayer(
     year: Int,
     selectedMonth: Int,
+    selectedKey: String,
     todayKey: String,
     flags: Set<String>,
     weekStart: String,
@@ -1004,6 +1007,7 @@ private fun YearLayer(
     YearCanvas(
         year = year,
         selectedMonth = selectedMonth,
+        selectedKey = selectedKey,
         todayKey = todayKey,
         flags = flags,
         weekStart = weekStart,

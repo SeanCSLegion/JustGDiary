@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -116,6 +117,29 @@ fun YearMonthMorph(
             color = onSurface,
         )
     }
+    // ⚠️ morph 画的格子必须与**真实日期格逐像素一致**，否则交班（morph ↔ 真实图层）
+    // 那一帧整片日期会跳一下 —— 用户说的"最后会闪一下"就是它。
+    //
+    // 真实格子（`CalendarDayCell`）的竖向布局是：
+    //   Column[ 圆(circleDiameter) , 农历那一行 Text , 有日记的标记(1+2dp) ]
+    //   在格子里**居中**，再整体 `+LUNAR_TIGHTEN/2`、农历自己 `-LUNAR_TIGHTEN`。
+    // 所以农历 Text 的**盒子高度**（不是字号）决定一切 —— 用同一个 `LocalTextStyle`
+    // 量一次，再按字号比例缩放（字号在 morph 里是插值的）。
+    val baseTextStyle = LocalTextStyle.current
+    val lunarBoxH = remember(measurer, baseTextStyle, fontScale, showLunar) {
+        if (!showLunar) {
+            0f
+        } else {
+            val style = baseTextStyle.copy(
+                fontSize = DynamicTypeMetrics.calendarSp(
+                    flowMetrics.lunarFont.dp,
+                    fontScale,
+                ),
+            )
+            measurer.measure(LUNAR_PROBE, style).size.height / density.density
+        }
+    }
+
     val labelStyle = remember(fontScale, primary, onSurfaceVariant) {
         TextStyle(
             fontSize = DynamicTypeMetrics.calendarSp(
@@ -198,6 +222,7 @@ fun YearMonthMorph(
                             onSurface = onSurface,
                             onSurfaceVariant = onSurfaceVariant,
                             dividerColor = dividerColor,
+                            lunarBoxHDp = lunarBoxHDpFor(flowMetrics.lunarFont, lunarBoxH),
                         )
                     }
                 }
@@ -239,6 +264,7 @@ fun YearMonthMorph(
                         onPrimary = onPrimary,
                         onSurface = onSurface,
                         onSurfaceVariant = onSurfaceVariant,
+                        lunarBoxHDp = lunarBoxHDpFor(m.lunarFont, lunarBoxH),
                         originX = gridLeft,
                     )
                 }
@@ -291,6 +317,7 @@ fun YearMonthMorph(
                             onSurface = onSurface,
                             onSurfaceVariant = onSurfaceVariant,
                             dividerColor = dividerColor,
+                            lunarBoxHDp = lunarBoxHDpFor(flowMetrics.lunarFont, lunarBoxH),
                         )
                     }
                 }
@@ -392,6 +419,7 @@ private fun DrawScope.drawWeekRow(
     onSurface: Color,
     onSurfaceVariant: Color,
     dividerColor: Color,
+    lunarBoxHDp: Float,
 ) {
     if (alpha <= 0.01f) return
     val cellPx = metrics.cellW * density
@@ -423,6 +451,7 @@ private fun DrawScope.drawWeekRow(
             onPrimary = onPrimary,
             onSurface = onSurface,
             onSurfaceVariant = onSurfaceVariant,
+            lunarBoxHDp = lunarBoxHDp,
             alpha = alpha,
         )
     }
@@ -466,6 +495,8 @@ private fun DrawScope.drawDayCell(
     onPrimary: Color,
     onSurface: Color,
     onSurfaceVariant: Color,
+    /** 农历那一行 Text 的盒子高度（dp，与真实格子同一个 `LocalTextStyle` 量出来的）。 */
+    lunarBoxHDp: Float,
     alpha: Float = 1f,
     /** 网格左边缘的 x（px）。 */
     originX: Float = 0f,
@@ -479,9 +510,9 @@ private fun DrawScope.drawDayCell(
     // 几何：把 px 的 rowY / 格宽格高换回 dp，复用 CalendarLayout 的纯函数
     val rowYDp = rowY / density
     val metrics = m.copy(cellW = cellW / density, cellH = cellH / density)
-    val top = CalendarLayout.contentTop(rowYDp, metrics)
+    val layout = cellLayout(rowYDp, metrics, lunarBoxHDp)
     val cx = originX + CalendarLayout.cellCenterX(col, metrics.cellW) * density
-    val circleCy = CalendarLayout.circleCenterY(top, metrics) * density
+    val circleCy = layout.circleCenterY * density
     val radius = metrics.circleDiameter / 2f * density
 
     when {
@@ -515,7 +546,7 @@ private fun DrawScope.drawDayCell(
         textLayoutResult = num,
         topLeft = Offset(
             x = cx - num.size.width / 2f,
-            y = CalendarLayout.dayNumberCenterY(top, metrics) * density - num.size.height / 2f,
+            y = circleCy - num.size.height / 2f,
         ),
         alpha = alpha,
     )
@@ -531,20 +562,62 @@ private fun DrawScope.drawDayCell(
             textLayoutResult = lunar,
             topLeft = Offset(
                 x = cx - lunar.size.width / 2f,
-                y = CalendarLayout.lunarCenterY(top, metrics) * density - lunar.size.height / 2f,
+                y = layout.lunarCenterY * density - lunar.size.height / 2f,
             ),
             alpha = alpha * metrics.lunarAlpha,
         )
     }
     if (flags.contains(key)) {
-        val mark = CalendarLayout.diaryMark(top, metrics)
+        val markW = minOf(20f, metrics.cellW * 0.5f)
         drawRect(
             color = (if (isSelected) onPrimary else primary).copy(alpha = alpha),
-            topLeft = Offset(cx - mark.width / 2f * density, mark.y * density),
-            size = Size(mark.width * density, mark.height * density),
+            topLeft = Offset(cx - markW / 2f * density, layout.markTop * density),
+            size = Size(markW * density, 2f * density),
         )
     }
 }
 
+/**
+ * 一个日期格里"圆 / 农历 / 标记"的竖向位置（dp，**相对本行顶部**）。
+ *
+ * 逐条对应 `CalendarDayCell` 的布局：
+ * ```
+ * Column(居中 + offset(+LUNAR_TIGHTEN/2)) {
+ *     圆(circleDiameter)   // 日号在圆里居中
+ *     农历 Text            // offset(-LUNAR_TIGHTEN)
+ *     标记(1dp padding + 2dp)
+ * }
+ * ```
+ * ⚠️ 这里**不能**用 `CalendarLayout.contentTop / lunarCenterY`（那是 iOS `DayDraw` 的
+ * 公式，Android 的真实格子是组件布局，两者差 4~11dp）—— 差这点，morph 交班那一帧
+ * 整片日期就会跳一下。
+ */
+private data class CellLayout(
+    val circleCenterY: Float,
+    val lunarCenterY: Float,
+    val markTop: Float,
+)
+
+private fun cellLayout(rowY: Float, m: CalendarLayout.DayMetrics, lunarBoxHDp: Float): CellLayout {
+    val markH = 3f                                   // 1dp padding + 2dp 短横线
+    val columnH = m.circleDiameter + lunarBoxHDp + markH
+    val top = rowY + (m.cellH - columnH) / 2f + CalendarLayout.LUNAR_TIGHTEN / 2f
+    return CellLayout(
+        circleCenterY = top + m.circleDiameter / 2f,
+        lunarCenterY = top + m.circleDiameter + lunarBoxHDp / 2f - CalendarLayout.LUNAR_TIGHTEN,
+        markTop = top + m.circleDiameter + lunarBoxHDp + 1f,
+    )
+}
+
+/** 农历盒子高度按字号比例缩放（字号在 morph 里是插值的）。 */
+private fun lunarBoxHDpFor(lunarFont: Float, flowLunarBoxH: Float): Float =
+    if (flowLunarBoxH <= 0f) 0f else flowLunarBoxH * (lunarFont / FLOW_LUNAR_FONT_REF)
+
 /** morph 层的文本测量缓存（字号每帧都在变，缓存要够大）。 */
 private const val MORPH_TEXT_CACHE = 256
+
+/** 量农历盒子高度用的探针文本（两个汉字，和真实内容同宽同高）。 */
+private const val LUNAR_PROBE = "初一"
+
+/** 流里农历字号的参考值（`CalendarLayout.flowMetrics` 的 `lunarFont`，竖屏是 11）。 */
+private const val FLOW_LUNAR_FONT_REF = 11f

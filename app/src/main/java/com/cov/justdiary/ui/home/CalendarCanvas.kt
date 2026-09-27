@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -55,6 +56,8 @@ fun YearCanvas(
     todayKey: String,
     flags: Set<String>,
     modifier: Modifier = Modifier,
+    /** 选中的那一天：年历里它才是实心圆（此前错画成"今天"）。 */
+    selectedKey: String = "",
     weekStart: String = DateUtil.WEEK_START_MONDAY,
     showLunar: Boolean = false,
     onMonthClick: ((Int) -> Unit)? = null,
@@ -193,22 +196,33 @@ fun YearCanvas(
                     week.forEachIndexed { col, date ->
                         if (date.year != year || date.monthValue != month) return@forEachIndexed
                         val key = DateUtil.dayKeyOf(date)
+                        val isSelected = key == selectedKey
                         val isToday = key == todayKey
                         val hasDiary = flags.contains(key)
 
-                        // 规范 §5.2 / 裁决 #8：**今天与有日记可以共存**（不是 when 二选一）。
-                        // 今天 = 实心圆 + onPrimary 字；有日记 = 加粗 + 主色（今天时用 onPrimary，
-                        // 否则与圆底的对比度不够）。
+                        // 与月格、与 iOS `DayDraw` 同一套优先级：
+                        //   **选中** = 实心圆 + onPrimary 字；**今天**（未选中）= 圆环；
+                        //   有日记 = 加粗 + 主色（在实心圆上用 onPrimary，否则对比度不够）。
+                        //
+                        // ⚠️ 这里原来只画"今天"（`isToday`），于是年历里高亮的永远是今天 ——
+                        // 用户 2026-09-27："年视图下，选中日期不对，没有变为真实的选中日期，
+                        // 而是一直都是选中的今天。"
                         val style = dayStyle.copy(
-                            color = if (isToday) onPrimary else onSurface,
-                            fontWeight = if (isToday || hasDiary) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) onPrimary else onSurface,
+                            fontWeight = if (isSelected || hasDiary) FontWeight.Bold else FontWeight.Normal,
                         )
                         val layout = measurer.measure(date.dayOfMonth.toString(), style)
                         val cx = grid.x.dp.toPx() + (col + 0.5f) * cellW
                         val cy = grid.y.dp.toPx() + (row + 0.5f) * cellH
 
-                        if (isToday) {
-                            drawCircle(color = primary, radius = todayRadius, center = Offset(cx, cy))
+                        when {
+                            isSelected -> drawCircle(color = primary, radius = todayRadius, center = Offset(cx, cy))
+                            isToday -> drawCircle(
+                                color = primary,
+                                radius = todayRadius - CalendarLayout.TODAY_RING_WIDTH.dp.toPx() / 2f,
+                                center = Offset(cx, cy),
+                                style = Stroke(width = CalendarLayout.TODAY_RING_WIDTH.dp.toPx()),
+                            )
                         }
                         drawText(
                             textLayoutResult = layout,
@@ -222,7 +236,7 @@ fun YearCanvas(
                             val markW = minOf(20f, cellW * 0.5f)
                             val markY = cy + todayRadius * 0.86f
                             drawRoundRect(
-                                color = if (isToday) onPrimary else primary,
+                                color = if (isSelected) onPrimary else primary,
                                 topLeft = Offset(cx - markW / 2f, markY),
                                 size = androidx.compose.ui.geometry.Size(markW, 2f.dp.toPx()),
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(1f.dp.toPx()),

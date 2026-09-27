@@ -2019,6 +2019,26 @@ LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
 年→月网格以被点卡片为中心展开、顶部再无越界日期；从年历点「10月」后月视图无高亮、
 点「9月」后高亮回到真实的 9月27日。
 
+### 用户复测第 4 条：交班"闪一下" + 年历里高亮的是**今天**不是选中日
+
+1. **morph 画的格子与真实日期格差 4~11dp** —— 交班（morph ↔ 真实图层）那一帧整片日期
+   会跳一下，用户："最后会闪一下"。
+   量出来的数（AVD，行高 105dp 的格子）：真实格子「日号中心 = 行顶 + 41.3dp、
+   农历中心 = +75.3dp」，而我用的是 `CalendarLayout.contentTop / lunarCenterY`
+   （那是 iOS `DayDraw` 的公式）→ +45 / +64.5，**差 4~11dp**。
+   根因：Android 的真实格子是 `CalendarDayCell` 的**组件布局** ——
+   `Column[圆, 农历 Text, 标记]` 居中后再 `+LUNAR_TIGHTEN/2`、农历自己 `-LUNAR_TIGHTEN`，
+   而农历 Text 的**盒子高度**（继承 `LocalTextStyle`，比字号高得多）才是决定性的。
+   修法：morph 侧改成**照 `CalendarDayCell` 的结构算**（`cellLayout()`），农历盒子高度
+   用同一个 `LocalTextStyle` + `TextMeasurer` 量一次、再按字号比例缩放。
+   **验证**：把慢放临时拉到 30s，抓 morph 尾帧（p≈0.02）与交班后一帧比对 ——
+   **0 个像素差异**（此前是十几万）。这个临时改动已还原（仍是 3s）。
+2. **年历里的实心圆画的是"今天"**：`YearCanvas` 只认 `todayKey`，没有 `selectedKey`
+   —— 用户："年视图下，选中日期不对，没有变为真实的选中日期，而是一直都是选中的今天。"
+   修法：与月格、与 iOS `DayDraw` 同一套优先级 —— **选中 = 实心圆 + onPrimary**、
+   **今天（未选中）= 圆环**、有日记 = 加粗 + 主色。实测：选中 9/17、今天 9/27 时，
+   年历里 17 是实心圆、27 是圆环（截图 `docs/ui-audit/r7-5`）。
+
 ### 单测抓到的两个真 bug（都已修）
 
 1. **矩形插值方向反了**：`lerpRect(source, target, t)` 在 `t = 1`（月侧）给的是**目标** ——
