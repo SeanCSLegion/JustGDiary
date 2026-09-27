@@ -817,7 +817,6 @@ private fun BlockCanvas(
             },
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (!FrameGate.allow()) return@Canvas
             val cellPx = metrics.cellW * density.density
             val rowPx = metrics.cellH * density.density
             // 两个文字盒子高度：真实格子里 `Column[日号, 农历, 标记]` 的总高靠它们算

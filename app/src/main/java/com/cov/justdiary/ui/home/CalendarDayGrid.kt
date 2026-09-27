@@ -143,7 +143,6 @@ fun CalendarDayGrid(
     Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
     if (canvasCells) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (!FrameGate.allow()) return@Canvas
             val rowPx = metrics.cellH * density
             val cellPx = metrics.cellW * density
             // 真实格子里两个 Text 的**盒子高度**（dp）。它们决定 `Column` 的总高，

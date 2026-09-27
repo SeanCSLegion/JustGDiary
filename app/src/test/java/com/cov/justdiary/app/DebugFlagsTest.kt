@@ -55,17 +55,7 @@ class DebugFlagsTest {
     @Test
     fun `defaults are both off`() {
         val value = DebugFlags.resolve(slowMorphExtra = false, morphLogExtra = false)
-        assertEquals(
-            DebugFlags.Value(slowMorph = false, morphLog = false, frameGateFps = 0),
-            value,
-        )
-    }
-
-    @Test
-    fun `frame gate parses and clamps`() {
-        assertEquals(60, DebugFlags.resolve(false, false, frameGateFpsExtra = 60).frameGateFps)
-        assertEquals(0, DebugFlags.resolve(false, false).frameGateFps)
-        assertEquals(240, DebugFlags.resolve(false, false, frameGateFpsExtra = 9999).frameGateFps)
+        assertEquals(DebugFlags.Value(slowMorph = false, morphLog = false), value)
     }
 
     @Test

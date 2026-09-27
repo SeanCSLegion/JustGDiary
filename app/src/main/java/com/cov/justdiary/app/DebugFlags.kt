@@ -25,39 +25,23 @@ object DebugFlags {
     var morphLog: Boolean = false
         private set
 
-    /**
-     * **临时的帧率上限**（0 = 不限制）。
-     *
-     * 用户 2026-09-27："作为测试，现在先临时限制一下帧率到 30 或者 60"。
-     * 用 `Choreographer` 的帧回调做门闸（draw 阶段比对时间戳，未到点就跳过这一帧的绘制），
-     * 这样同一台机器上能直接对比"30 / 60 / 不限"三档的观感。
-     *
-     * 用法：`adb shell am start -n com.cov.justdiary/.app.MainActivity --ei frame-gate 60`
-     */
-    @Volatile
-    var frameGateFps: Int = 0
-        private set
-
     /** 放慢后的时长（iOS 为 3.0s）。 */
     const val SLOW_MORPH_DURATION_MS: Int = 3_000
 
     const val EXTRA_SLOW_MORPH: String = "slow-morph"
     const val EXTRA_MORPH_LOG: String = "morph-log"
-    const val EXTRA_FRAME_GATE: String = "frame-gate"
     const val ENV_SLOW_MORPH: String = "SLOW_MORPH"
 
-    data class Value(val slowMorph: Boolean, val morphLog: Boolean, val frameGateFps: Int)
+    data class Value(val slowMorph: Boolean, val morphLog: Boolean)
 
     /** 纯判定：`extra` 优先，其次环境变量（`SLOW_MORPH=1`）。 */
     fun resolve(
         slowMorphExtra: Boolean,
         morphLogExtra: Boolean,
         env: Map<String, String> = emptyMap(),
-        frameGateFpsExtra: Int = 0,
     ): Value = Value(
         slowMorph = slowMorphExtra || env[ENV_SLOW_MORPH] == "1",
         morphLog = morphLogExtra,
-        frameGateFps = frameGateFpsExtra.coerceIn(0, 240),
     )
 
     /** 从启动 `Intent` 解析（`MainActivity` 在 `onCreate` / `onNewIntent` 调）。 */
@@ -66,10 +50,8 @@ object DebugFlags {
             slowMorphExtra = intent?.getBooleanExtra(EXTRA_SLOW_MORPH, false) == true,
             morphLogExtra = intent?.getBooleanExtra(EXTRA_MORPH_LOG, false) == true,
             env = System.getenv() ?: emptyMap(),
-            frameGateFpsExtra = intent?.getIntExtra(EXTRA_FRAME_GATE, 0) ?: 0,
         )
         slowMorph = value.slowMorph
         morphLog = value.morphLog
-        frameGateFps = value.frameGateFps
     }
 }

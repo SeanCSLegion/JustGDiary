@@ -109,7 +109,6 @@ fun YearCanvas(
         val canvasH = maxHeight.value
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (!FrameGate.allow()) return@Canvas
             val widthDp = size.width / density.density
             val heightDp = size.height / density.density
 
