@@ -2039,6 +2039,32 @@ LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
    **今天（未选中）= 圆环**、有日记 = 加粗 + 主色。实测：选中 9/17、今天 9/27 时，
    年历里 17 是实心圆、27 是圆环（截图 `docs/ui-audit/r7-5`）。
 
+## R8 · 年↔月两端的"抖/闪" + 月↔周的内容块位置
+
+### 年↔月：两端各用**不同的排版模型**，中间没有插值
+
+- 月侧（`t = 1`）是 `CalendarDayCell`：`Column[圆, 农历, 标记]` 居中 + 3dp、农历 −6dp；
+- 年侧（`t = 0`）是 `YearCanvas` 的迷你月：日号**直接居中在格子里**，圆半径
+  `min(格宽, 格高) × 0.42`，选中/有日记加粗，标记挂在圆下方 `0.86 × 半径`。
+
+morph 全程只用了**月侧**那套 → 到年侧端点就与真实年历对不上：
+月→年收尾"抖一下"（用户），年→月起手"整屏闪一下"（用户：那张卡片的迷你月被
+`hiddenMonth` 隐掉、换成我画的格子，两者不一样就闪）。
+修法：按 `t` 把两套模型插值（`miniBlend = 1 - t`）—— 位置、半径、标记位置、字重一起插。
+**验证**（30s 线性慢放）：年→月起手帧 vs 年历静止，整屏仅 **5450 / 3655680（0.15%）**
+像素差异（基本都是年层自身 1% 缩放带来的边缘位移），卡片区仅 **860**。
+
+### 月↔周：当日内容块**没有布局偏移**，全程高了 110dp
+
+iOS `MonthWeekMorphView` 是 `content().offset(y: contentOffset)`，其中
+`contentOffset = selectedY + weekStripH`（**布局**偏移）。Android 只写了
+`graphicsLayer.translationY = (selectedY - headH)`，布局仍在 `y = 0` —— 于是整个当日
+内容（"9月15日 周二 丙午年八月初五" + 空态插画）在 morph 全程高了
+`headH + weekStripH = 110dp`，标题正好压在周条上（用户："周视图的日期栏出现时机和
+位置问题"）。修法：补上 `.offset(y = contentTop.dp)`，位移仍取与终态之差 ——
+与 iOS 逐字一致。**验证**：月→周尾帧 vs 周态静止 **0 个像素差异**；
+周→月起手帧 vs 周态静止 **0**、尾帧 vs 月视图 **0**。
+
 ### 单测抓到的两个真 bug（都已修）
 
 1. **矩形插值方向反了**：`lerpRect(source, target, t)` 在 `t = 1`（月侧）给的是**目标** ——

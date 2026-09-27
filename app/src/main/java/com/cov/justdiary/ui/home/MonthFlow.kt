@@ -1164,6 +1164,11 @@ fun MonthWeekMorph(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                // ⚠️ **布局**位置必须是终态的 `contentTop`（= 星期栏 + 周条高度）。
+                // 只写 `graphicsLayer.translationY` 是不够的：`graphicsLayer` 只改**绘制**，
+                // 布局仍在 y = 0，于是整个当日内容（日期标题 + 空态插画）在 morph 全程
+                // 高了 110dp，标题压在周条上 —— 用户报的"周视图的日期栏出现时机和位置问题"。
+                .offset(y = contentTop.dp)
                 .height((heightDp - contentTop).coerceAtLeast(0f).dp)
                 .graphicsLayer {
                     val p = progress()

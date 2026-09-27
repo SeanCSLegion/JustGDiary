@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -36,6 +37,7 @@ import com.cov.justdiary.service.Lunar
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.TypeSize
 import java.time.LocalDate
+import kotlin.math.roundToInt
 
 /**
  * 年 ↔ 月 morph 层。**照着 iOS `YearMonthMorphView` 重写**（2026-09-27）。
@@ -223,6 +225,7 @@ fun YearMonthMorph(
                             onSurfaceVariant = onSurfaceVariant,
                             dividerColor = dividerColor,
                             lunarBoxHDp = lunarBoxHDpFor(flowMetrics.lunarFont, lunarBoxH),
+                            t = t,
                         )
                     }
                 }
@@ -265,6 +268,7 @@ fun YearMonthMorph(
                         onSurface = onSurface,
                         onSurfaceVariant = onSurfaceVariant,
                         lunarBoxHDp = lunarBoxHDpFor(m.lunarFont, lunarBoxH),
+                        t = t,
                         originX = gridLeft,
                     )
                 }
@@ -318,6 +322,7 @@ fun YearMonthMorph(
                             onSurfaceVariant = onSurfaceVariant,
                             dividerColor = dividerColor,
                             lunarBoxHDp = lunarBoxHDpFor(flowMetrics.lunarFont, lunarBoxH),
+                            t = t,
                         )
                     }
                 }
@@ -420,6 +425,7 @@ private fun DrawScope.drawWeekRow(
     onSurfaceVariant: Color,
     dividerColor: Color,
     lunarBoxHDp: Float,
+    t: Float,
 ) {
     if (alpha <= 0.01f) return
     val cellPx = metrics.cellW * density
@@ -452,6 +458,7 @@ private fun DrawScope.drawWeekRow(
             onSurface = onSurface,
             onSurfaceVariant = onSurfaceVariant,
             lunarBoxHDp = lunarBoxHDp,
+            t = t,
             alpha = alpha,
         )
     }
@@ -497,6 +504,8 @@ private fun DrawScope.drawDayCell(
     onSurfaceVariant: Color,
     /** 农历那一行 Text 的盒子高度（dp，与真实格子同一个 `LocalTextStyle` 量出来的）。 */
     lunarBoxHDp: Float,
+    /** `1` = 月侧端点（月格模型）、`0` = 年侧端点（年历迷你月模型）。 */
+    t: Float,
     alpha: Float = 1f,
     /** 网格左边缘的 x（px）。 */
     originX: Float = 0f,
@@ -510,10 +519,17 @@ private fun DrawScope.drawDayCell(
     // 几何：把 px 的 rowY / 格宽格高换回 dp，复用 CalendarLayout 的纯函数
     val rowYDp = rowY / density
     val metrics = m.copy(cellW = cellW / density, cellH = cellH / density)
+    // 两边端点是**两套不同的排版模型**，必须按 `t` 插值，否则交班那一帧会跳：
+    //  · 月侧（t=1）：`CalendarDayCell` —— Column[圆, 农历, 标记] 居中 + 3dp，农历 −6dp；
+    //  · 年侧（t=0）：`YearCanvas` 的迷你月 —— 日号**直接居中在格子里**，
+    //    圆半径 = `min(格宽, 格高) × 0.42`，标记挂在圆下方 0.86×半径处，选中/有日记加粗。
     val layout = cellLayout(rowYDp, metrics, lunarBoxHDp)
+    val miniBlend = CalendarLayout.clamp01(1f - t)
+    val cellCenterY = (rowYDp + metrics.cellH / 2f) * density
     val cx = originX + CalendarLayout.cellCenterX(col, metrics.cellW) * density
-    val circleCy = layout.circleCenterY * density
-    val radius = metrics.circleDiameter / 2f * density
+    val circleCy = CalendarLayout.lerp(layout.circleCenterY * density, cellCenterY, miniBlend)
+    val miniRadius = minOf(metrics.cellW, metrics.cellH) * 0.42f * density
+    val radius = CalendarLayout.lerp(metrics.circleDiameter / 2f * density, miniRadius, miniBlend)
 
     when {
         isSelected -> drawCircle(
@@ -523,7 +539,7 @@ private fun DrawScope.drawDayCell(
         )
         isToday -> drawCircle(
             color = primary.copy(alpha = alpha),
-            radius = radius - CalendarLayout.TODAY_RING_WIDTH / 2f * density,
+            radius = (radius - CalendarLayout.TODAY_RING_WIDTH / 2f * density).coerceAtLeast(0f),
             center = Offset(cx, circleCy),
             style = Stroke(width = CalendarLayout.TODAY_RING_WIDTH * density),
         )
@@ -535,11 +551,18 @@ private fun DrawScope.drawDayCell(
         isFuture -> onSurfaceVariant
         else -> onSurface
     }
+    // 字重：月格模型一律常重；年历迷你月把"选中 / 有日记"加粗 —— 同样按 `t` 插值。
+    val weight = if ((isSelected || flags.contains(key)) && miniBlend > 0.01f) {
+        FontWeight(CalendarLayout.lerp(400f, 700f, miniBlend).roundToInt().coerceIn(1, 1000))
+    } else {
+        FontWeight.Normal
+    }
     val num = measurer.measure(
         day.dayOfMonth.toString(),
         TextStyle(
             fontSize = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale),
             color = textColor,
+            fontWeight = weight,
         ),
     )
     drawText(
@@ -569,10 +592,13 @@ private fun DrawScope.drawDayCell(
     }
     if (flags.contains(key)) {
         val markW = minOf(20f, metrics.cellW * 0.5f)
-        drawRect(
+        val miniMarkTop = cellCenterY + miniRadius * 0.86f
+        val markTop = CalendarLayout.lerp(layout.markTop * density, miniMarkTop, miniBlend)
+        drawRoundRect(
             color = (if (isSelected) onPrimary else primary).copy(alpha = alpha),
-            topLeft = Offset(cx - markW / 2f * density, layout.markTop * density),
+            topLeft = Offset(cx - markW / 2f * density, markTop),
             size = Size(markW * density, 2f * density),
+            cornerRadius = CornerRadius(1f * density),
         )
     }
 }
