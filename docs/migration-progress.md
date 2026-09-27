@@ -1942,6 +1942,31 @@ LazyRow(state = state, flingBehavior = rememberSnapFlingBehavior(state)) {
 且字号放大时行高跟着长）；"静止画面"那条也按新尺子重写（6 行月正好铺满、5 行月露下个月第一行）。
 全量 **417** 条 JVM 单测通过。
 
+## R6 补 2 · 年历去掉特效、月↔年 morph 的"跳变"、morph 分割线、单点进周态
+
+**用户（2026-09-27）**："1. 年视图的点击特效不要了，当前选中的月份卡片背景也去掉。
+2. 年视图切换到月视图的动画明显有问题，现在完全是跳变，没有过渡动画。
+3. 月视图切换年视图的动画也不流畅。4. 月视图去掉我之前说的先点击选中，再次点击跳转
+周视图。点击直接进入周视图就行了。5. 月视图和周视图的切换中日期的动画过渡基本可以，
+但是一些分割线的动画还是不对。"
+
+| # | 根因 | 修法 |
+| --- | --- | --- |
+| 1 | 年历卡片有 `ripple()`，选中月还有一层 `cardBgSelected` 淡底 | 涟漪改 `indication = null`；卡片底**一律不画**（选中月只靠标题用 `primary` 区分） |
+| 2 / 3 | **月层的可见性判据写错了**：`visible = mode == MONTH && !morphing` —— 一进年 morph 月层立刻变透明，而年层要 `p > 0.25` 才开始淡入 ⇒ **中间那段整屏空白**（抓帧确认过：连续两帧全白），最后月视图"啪"地出现 | `visible = (mode == MONTH && !weekMorphing) || yearMorphing`：年 morph 期间月层留在场上，与年层按 `1 − yearOpacity(p)` / `yearOpacity(p)` **交叉淡入**（两条曲线和为 1）；周 morph 期间月层仍然让开（否则与 morph 层重影） |
+| 3（观感） | 年 morph 把**整条流**（含相邻月份）一起做仿射变换 ⇒ 邻月被压成一片横向涂抹 | 变换下沉到**每一块**：只有"顶部那一块"缩进/长出年历卡片，其余块按 `1 − clamp01(p·3)` 快速淡出 |
+| 2（另一半） | `yearMorphing` / `weekMorphing` 在 `scope.launch` 里才置位 ⇒ 有一帧"`mode` 已翻、标志位还没置"，两层都不盖 | 标志位改成**与 `mode` 同一帧**同步置位（三个入口：`openYear` / `backToMonth` / `openMonthFromYear` / `setWeekMode`） |
+| 4 | 2026-09-26 定的"先选中、再点一次才进周态" | 改回**点一下直接进周态**（选中日同时更新），与 iOS 一致。`onFlowDayTap` 仍然显式判 `mode`（月流常驻、透明度 0 不挡命中测试） |
+| 5 | morph 层是**一行一个 `CalendarDayGrid`**，而 `CalendarDayGrid` 里"这一行画不画分割线"的条件是 `row > 0 \|\| dividerAboveFirst` —— 单行调用时 `row > 0` 恒假、`dividerAboveFirst` 又没传 ⇒ **所有分割线在 morph 第一帧就整条消失** | morph 的每一行都传 `showDividers = true` + `dividerAboveFirst = row.showDivider`，与连续流里"本块第一行不画、其余都画"逐字一致 |
+
+**实测（AVD，逐帧抓图）**：
+- 月→年：月层与年层交叉淡入、顶部那一块缩进"9月"卡片、邻月快速淡出，**没有白屏**；
+- 年→月：网格从被点的卡片长出来、年历同步淡出，收尾正好接到真实月视图；
+- 月→周：分割线**跟着行一起移动**（此前第一帧就没了），→ 周态收尾与真实周层一致；
+- 单点 9月15日 直接进周态（`uiautomator dump` 里出现周条）。
+
+全量 **417** 条 JVM 单测 + `assembleDebug` 通过，编译零警告。
+
 ### 已知遗留
 
 - 日记页（阅读 / 编辑 / 多选 / 分享）**未开工**，差距清单见

@@ -533,31 +533,18 @@ fun MonthFlow(
                 .height(viewportH.dp)
                 .offset(y = (titleHeight + weekdayHeight).dp)
                 .graphicsLayer {
-                    // 年 morph：把「顶部月份那一块网格」仿射变换到年历里那张迷你月的网格上。
-                    // `p = 0` 时是恒等变换 —— 无论流滚到哪儿，morph 的第一帧都不会跳。
+                    // 年 morph 的缩放**不在这里做** —— 整层变换会把相邻月份一起压成一片
+                    // 涂抹（用户："月视图切换年视图的动画也不流畅"）。现在每一块各自变换：
+                    // 只有「顶部那一块」缩进年历卡片，其余块快速淡出（见下面的 MonthFlowBlock）。
+                    //
+                    // 这里只负责两件事：
+                    //  · 整体透明度（月层随年层淡入淡出，两条曲线互补）；
+                    //  · morph 期间**不裁**：缩小的那块要能落到内容区之上（年历第一行的卡片
+                    //    就在标题槽那一带）。平时必须裁，否则日期会画到钉住层上面。
                     val ym = yearMorph
                     val p = ym?.progress?.invoke() ?: 0f
-                    // morph 期间**不裁**：缩小的网格要能落到内容区之上（年历第一行的卡片
-                    // 就在标题槽那一带）。平时必须裁，否则日期会画到钉住层上面。
                     clip = ym == null || p <= 0.001f
                     alpha = contentAlpha()
-                    if (ym != null && p > 0f) {
-                        val block = layout.blocks.getOrNull(layout.blockIndexForKey(ym.monthKey))
-                        if (block != null) {
-                            val sY = block.top - scroll.offsetDp
-                            val sH = max(1f, block.rowCount * layout.rowH)
-                            val t = 1f - p
-                            val rY = CalendarLayout.lerp(sY, ym.miniGrid.y - (titleHeight + weekdayHeight), t)
-                            val rH = CalendarLayout.lerp(sH, ym.miniGrid.h, t)
-                            val rX = CalendarLayout.lerp(0f, ym.miniGrid.x, t)
-                            val rW = CalendarLayout.lerp(widthDp, ym.miniGrid.w, t)
-                            scaleX = rW / max(1f, widthDp)
-                            scaleY = rH / sH
-                            transformOrigin = TransformOrigin(0f, sY / max(1f, viewportH))
-                            translationX = rX * density
-                            translationY = (rY - sY) * density
-                        }
-                    }
                 }
                 .pointerInput(layout, viewportH, enabled) {
                     if (!enabled) return@pointerInput
@@ -600,9 +587,36 @@ fun MonthFlow(
                                 ),
                             )
                         },
-                        modifier = Modifier.offset {
-                            IntOffset(0, ((block.top - scroll.offsetDp) * density).roundToInt())
-                        },
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(0, ((block.top - scroll.offsetDp) * density).roundToInt())
+                            }
+                            .graphicsLayer {
+                                // 年 morph：**只有顶部那一块**仿射变换到年历里那张迷你月的网格上；
+                                // 其余块快速淡出（`p=0` 时两者都是恒等 / 全不透明，
+                                // 所以 morph 的第一帧与屏幕上那一帧逐像素一致，不会跳）。
+                                val ym = yearMorph ?: return@graphicsLayer
+                                val p = ym.progress()
+                                if (p <= 0f) return@graphicsLayer
+                                if (block.index != layout.blockIndexForKey(ym.monthKey)) {
+                                    alpha = 1f - CalendarLayout.clamp01(p * 3f)
+                                    return@graphicsLayer
+                                }
+                                val sY = block.top - scroll.offsetDp      // 源矩形在本层坐标里的顶
+                                val sH = max(1f, block.rowCount * layout.rowH)
+                                val t = 1f - p
+                                val targetY = ym.miniGrid.y - (titleHeight + weekdayHeight)
+                                val rY = CalendarLayout.lerp(sY, targetY, t)
+                                val rH = CalendarLayout.lerp(sH, ym.miniGrid.h, t)
+                                val rX = CalendarLayout.lerp(0f, ym.miniGrid.x, t)
+                                val rW = CalendarLayout.lerp(widthDp, ym.miniGrid.w, t)
+                                scaleX = rW / max(1f, widthDp)
+                                scaleY = rH / sH
+                                // 锚点 = 本块自己的左上角（所以位移就是"目标 − 源"）
+                                transformOrigin = TransformOrigin(0f, 0f)
+                                translationX = rX * density
+                                translationY = (rY - sY) * density
+                            },
                     )
                 }
             }
@@ -1233,7 +1247,12 @@ private fun SelectedMorphRow(
         showAdjacent = true,
         adjacentAlpha = { p },
         showLunar = showLunar,
-        showDividers = row.showDivider,
+        // ⚠️ 分割线：morph 层是**一行一个 `CalendarDayGrid`**，所以"这一行有没有分割线"
+        // 必须走 `dividerAboveFirst`（`CalendarDayGrid` 里 `row > 0` 对单行恒为假）。
+        // 少了这一条，月↔周 morph 的第一帧所有分割线就整条消失 —— 用户报的
+        // "一些分割线的动画还是不对"就是它。
+        showDividers = true,
+        dividerAboveFirst = row.showDivider,
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
@@ -1270,7 +1289,8 @@ private fun MorphRow(
         // 否则同一批日期会在两行里各画一遍（iOS 的注释专门记过这条）。
         showAdjacent = false,
         showLunar = showLunar,
-        showDividers = row.showDivider,
+        showDividers = true,
+        dividerAboveFirst = row.showDivider,
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -146,21 +145,10 @@ fun YearCanvas(
                 val isCurrentMonth = month == selectedMonth
                 val titleColor = if (isCurrentMonth) primary else onSurfaceVariant
 
-                // ⚠️ **不画卡片底**（用户 2026-09-26："年视图的每个月底部的背景其实没必要，
-                // 干脆去掉算了"）。迷你网格本来就没填满卡片高度，那块空底色既没信息量，
-                // 又会让"卡片矩形"成为视觉主体 —— 年份列表滚动时任何位置偏差都会被它放大。
-                // 选中月仍然可辨：标题用 `primary`（见上面的 `titleColor`）。
-                // 只保留选中月的一层**很淡**的底，用于"我在哪个月"的快速定位。
-                if (isCurrentMonth) {
-                    drawRoundRect(
-                        color = cardBgSelected.copy(alpha = 0.55f),
-                        topLeft = Offset(card.x.dp.toPx(), card.y.dp.toPx()),
-                        size = androidx.compose.ui.geometry.Size(card.w.dp.toPx(), card.h.dp.toPx()),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                            Radius.card.toPx(),
-                        ),
-                    )
-                }
+                // ⚠️ **卡片底一律不画**：
+                //  - 2026-09-26 用户："年视图的每个月底部的背景其实没必要，干脆去掉算了"；
+                //  - 2026-09-27 用户："当前选中的月份卡片背景也去掉"（连选中月那层淡底也不要了）。
+                // 选中月仍然可辨：**标题用 `primary`**（见上面的 `titleColor`）。
 
                 val titleText = measurer.measure(
                     monthLabel(monthFirst),
@@ -244,16 +232,15 @@ fun YearCanvas(
                         .offset(x = card.x.dp, y = card.y.dp)
                         .fillMaxWidth(card.w / canvasW)
                         .fillMaxHeight(card.h / canvasH)
-                        // ⚠️ 涟漪必须**按卡片自身的圆角裁剪**。
+                        // 点击**不要特效**（用户 2026-09-27："年视图的点击特效不要了"）。
                         //
-                        // `ripple()` 是矩形/圆形的，它不认识卡片画出来的圆角矩形 ——
-                        // 不加 `clip` 时按下去出现的是一块**直角**高亮，与卡片形状对不上
-                        // （用户实测反馈："点击效果并不是卡片的圆角，而是直角"）。
-                        // 卡片绘制用的就是 `Radius.card`，这里必须同一个值。
+                        // 这里曾经是 `ripple()`，还专门按卡片圆角 `clip` 过（因为默认涟漪是
+                        // 直角的、和卡片对不上）。现在整块点击区域做成透明的 —— 没有涟漪、
+                        // 没有高亮，点下去只发生"进这个月"这一件事。
                         .clip(RoundedCornerShape(Radius.card))
                         .clickable(
                             interactionSource = interaction,
-                            indication = ripple(),
+                            indication = null,
                             role = Role.Button,
                             onClick = { onMonthClick(month) },
                         )

@@ -372,16 +372,18 @@ fun HomeScreen(
     fun setWeekMode(expand: Boolean) {
         if (expand) {
             if (mode == HomeViewMode.WEEK || weekMorphing) return
-            mode = HomeViewMode.WEEK
         } else {
             if (mode != HomeViewMode.WEEK || weekMorphing) return
             // 周态回退：把「当前月」拉回选中日所在的月（与 iOS `goBack` 一致）。
             // ⚠️ **不动连续月历流的滚动位置** —— 它停在哪儿就留在哪儿（用户明确要求）。
             monthKey = CalendarGrid.monthKeyOf(selectedDate)
-            mode = HomeViewMode.MONTH
         }
+        // ⚠️ `weekMorphing` 必须**同步**置位（不能放进 `scope.launch`）：图层的可见性由
+        // `mode` + `morphing` 决定，两者若不在同一帧生效，中间就会有一帧"两层都不盖"
+        // —— 表现为月↔周切换的第一帧直接跳过去（用户报的"完全是跳变"就是这一类）。
+        weekMorphing = true
+        mode = if (expand) HomeViewMode.WEEK else HomeViewMode.MONTH
         scope.launch {
-            weekMorphing = true
             weekProgress.animateTo(if (expand) 1f else 0f, morphSpec)
             weekMorphing = false
             if (!expand) weekSource = null
@@ -400,9 +402,10 @@ fun HomeScreen(
     fun openYear() {
         if (mode == HomeViewMode.YEAR || morphing) return
         yearZoomingIn = true
+        // 同上：标志位与 `mode` 必须同一帧生效
+        yearMorphing = true
         mode = HomeViewMode.YEAR
         scope.launch {
-            yearMorphing = true
             yearProgress.animateTo(1f, morphSpec)
             yearMorphing = false
         }
@@ -415,9 +418,9 @@ fun HomeScreen(
             HomeViewMode.YEAR -> {
                 if (yearMorphing) return
                 yearZoomingIn = false
+                yearMorphing = true
                 mode = HomeViewMode.MONTH
                 scope.launch {
-                    yearMorphing = true
                     yearProgress.animateTo(0f, morphSpec)
                     yearMorphing = false
                 }
@@ -441,9 +444,11 @@ fun HomeScreen(
         selectedKey = DateUtil.dayKeyOf(LocalDate.of(year, month, 1))
         jumpToMonth(key, animated = false)
         yearZoomingIn = false
+        // ⚠️ 这三行必须**同一帧**生效：`mode` 翻成月态、`yearMorphing` 置位、进度从 1 起。
+        // 少一个就会闪一帧"完整的月视图"（用户报的年→月"完全是跳变"）。
+        yearMorphing = true
         mode = HomeViewMode.MONTH
         scope.launch {
-            yearMorphing = true
             yearProgress.animateTo(0f, morphSpec)
             yearMorphing = false
         }
@@ -644,22 +649,22 @@ fun HomeScreen(
         }
 
         /**
-         * 月态点日期：**先选中，再点同一格才进周态**（用户 2026-09-26 要求）。
+         * 月态点日期：**点一下就直接进周态**（与 iOS 一致）。
          *
-         * ⚠️ 必须显式判 `mode`：连续月历流**始终挂载**（滚动位置不能丢），
+         * 2026-09-26 曾改成"先选中、再点同一格才进周态"（当时怕误触），
+         * 用户 2026-09-27 要求改回来："月视图去掉我之前说的先点击选中，再次点击跳转周视图。
+         * 点击直接进入周视图就行了。"
+         *
+         * ⚠️ 仍然要显式判 `mode`：连续月历流**始终挂载**（滚动位置不能丢），
          * 周态 / 年态下它只是不透明度 0 —— 而**透明度 0 不阻止命中测试**。
-         * 少了这一条，年历上没盖到卡片的地方点两下就会莫名进周态
+         * 少了这一条，年历上没盖到卡片的地方点一下就会莫名进周态
          * （iOS 那边靠 `allowsHitTesting(false)` 挡，Compose 没有对应修饰符）。
          */
         val onFlowDayTap: (LocalDate, MonthFlowMorphSource) -> Unit = { date, source ->
-            val key = DateUtil.dayKeyOf(date)
-            when {
-                mode != HomeViewMode.MONTH || morphing -> Unit
-                key != selectedKey -> selectedKey = key
-                else -> {
-                    weekSource = source
-                    setWeekMode(true)
-                }
+            if (mode == HomeViewMode.MONTH && !morphing) {
+                selectedKey = DateUtil.dayKeyOf(date)
+                weekSource = source
+                setWeekMode(true)
             }
         }
 
@@ -784,7 +789,15 @@ fun HomeScreen(
                         resetMonthKey = monthKey,
                         jump = monthJump,
                         enabled = mode == HomeViewMode.MONTH && !morphing,
-                        visible = mode == HomeViewMode.MONTH && !morphing,
+                        // ⚠️ 可见性**不能**写成 `mode == MONTH && !morphing`：
+                        // 年 morph 期间月层必须留在场上，与年层做**交叉淡入**
+                        // （月层 = `1 − yearLayerOpacity(p)`，年层 = `yearLayerOpacity(p)`，
+                        // 两条曲线在整段区间里和为 1）。写成上面那样的话，一进 morph 月层就
+                        // 变透明，而年层要等 `p > 0.25` 才淡入 —— 中间那段**整屏空白**，
+                        // 用户看到的就是"完全是跳变、没有过渡动画"。
+                        // 周 morph 相反：那一行与当日内容由 morph 层自己画，月层必须让开，
+                        // 否则会与 morph 层重影（两层画同一批日期）。
+                        visible = (mode == HomeViewMode.MONTH && !weekMorphing) || yearMorphing,
                         onDayTap = onFlowDayTap,
                         onTopMonthChange = { key -> if (key != monthKey) monthKey = key },
                         onSettle = { key -> if (key != monthKey) monthKey = key },
