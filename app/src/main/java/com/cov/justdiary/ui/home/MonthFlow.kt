@@ -89,7 +89,7 @@ import kotlinx.coroutines.launch
 //
 // 1. **行高全局一致**：每个月 = 一行小标题带 + 若干周行，都是同一个 `rowH`。
 // 2. **月份之间不留空隙**：两个月的行紧挨着；小标题画在**分割线上方**（贴着
-//    [CalendarLayout.LABEL_TIGHT_GAP]），分割线画在本月第一行的顶。
+//    [CalendarLayout.CalendarLayout.LABEL_TIGHT_GAP]），分割线画在本月第一行的顶。
 //    所以从上到下的次序是「上个月的日期 → 小标题 → 分割线 → 本月日期」。
 // 3. **静止位置 = 该月第一行的顶**：进入某个月（初始 / 今天 / 年历点月）时把该月
 //    第一行顶到视口顶部，小标题刚好落在视口上沿之外（被钉住层盖住）。
@@ -262,9 +262,6 @@ class MonthFlowLayout private constructor(
 }
 
 // --------------------------------------------------------------------------- 小标题
-
-/** 小标题与它下面那条分割线之间的间隙（「紧贴」的那个「紧」，iOS 同名常量）。 */
-private const val LABEL_TIGHT_GAP = 3f
 
 /**
  * 月↔周 morph 里小标题**落位**的位移（dp）。
@@ -695,7 +692,7 @@ private fun MonthFlowBlock(
             compact = compact,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .offset(y = (-(labelBandH + LABEL_TIGHT_GAP)).dp),
+                .offset(y = (-(labelBandH + CalendarLayout.LABEL_TIGHT_GAP - CalendarLayout.LABEL_TUCK)).dp),
             isCurrent = block.key == todayMonthKey,
         )
     }
@@ -1007,7 +1004,8 @@ private fun morphSource(
                 monthFirst = block.monthFirst,
                 key = block.key,
                 firstRowIndex = rows.size,
-                bottom = block.top - offsetDp + titleHeight + weekdayHeight - LABEL_TIGHT_GAP,
+                bottom = block.top - offsetDp + titleHeight + weekdayHeight -
+                    CalendarLayout.LABEL_TIGHT_GAP + CalendarLayout.LABEL_TUCK,
             ),
         )
         CalendarGrid.displayedWeeks(block.monthFirst, weekStart).forEachIndexed { i, week ->
@@ -1184,7 +1182,7 @@ fun MonthWeekMorph(
                                         heightDp = heightDp,
                                         rowH = source.rowH,
                                         p = p,
-                                    ) - LABEL_TIGHT_GAP - source.labelBandH
+                                    ) - CalendarLayout.LABEL_TIGHT_GAP + CalendarLayout.LABEL_TUCK - source.labelBandH
                                 } - LABEL_RISE * p
                                 translationY = (y - clipTop()) * density
                                 alpha = 1f - CalendarLayout.clamp01(p * 1.4f)

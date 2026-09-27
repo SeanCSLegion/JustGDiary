@@ -103,7 +103,7 @@ fun YearMonthMorph(
     val prevBlock = layout.blocks.getOrNull(blockIndex - 1)
     val cellW = CalendarLayout.monthCellW(widthDp)
     val labelH = remember { CalendarLayout.flowLabelBandHeight(compact = false) }
-    val labelBlockH = labelH + CalendarLayout.LABEL_TIGHT_GAP
+    val labelBlockH = labelH + CalendarLayout.LABEL_TIGHT_GAP - CalendarLayout.LABEL_TUCK
 
     // 主题色在组合期取出（Canvas 的绘制 lambda 不是 @Composable）
     val primary = MaterialTheme.colorScheme.primary
