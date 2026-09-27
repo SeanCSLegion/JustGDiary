@@ -25,20 +25,18 @@ import java.time.LocalDate
 class MonthFlowLayoutTest {
 
     /**
-     * 参考机（Pixel 10 Pro AVD，426.7×952dp）的实测值。
+     * 参考机（Pixel 10 Pro AVD，1280×2856 @480dpi = 426.7×952dp）的实测值。
      *
-     * ⚠️ Android 竖屏的行高是**由列宽推出**的（`dayCellHeightFor`：列距 × 1.2，且不低于
-     * 内容下限 72dp），不是 iOS 那种「把整页均分给 6 行」。于是同样一屏在 Android 上能看到
-     * **约 9 行（≈ 1.8 个月）**，而 iOS 上是 6 行。这条差异影响两处断言：视口里能同时看到
-     * 两个整月、以及"顶部月份"过半才切。
+     * 行高与 iOS **同一条尺子**：`(日历区高 − 标题槽 − 星期栏) / 6`（用户 2026-09-27
+     * "行高也按照 iOS 的 94pt 来设置，这方面对齐 iOS"）。iPhone 402×874 上得 94pt，
+     * 本机得 ~105dp —— 一屏正好 6 行（= 一个月），与 iOS 的观感一致。
      */
     private val calendarW = 426.7f
-    private val rowH = CalendarLayout.dayCellHeightFor(calendarW, fontScale = 1f, showLunar = true)
 
-    /** 日历区高度 = 屏高 − 顶栏 64 − 底部导航 83（与 `AdaptiveLayout` 的浮条让位同一个量级）。 */
-    private val viewportH =
-        952f - CalendarLayout.HEADER_H - CalendarLayout.BIG_TITLE_H -
-            CalendarLayout.WEEKDAY_HEADER_H - 83f
+    /** 日历区高度 = 屏高 − 顶栏 64 − 底部导航（实测内容顶 ≈ 218dp、底 ≈ 848dp）。 */
+    private val bandH = 952f - CalendarLayout.HEADER_H - 83f
+    private val viewportH = bandH - CalendarLayout.BIG_TITLE_H - CalendarLayout.WEEKDAY_HEADER_H
+    private val rowH = CalendarLayout.flowCellHeightFor(areaH = bandH, fontScale = 1f, showLunar = true)
 
     private fun layout(ws: String = DateUtil.WEEK_START_MONDAY) = MonthFlowLayout.of(ws, rowH)
 
@@ -46,6 +44,10 @@ class MonthFlowLayoutTest {
 
     /** 见 `rows inside a month are exactly one row apart` 里的说明。 */
     private val FLOAT_EPS = 0.1f
+
+    /** 一行里「内容之上」的留白（小标题就借用它）。 */
+    private val contentTopPadding =
+        CalendarLayout.cellContentTopPadding(CalendarLayout.flowMetrics(calendarW, rowH, showLunar = true))
 
     // ------------------------------------------------------------------ 行数与行高
 
@@ -113,6 +115,40 @@ class MonthFlowLayoutTest {
         }
     }
 
+    /**
+     * 2b) **小标题与上个月最后一行要隔开**（用户 2026-09-27："小月份和上一个月的最后要
+     * 稍微隔开一点，以小月份的上方为限"）。
+     *
+     * 小标题整块高度 = 带高 + 3dp 间隙，必须**放得进**上一行底部的留白
+     * `(行高 − 内容高)/2`，这样它的**顶边**之上还剩一段真实的空档。
+     */
+    @Test
+    fun `the label keeps a gap above the previous month's last row`() {
+        val padding = contentTopPadding
+        // 小标题整块（带高 + 3dp 间隙）必须放得进上一行底部的留白
+        assertTrue(
+            "留白 ${'$'}padding 要放得下小标题 ${'$'}{labelH + CalendarLayout.LABEL_TIGHT_GAP}",
+            padding >= labelH + CalendarLayout.LABEL_TIGHT_GAP,
+        )
+        // 而且"小标题顶边"之上还有真正的空档（用户要的"稍微隔开一点"）
+        val gap = padding - labelH - CalendarLayout.LABEL_TIGHT_GAP
+        assertTrue("小标题上方要留出空档（当前 ${'$'}gap dp）", gap >= 4f)
+    }
+
+    /** 行高 = iOS 那条尺子：一屏正好 6 行（分区高 = 标题槽 + 星期栏 + 6 行）。 */
+    @Test
+    fun `row height fills the viewport with six rows like ios`() {
+        assertEquals(
+            "六行正好铺满视口（iOS 同一条尺子）",
+            viewportH,
+            rowH * CalendarLayout.MONTH_ROWS,
+            0.001f,
+        )
+        // 系统字号放大时行高要跟着长，否则"日号 + 农历"会被裁掉
+        val big = CalendarLayout.flowCellHeightFor(bandH, fontScale = 2f, showLunar = true)
+        assertTrue("字号放大后行高要跟着长", big > rowH)
+    }
+
     /** 3) 静止位置 = 该月第一行的顶；此时顶部月份就是它自己。 */
     @Test
     fun `rest offset puts the first row at the top`() {
@@ -128,11 +164,12 @@ class MonthFlowLayoutTest {
     }
 
     /**
-     * 静止画面（Android 竖屏）：本月第一行顶在视口顶部，**整月都在视口里**，
-     * 下面还接着下个月的小标题与若干行 —— 这正是用户要的「下一个月的日期会立即出现」。
+     * 静止画面（竖屏，与 iOS 一致）：本月第一行顶在视口顶部；**6 行月正好铺满**
+     * （下个月一行都不露），5 行月则把下个月的第一行露在底部 —— 这正是用户要的
+     * 「下一个月的日期会立即出现」。
      */
     @Test
-    fun `the viewport at rest shows the whole month and the next month's start`() {
+    fun `the viewport at rest shows six rows or the next month's first row`() {
         val l = layout()
         for (key in listOf(202608, 202609, 202602)) {
             val i = l.blockIndexForKey(key)
@@ -140,10 +177,15 @@ class MonthFlowLayoutTest {
             val block = l.blocks[i]
             val rowsH = block.rowCount * l.rowH
             val nextTop = l.blocks[i + 1].top
-            assertTrue("本月的第一行顶在视口顶部", rest == block.top)
-            assertTrue("整月都要放得下（行数 4…6）", rowsH <= viewportH)
+            assertEquals("本月的第一行顶在视口顶部", block.top, rest, 0.001f)
             assertEquals("下个月紧接着本月最后一行（不留空隙）", rest + rowsH, nextTop, 0.001f)
-            assertTrue("所以下一行确实露在视口里", nextTop < rest + viewportH)
+            if (block.rowCount == 6) {
+                assertEquals("六行正好铺满视口", viewportH, rowsH, 0.001f)
+                assertEquals("六行月的下一行正好在视口之外", rest + viewportH, nextTop, 0.001f)
+            } else {
+                assertTrue("五行月底下会露出下个月的开头", rowsH < viewportH)
+                assertTrue("所以下一行确实露在视口里", nextTop < rest + viewportH)
+            }
         }
     }
 

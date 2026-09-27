@@ -437,6 +437,41 @@ object CalendarLayout {
         (flowLabelFontSize(compact) * 1.4f).roundToInt().toFloat()
 
     /**
+     * 竖屏连续月历流的行高：**与 iOS 同一条尺子** —— `(区高 − 标题槽 − 星期栏) / 6`。
+     *
+     * 用户 2026-09-27："行高也按照 iOS 的 94pt 来设置，这方面对齐 iOS。"
+     * 在 iPhone 402×874 上这个式子得 94pt；本机（Pixel 10 Pro，426.7×952dp）得 ~105dp。
+     *
+     * ⚠️ 这条规则**取代**了 §8.9 那条"由列宽推出（列距 × 1.2）"：
+     *  - 一屏正好 6 行（= 一个月）⇒ 与 iOS 的观感一致；
+     *  - 一行底部的留白 = (行高 − 内容高) / 2 ≈ 35dp，**放得下** 21dp 的小标题 +
+     *    3dp 间隙 ⇒ 小标题与上个月最后一行之间自然留出约 11dp（用户要的"稍微隔开一点"）；
+     *    旧规则（73dp）只有 19dp 留白，小标题会压到前一行的农历上。
+     *
+     * [fontScale] 那一项只是**兜底**：系统字号调大时内容会变高，行高至少要放得下
+     * "日号 + 农历"（与 [dayCellHeightFor] 的 `byContent` 同一个下限）。
+     */
+    fun flowCellHeightFor(
+        areaH: Float,
+        headerH: Float = BIG_TITLE_H + WEEKDAY_HEADER_H,
+        fontScale: Float = 1f,
+        showLunar: Boolean = true,
+    ): Float {
+        val byFill = (areaH - headerH) / MONTH_ROWS
+        val natural = if (showLunar) DAY_CELL_CONTENT_H else DAY_CELL_NO_LUNAR_H
+        val byContent = natural * max(1f, fontScale)
+        return max(byFill, byContent).coerceIn(MIN_CELL_H, SANITY_MAX_CELL_H)
+    }
+
+    /**
+     * 一格里「内容之上」的留白：`(行高 − 内容高) / 2`。
+     *
+     * 小标题（[flowLabelBandHeight] + [LABEL_TIGHT_GAP]）就借用这段留白 ——
+     * `MonthFlowLayoutTest` 用它守住"小标题不压到上个月的日期上"。
+     */
+    fun cellContentTopPadding(metrics: DayMetrics): Float = (metrics.cellH - metrics.contentH) / 2f
+
+    /**
      * 连续月历流单行的绘制参数。
      *
      * 字号跟着行高走：竖屏行高 ~94dp 时仍是设计里的 20/11；横屏左栏一格只有 40dp，

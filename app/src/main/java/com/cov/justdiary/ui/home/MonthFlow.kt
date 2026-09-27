@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -266,10 +267,16 @@ class MonthFlowLayout private constructor(
 private const val LABEL_TIGHT_GAP = 3f
 
 /**
- * 月份小标题：站在**当月 1 号那一列的正上方**（不是整行居中），并且紧贴 1 号那一行。
+ * 月份小标题：压在**当月 1 号那一列的正上方**（在这一列里居中，与日号同一个中心），
+ * 并且紧贴 1 号那一行。
  *
  * 带高就是这一行字的高度（[CalendarLayout.flowLabelBandHeight]），上下不再留白：
  * 用户看过两版（整行高 → 35pt）都嫌高，明确要求「紧贴月份高度」。
+ *
+ * 它**借用**的是上一个月最后一行底部的留白（`CalendarLayout.cellContentTopPadding`
+ * ≈ 35dp），所以不额外占高度；用户 2026-09-27 要求「小月份和上一个月的最后稍微隔开一点，
+ * 以小月份的上方为限」—— 行高对齐 iOS 之后这段留白足够（21 + 3 ≤ 35），
+ * 小标题的**顶边**之上还有约 11dp 的空档。`MonthFlowLayoutTest` 把这条钉住了。
  */
 @Composable
 fun MonthFlowLabel(
@@ -294,12 +301,7 @@ fun MonthFlowLabel(
         // 摆到带子该在的位置（带高 21dp 只是设计值，字自己 ~22dp，差 1dp 看不出来）。
         modifier = modifier
             .offset(x = (column * cellW).dp)
-            .width(cellW.dp)
-            // 底色 = 页面底色：小标题那一行字高 21dp，而上一个月最后一行的**底部留白**
-            // 只有 (行高 − 内容高)/2 ≈ 19dp（Android 的行高由列宽推出，比 iOS 矮），
-            // 所以「1 号正好是周首日」的月份（约 1/7）里小标题会压到前一行的农历上。
-            // 给这一行字一块同色底，压住的部分就干净地让位（而不是叠字）。
-            .background(MaterialTheme.colorScheme.surface),
+            .width(cellW.dp),
         fontSize = DynamicTypeMetrics.calendarSp(
             CalendarLayout.flowLabelFontSize(compact).dp,
             fontScale,
@@ -313,6 +315,9 @@ fun MonthFlowLabel(
         maxLines = 1,
         overflow = TextOverflow.Clip,
         softWrap = false,
+        // **在这一列里居中** = 压在 1 号正上方（1 号的日号也是在这一列居中的）。
+        // iOS 的 `frame(width: cellW, height: bandH, alignment: .bottom)` 默认就是居中。
+        textAlign = TextAlign.Center,
     )
 }
 

@@ -523,18 +523,15 @@ fun HomeScreen(
         } else {
             showLunar
         }
-        // 行高：竖屏**由列宽推出**（见 `dayCellHeightFor`：均分会让 5 行月的行距达到列距的
-        // 两倍多，用户反馈"上下间隔太大"）；分栏按 6 行等分（行高必须跨月恒定，
-        // 否则滚过月份边界时格子会忽高忽低）。
-        val rowH = if (split) {
-            CalendarLayout.cellHeightFor(
-                areaH = bandH,
-                rows = CalendarLayout.MONTH_ROWS,
-                headerH = titleH + weekdayH,
-            )
-        } else {
-            CalendarLayout.dayCellHeightFor(calendarW, fontScale, showLunarHere)
-        }
+        // 行高：**与 iOS 同一条尺子** `(区高 − 标题槽 − 星期栏) / 6`（行高必须跨月恒定，
+        // 否则滚过月份边界时格子会忽高忽低）。用户 2026-09-27 明确要求对齐 iOS ——
+        // 附带好处是小标题那一行字有了 35dp 的留白（旧规则只有 19dp，会压到农历上）。
+        val rowH = CalendarLayout.flowCellHeightFor(
+            areaH = bandH,
+            headerH = titleH + weekdayH,
+            fontScale = fontScale,
+            showLunar = showLunarHere,
+        )
         val flowLayout = remember(weekStart, rowH) { MonthFlowLayout.of(weekStart, rowH) }
         val viewportH = maxOf(0f, bandH - titleH - weekdayH)
 
