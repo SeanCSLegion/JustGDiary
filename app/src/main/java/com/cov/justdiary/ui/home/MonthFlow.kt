@@ -1371,21 +1371,55 @@ fun MonthWeekMorph(
                     )
                 }
 
-                // ---- 被点中那一周：从**冻结时的真实位置**走到星期栏下沿 ----
-                // 两端都是"日历区坐标"，与 Canvas 本地坐标同一套 ⇒ 直接插值，
-                // 不需要任何补偿项（旧实现要在这里减层偏移、减 clipTop，正是错误的来源）。
+                // ---- 本月各行的让位动画 ----
+                //
+                // 用户 2026-09-27 指出（我上一版偷懒只留了当周）：
+                // "不是只有当周才有动画，实际上当周以上都要向上移动，以下日期向下逐渐淡出"。
+                // 与 iOS 的 `MonthWeekMorph` 同一条：
+                //   · 选中行    —— 从**冻结时的真实位置**走到星期栏下沿，行高/字号同步插值；
+                //   · 上方各行  —— 一起**向上**滑出（`top − p × (top + rowH)`）；
+                //   · 下方各行  —— **向下**滑出（`top + p × (height − top)`）并逐渐淡出。
+                // 位移与透明度都直接作用在 `y` 上 —— 单 Canvas 结构里没有图层叠加，
+                // 不需要任何补偿项（这正是重写的意义）。
+                //
+                // ⚠️ 按"周首日"去重：`displayedWeeks` 对相邻两个月都会把**跨月那一周**
+                // 算进去，同一个块里就会出现两条同周的 `Row`，画两遍就是叠字。
                 val selectedRow = source.selectedRow
-                if (selectedRow != null) {
+                val selectedBlockTop = selectedRow?.top ?: 0f
+                val drawnWeeks = HashSet<LocalDate>()
+                source.rows.forEachIndexed { i, row ->
+                    if (!row.inSelectedBlock) return@forEachIndexed
+                    if (!drawnWeeks.add(row.week.first())) return@forEachIndexed
+                    val isSelected = i == source.selectedIndex
+                    val rowY: Float
+                    val rowAlpha: Float
+                    val rowMetrics: CalendarLayout.DayMetrics
+                    if (isSelected) {
+                        rowY = CalendarLayout.lerp(row.top, headH, p)
+                        rowAlpha = 1f
+                        rowMetrics = mMetrics.lerp(wMetrics, p)
+                    } else {
+                        rowY = if (row.top < selectedBlockTop) {
+                            // 上方：向上滑出
+                            row.top - p * (row.top + rowH)
+                        } else {
+                            // 下方：向下滑出，把位置让给当日内容
+                            row.top + p * (heightDp - row.top)
+                        }
+                        rowAlpha = 1f - CalendarLayout.clamp01(p * 1.4f)
+                        rowMetrics = mMetrics
+                    }
+                    if (rowAlpha <= 0.01f) return@forEachIndexed
                     drawWeekRow(
-                        week = selectedRow.week,
-                        anchorMonth = selectedRow.anchorMonth,
-                        rowY = CalendarLayout.lerp(selectedRow.top, headH, p) * densityF,
-                        metrics = mMetrics.lerp(wMetrics, p),
+                        week = row.week,
+                        anchorMonth = row.anchorMonth,
+                        rowY = rowY * densityF,
+                        metrics = rowMetrics,
                         selectedKey = selectedKey,
                         todayKey = todayKey,
                         flags = flags,
-                        alpha = 1f,
-                        showDivider = selectedRow.showDivider,
+                        alpha = rowAlpha,
+                        showDivider = row.showDivider,
                         measurer = measurer,
                         textLayouts = textLayouts,
                         fontScale = fontScale,
