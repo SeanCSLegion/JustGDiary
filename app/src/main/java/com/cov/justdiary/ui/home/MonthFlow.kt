@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -634,6 +635,9 @@ private fun MonthFlowBlock(
     onDayTap: (LocalDate, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 临时探针：组合段 / 布局段分开计时
+    val composeStartNs = System.nanoTime()
+    val placedNs = composeStartNs
     val weeks = remember(block.key, weekStart) {
         CalendarGrid.displayedWeeks(block.monthFirst, weekStart)
     }
@@ -656,6 +660,7 @@ private fun MonthFlowBlock(
             rows = weeks,
             anchorMonth = block.monthFirst,
             metrics = metrics,
+            modifier = Modifier.onPlaced { ScrollProf.measure(System.nanoTime() - placedNs) },
             selectedKey = selectedKey,
             todayKey = todayKey,
             flags = flags,
@@ -681,6 +686,7 @@ private fun MonthFlowBlock(
                 .offset(y = (-(labelBandH + CalendarLayout.LABEL_TIGHT_GAP)).dp),
             isCurrent = block.key == todayMonthKey,
         )
+        ScrollProf.composeDone(System.nanoTime() - composeStartNs)
     }
 }
 
@@ -745,6 +751,7 @@ private fun BoxScope.FlowScrollIndicator(
             show = false
         }
     }
+
     val alpha by animateFloatAsState(if (show) 0.35f else 0f, tween(180))
     val color = MaterialTheme.colorScheme.onSurfaceVariant
     Box(
@@ -796,6 +803,7 @@ private suspend fun PointerInputScope.flowDrag(
         // 手指追上正在滑行的惯性：立刻把动画停在**当前帧**（iOS 的 `freezeAnimation`）
         scroll.animJob?.cancel()
         scroll.dragging = true
+        ScrollProf.start()
         val origin = scroll.offsetDp
         var accumulatedPx = 0f
         var started = false

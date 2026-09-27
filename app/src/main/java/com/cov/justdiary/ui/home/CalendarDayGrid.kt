@@ -109,6 +109,14 @@ fun CalendarDayGrid(
     val dayFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
     val lunarFontSize: TextUnit = DynamicTypeMetrics.calendarSp(metrics.lunarFont.dp, fontScale)
     val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+    // ⚠️ 这 4 条资源**必须提在这一层**：原来写在 `CalendarDayCell` 里，而
+    // `stringResource` 是**每个组合实例各查一次**（不是全局 memo）—— 一屏 180 个格子
+    // 就是 720 次 Resources 查询，正好落在"挂载新月份"那一帧（真机实测该帧 257ms）。
+    // 提到行/网格这一层之后，一次组合只查 4 次。
+    val todayLabel = stringResource(R.string.index_today)
+    val selectedLabel = stringResource(R.string.index_selected)
+    val hasDiaryLabel = stringResource(R.string.index_has_diary)
+    val noDiaryLabel = stringResource(R.string.index_no_diary)
 
     Column(modifier = modifier.fillMaxWidth()) {
         rows.forEachIndexed { row, week ->
@@ -180,18 +188,27 @@ fun CalendarDayGrid(
                         Box(modifier = Modifier.weight(1f).height(rowH))
                         return@forEach
                     }
+                    // ⚠️ `dayKeyOf` **只算一次**再传下去。原来在这一段里被调用 3 次
+                    //（isSelected / isToday / hasDiary），`CalendarDayCell` 内部又算第 4 次 ——
+                    // 而它每次都要 `StringBuilder` 拼一个 10 字符的串。一屏 180 格 × 4 = 720 次。
+                    val dayKey = DateUtil.dayKeyOf(date)
                     CalendarDayCell(
                         date = date,
+                        dayKey = dayKey,
                         showLunar = showLunar,
-                        isSelected = DateUtil.dayKeyOf(date) == selectedKey,
-                        isToday = DateUtil.dayKeyOf(date) == todayKey,
-                        hasDiary = flags.contains(DateUtil.dayKeyOf(date)),
+                        isSelected = dayKey == selectedKey,
+                        isToday = dayKey == todayKey,
+                        hasDiary = flags.contains(dayKey),
                         todayKey = todayKey,
                         dayFontSize = dayFontSize,
                         lunarFontSize = lunarFontSize,
                         circleDiameter = m.circleDiameter.dp,
                         diaryMarkWidth = minOf(20f, m.cellW * 0.5f).dp,
                         enabled = true,
+                        todayLabel = todayLabel,
+                        selectedLabel = selectedLabel,
+                        hasDiaryLabel = hasDiaryLabel,
+                        noDiaryLabel = noDiaryLabel,
                         onClick = { onDayClick(date) },
                         modifier = Modifier
                             .weight(1f)
@@ -224,6 +241,8 @@ fun CalendarDayGrid(
 @Composable
 private fun CalendarDayCell(
     date: LocalDate,
+    /** `YYYY-MM-DD`，由调用方算好（一屏 180 格，重复计算 4 次很贵）。 */
+    dayKey: String,
     showLunar: Boolean,
     isSelected: Boolean,
     isToday: Boolean,
@@ -236,18 +255,20 @@ private fun CalendarDayCell(
     /** "有日记"下划线的宽度（dp）：`min(20, cellW × 0.5)`（与 iOS 一致）。 */
     diaryMarkWidth: Dp,
     enabled: Boolean,
+    /** 无障碍状态词（由 `CalendarDayGrid` 统一取，见那里的说明）。 */
+    todayLabel: String,
+    selectedLabel: String,
+    hasDiaryLabel: String,
+    noDiaryLabel: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val key = DateUtil.dayKeyOf(date)
+    ScrollProf.cell()
+    val key = dayKey
     val isFuture = key > todayKey
 
     // `dayTitleFor` 要跑两次 `getDisplayName`（格式化的 ICU），按日期缓存即可。
     val dateLabel = remember(date) { DateFormats.dayTitleFor(date) }
-    val todayLabel = stringResource(R.string.index_today)
-    val selectedLabel = stringResource(R.string.index_selected)
-    val hasDiaryLabel = stringResource(R.string.index_has_diary)
-    val noDiaryLabel = stringResource(R.string.index_no_diary)
 
     // 无障碍串只在状态变化时重拼（原来每次重组都 buildList + joinToString）。
     val stateLabel = remember(isToday, isSelected, hasDiary, todayLabel, selectedLabel, hasDiaryLabel, noDiaryLabel) {

@@ -662,6 +662,12 @@ fun HomeScreen(
         // 连续月历流的初始滚动位置 = 当前月的**静止偏移**（该月第一行顶到视口顶部）。
         // `remember {}` 不带 key：只在第一次组合时取一次，之后滚动位置由流自己持有
         // —— 跨形态保持，正是用户要的「用户滑到哪，周视图返回的时候月视图就留在哪」。
+        // ⚠️ 初始偏移**只在第一次组合时取一次**（`remember {}` 不带 key）：之后滚动位置由
+        // 流自己持有 —— 跨形态保持，正是"用户滑到哪，周视图返回时月视图就留在哪"。
+        // ⚠️ 启动时会**组合两次**：第一帧的视口还没量准（`boxWithConstraints` 首帧给出的
+        // 高度与最终不同），`rowH` 会从 ~101dp 变成 95dp，于是 `flowLayout` 实例变了、
+        // `MonthFlow` 里 `LaunchedEffect(resetKey, layout)` 会把滚动拨回"当前月的静止位置"。
+        // 真机实测这一次拨动是可见的（先看到旧偏移那一段、再跳到本月）。
         val initialFlowOffset = remember { flowLayout.restOffset(monthKey) ?: 0f }
 
         // 进入分栏（横屏 / 宽窗口）时归位到月态：横屏不提供年历入口，也没有周态
@@ -951,42 +957,17 @@ fun HomeScreen(
                         )
                     }
 
-                    // ③ 年层（**常驻**）：年态静止时看得见；月态 / 周态下 alpha = 0 但仍挂载。
+                    // ③ 年层（**年态静止**）：上下滑翻年的手势挂在它上面。
+                    // morph 期间不画这一份 —— 那一段由 ④ 的 morph 层自己带一份年历，
+                    // 两份同时在场会白画一遍 12 张迷你月。
                     //
-                    // ⚠️ 原来这一层是 `if (mode == YEAR && !yearMorphing)` —— 只在年态
-                    // **之外**才挂载。于是"第一次点年份"那次 morph 里，年历的首次排版
-                    // （字形加载 + 12 张迷你月文本整形）全压在动画最前面：真机实测
-                    // `触发→首帧 387ms`（进程冷启动那一次），首帧落地时进度已经跑掉 1/3，
-                    // 观感就是"点下去先卡一下、然后动画飞快地走完"。
-                    // 常驻之后这份开销落在启动时（见下面 `LaunchedEffect` 的预热）。
-                    //
-                    // ⚠️ 透明层**不阻止命中测试**（与 `MonthFlow` 的 `visible` 同一条坑）：
-                    // 月态 / 周态下年历那 12 个点击层必须自己让开，否则会偷走月历的点击。
-                    // Compose 没有 `allowsHitTesting(false)` 的对等物，这里用"回调里判模式"
-                    // 兜住（点下去没有任何效果，等于让开）。
-                    Box {
-                        YearLayer(
-                            year = year,
-                            selectedMonth = monthFirst.monthValue,
-                            selectedKey = selectedKey,
-                            todayKey = todayKey,
-                            flags = flags,
-                            weekStart = weekStart,
-                            showLunar = showLunarHere,
-                            yearHeight = bandH,
-                            yearWidth = calendarW,
-                            yearProgress = yearProgressReader,
-                            dateFormats = dateFormats,
-                            visible = mode == HomeViewMode.YEAR && !yearMorphing,
-                            onMonthClick = { month ->
-                                if (mode == HomeViewMode.YEAR && !yearMorphing) {
-                                    openMonthFromYear(month)
-                                }
-                            },
-                        )
-                    }
-
-                    // ③b 上下滑翻年：只在年态静止时挂手势（多画一年由 ③ 的 PagerViewport 负责）
+                    // ⚠️ **不要改成"常驻"**（2026-09-27 试过，回退了）：
+                    // 月态下这一层是透明的，但透明**不阻止命中测试** —— `YearCanvas` 的 12 个
+                    // 迷你月卡片各自是一个铺满日历区的 `Modifier.clickable`，它们会在月流
+                    // **之上**把指针事件接走，于是月态**上下拖动完全失效**（真机实测：
+                    // 显式 `input motionevent` 拖 800px，整屏差异 0.000）。而且在年态翻年时，
+                    // 这一层会跟着 `graphicsLayer` 的放大一起参与绘制，底部会露残留。
+                    // 想省"年历首次排版"的开销，只能另找不参与命中测试的预热方式。
                     if (mode == HomeViewMode.YEAR && !yearMorphing) {
                         Box(modifier = pagerGesture) {
                             PagerViewport(
@@ -1155,13 +1136,14 @@ private fun YearLayer(
     /** 年↔月 morph 期间不画这一张迷你月（morph 层正在同一矩形里画它，见 `YearCanvas`）。 */
     hiddenMonth: Int? = null,
     /**
-     * 年历是否**当前可见**（年态 / 年 morph 期间 / 启动预热那一帧）。
+     * ⚠️ 这一层**只在年态静止时挂载**（`mode == YEAR && !yearMorphing`）。
      *
-     * ⚠️ 这一层是**常驻**的（见 [HomeScreen] 里的说明）：年历首次排版要加载字形 +
-     * 排 12 张迷你月的文本，实测 230~390ms —— 正好压在 morph 的起跑段，
-     * 观感就是"点下去先卡一下、动画只剩一小截"。常驻 + 启动预热把这份开销提前付掉。
+     * 不要改成"常驻 + `alpha = 0`"：透明不阻止命中测试，`YearCanvas` 里那 12 个
+     * 铺满日历区的卡片点击层会把月态的拖动事件接走（真机实测拖动完全失效），
+     * 而且年态翻年时它会跟着放大层一起参与绘制、底部露残留。
+     * 它首次排版（字形加载 + 12 张迷你月文本整形）约 230~390ms，要预热就另找
+     * 不参与命中测试的办法。
      */
-    visible: Boolean = true,
 ) {
     val context = LocalContext.current
     // 与进度无关的那部分几何：算一次就够（它只跟尺寸和选中月有关）
@@ -1185,13 +1167,11 @@ private fun YearLayer(
             .width(yearWidth.dp)
             .height(yearHeight.dp)
             .graphicsLayer {
-                // 进度在 layer 里读（延迟）：动画每一帧只让 layer 失效，Canvas 重画由
-                // 上面的常驻挂载决定（内容不变时 Canvas 每帧重画的成本见 YearCanvas 注释）。
+                // 进度在 layer 里读（延迟）：动画每一帧只让 layer 失效，Canvas 不重画
                 val p = yearProgress()
                 // 年层的淡入曲线与月层的淡出曲线**互补**（月层用 `1 - yearOpacity`），
                 // 两者在整段区间里和为 1，不会"双重曝光"、也不会"前 25% 什么都不见"。
-                // 常驻但不在年态时：直接压到 0（原样调用也得到 0，这里只是写明白）。
-                alpha = if (visible) CalendarLayout.yearLayerOpacity(p) else 0f
+                alpha = CalendarLayout.yearLayerOpacity(p)
                 // 1.6 → 1：从"源卡片炸开"的起点略大一点，收尾正好与真实年历同尺寸。
                 val k = 1f + (1f - p) * 0.6f
                 scaleX = k
