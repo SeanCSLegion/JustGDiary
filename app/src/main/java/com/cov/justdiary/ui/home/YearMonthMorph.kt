@@ -165,7 +165,11 @@ fun YearMonthMorph(
         Canvas(modifier = Modifier.fillMaxSize()) {
             // ⚠️ 进度**在这里读**（draw 阶段）：只让绘制失效，不触发重组
             val p = progress()
-            if (p <= 0.0001f) return@Canvas
+            // ⚠️ **不要**在 `p = 0` 时提前返回。`p = 0` 正是年→月的**最后一帧**，
+            // 这一帧必须把整月网格按源矩形画满 —— 少了它就是"日期整片消失一帧，
+            // 下一帧真实图层才补上"（用户：年→月"最后有一个闪烁"，"闪烁之后日期位置、
+            // 小标题也会有一定的偏移"）。morph 层只在 `yearMorphing` 期间挂载，
+            // 不需要靠这个 guard 省性能。
             val off = offsetDp()
             val t = CalendarLayout.clamp01(1f - p)
             val bodyTop = (titleHeight + weekdayHeight) * density.density
