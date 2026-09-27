@@ -707,3 +707,7 @@ private const val MARK_H = 3f
 
 /** "农历靠右"模式里离格子右边线的内边距（dp）。 */
 private const val CELL_SIDE_PAD = 4f
+
+
+private var lastDrawFrame = -1
+private val drawCounts = HashMap<String, Int>()

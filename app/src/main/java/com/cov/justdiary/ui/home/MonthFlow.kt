@@ -1350,10 +1350,17 @@ fun MonthWeekMorph(
                 val todayMonthKey = remember(todayKey) {
                     DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
                 }
+                // ⚠️ **按"周首日"去重**：`CalendarGrid.displayedWeeks` 对相邻两个月都会把
+                // **跨月的那一周**算进去（上个月的最后一周 = 下个月的第一周），于是
+                // `morphSource` 会把同一条周收两遍 —— 两份行落点相近，同一格的日号与农历
+                // 就被画了两遍，看起来就是"日号叠字/重影"（用户 2026-09-27："非常明显有问题，
+                // 有重叠"）。实测行清单：`…3:2026-09-21* 4:2026-09-28* 5:2026-09-28 6:2026-10-05…`
+                // —— 第 4、5 行是同一条周。
+                val drawnWeeks = HashSet<LocalDate>()
                 source.rows.forEachIndexed { i, row ->
-                    // 只画**被点中那个月**的行：相邻月的行与本月行在流里是接着排的，
-                    // 一起画会出现"同一条周画两遍、日号叠字"（见 Row.inSelectedBlock）。
+                    // 只画**被点中那个月**的行（相邻月整块交给真实图层）
                     if (!row.inSelectedBlock) return@forEachIndexed
+                    if (!drawnWeeks.add(row.week.first())) return@forEachIndexed
                     val isSelected = i == source.selectedIndex
                     if (isSelected) {
                         // 被点中的那一行要**逐帧改度量**（月格行高 → 周条高度），
