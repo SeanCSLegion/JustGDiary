@@ -328,7 +328,6 @@ private fun CalendarDayCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    ScrollProf.cell()
     val key = dayKey
     val isFuture = key > todayKey
 

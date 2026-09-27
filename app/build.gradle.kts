@@ -74,6 +74,14 @@ kotlin {
     }
 }
 
+// Compose 编译期报告：`build/compose-reports/` 列出每个 composable 是否 skippable、
+// 以及哪个参数被判成 unstable —— "跨月时所有已挂载的块都重组" 这类问题靠它定位，
+// 比逐帧打日志快得多。产物只在构建目录里，不进 APK。
+composeCompiler {
+    reportsDestination = layout.buildDirectory.dir("compose-reports")
+    metricsDestination = layout.buildDirectory.dir("compose-metrics")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -101,6 +109,10 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    // JVM 上也能跑 Compose 组合测试（Robolectric）：`keyedRange*Test` 用它钉住
+    // "挂载窗口挪一块时，其余块会不会被重建" 这类只有运行时才说得清的行为。
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
 
     androidTestImplementation(platform(libs.androidx.compose.bom))

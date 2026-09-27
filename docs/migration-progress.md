@@ -2956,3 +2956,72 @@ wrap-content 子节点"时那块缓冲画不出来。
 
 要对齐 iOS 的那两个数只有两条路（都会改版面，**没动**）：
 周条压回 68（会重新裁到中文农历）或月格行高提到 ~94（一屏放不下 6 行）。
+
+## R26 · 月视图"滑动不跟手"的**真因**：挪挂载窗口把整窗 9 块全部重建 + 重录
+
+用户："优化一下首页月视图滑动过程的跟手性。目前好像花费了很多时间在绘制上，
+导致滑动不跟手，有卡顿感。"
+
+### 先说结论（都带真机/ JVM 证据）
+
+**卡顿的那一帧不是"画得慢"，是"整屏日历被重建"**：滚动跨过一个月时，挂载窗口挪一格
+（头部丢一块 + 尾部加一块），结果**已挂载的 9~10 块全部重新组合、重新录制**：
+`ScrollProf` 逐帧日志里就是「组合 9 次 + 块绘制 9 次共 70~91ms」，最长一帧 **232ms**。
+
+### 怎么定位的（三步，都是可复现的）
+
+1. **逐帧日志**（`-morph-log`，MEIZU 21 / 120Hz）：
+   | 场景 | 改前 |
+   | --- | --- |
+   | 慢拖 3s | 中位 8ms，长帧 2 个（58/41ms）|
+   | 同一段小甩 8 次 | **每次** 1~2 个长帧（33~49ms）|
+   | 快甩跨月 | 长帧 3 个（55/66/58ms），janky **4.2%**，p95 **61ms** |
+2. **`atrace` 切片**：长帧里 `AndroidOwner:draw` 22~37ms（平时 0.05ms），
+   而里面**没有** `Constructing StaticLayout`（文本测量是命中的）、Skia op 都在
+   RenderThread（~1.6ms）—— 说明钱花在"重新录制我们的 Canvas"上。
+3. **把 Compose 的行为钉到 JVM 上**（Robolectric + `createComposeRule`，
+   新增用例 `MonthBlockWindowTest`）：同一段"挪窗口"，
+   | 循环写法 | 被重组的块 |
+   | --- | --- |
+   | `val b = blocks[i]; key(b.key) { … }` | **1 块**（只有新挂进来的）✓ |
+   | `val b = blocks.getOrNull(i) ?: continue; key(b.key) { … }` | **全部 9~10 块** ✗ |
+
+   这就是根因：**循环体里那个 `?: continue`**。Compose 的 movable group 只在"组往后挪"
+   时能匹配回来（`GapComposer.startMovableGroup` 的注释：组要 held on to "in case it moved
+   to a later position"），而 `continue` 让编译器生成的组结构变化、匹配不上 ⇒ 全部重建。
+
+### 改了什么
+
+1. **`MonthFlow` 的块循环抽成 `MonthBlockWindow`，并去掉 `?: continue`**（下标由窗口维护
+   保证在界内）。这一条是主刀：跨月从"整窗重建"变成"只挂新块"。
+   用例 `MonthBlockWindowTest` 把它钉住（改回 `getOrNull + continue` 立刻红，已实测）。
+2. **挂载窗口改成"自己持有的状态 + 空闲补挂"**（原来跟着偏移逐块移动）：
+   窗口 = 可见范围 ±3；用户滑出窗口才补（一次最多 2 块，避免露白）；空闲时每 250ms
+   向两侧各补一块，把"新块首次录制"的代价挪到用户没在看的时候付；空闲时再慢慢收窄。
+3. **点日期回调钉成稳定实例**（每块一份 `remember`），几何量走可变持有者 `TapGeometry`：
+   `viewportH`/`heightDp` 这类由测量得到的浮点在启动第二次组合时会差 ~0.3dp，
+   以前它们进了 `remember` 的 key ⇒ 回调全部重建 ⇒ `MonthFlowBlock` 参数全变 ⇒
+   整窗重组 + 重录（实测一帧 91ms）。
+4. 顺手清掉热路径上的临时探针：`MonthFlowBlock` 的 `onPlacedNs`（每帧新建 lambda，
+   而且让块永远无法 skip）、`BlockCanvas` 的 `onPlaced`、`ScrollProf` 里那个
+   **无界累积** `blockMounts`（`ns > 20ms` 判定读的是过期时间戳，普通使用下恒真）。
+   `ScrollProf` 保留但只报"帧间隔 / 我们自己画了几块共多少 ms / 文本测量未命中数"。
+5. 开 Compose 编译期报告（`build/compose-reports/`）——定位"哪个参数 unstable、哪个
+   composable 不能 skip"靠它比逐帧打日志快得多。
+
+### 实测结果（同一台机器、同一批手势）
+
+| 指标 | 改前 | 改后 |
+| --- | --- | --- |
+| 同一段小甩 8 次 | **每次** 1~2 个长帧（33~49ms）| **0 个**（最长帧 16~24ms）|
+| 慢拖 3s | 长帧 2 个（58/41ms）| **0 个**（p99 8ms）|
+| 快甩跨月 | 长帧 55~232ms；janky 4.2%，p95 61ms，p99 69ms | 单块 17~19ms（两块的帧 49ms）；janky 3.1%，p95 20ms，p99 30ms |
+| 卡顿的那一帧在干什么 | 整窗 9 块重组 + 重录（70~91ms）| **只有新挂进来那一块**（17~19ms）|
+
+### 还没做的（下一步的靶子，都有数）
+
+- 剩下的 17~19ms 是"新月份块**第一次录制**"（~60~84 次 `drawText`）。块是 5~6 行整块
+  录的，而屏幕上通常只有 1~2 行属于它 —— 只画"可能可见的那几行"应能再降到 ~5ms。
+- 跨年时 `flags` 换了实例（数据加载）⇒ 整窗重录（真内容变化，无法免；但可以靠上一条变便宜）。
+- `Modifier.offset { }` 自带 layer（`placeWithLayer`），所以**每帧拖动并不重录**；
+  网上"用 graphicsLayer 换 offset"在这版 Compose 上几乎是空操作，别白改。
