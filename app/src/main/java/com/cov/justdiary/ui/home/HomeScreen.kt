@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.activity.compose.PredictiveBackHandler
@@ -1258,87 +1259,109 @@ private fun WeekStrip(
     onPageWeek: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // ⚠️ 与月态同一个教训：**只组合当前一周，横向拖出去的部分就是空白**。
+    // 与 iOS `weekLayer` 的 `DragPagePager(axis: .horizontal)` 同一套逻辑：
+    // **一次只翻一页**、跟手、松手按"位移或速度"决定去留，落定后把偏移清零。
+    // 复用年份翻页那套 `CalendarLayout.DragPagerMath`（它本身就是 `DragPagePager.swift` 的移植）。
     //
-    // 现在用"**居中的窗口 + 框架滚动**"：一次放 [WINDOW] 周，当前周固定在正中间，
-    // 左右各有邻周；滑动由 `LazyRow` + 官方吸附负责，停稳后回调 `onPageWeek`，
-    // 再把窗口**无动画地**拨回中间（内容同时被父层换成新的当前周）。
-    val state = rememberLazyListState(initialFirstVisibleItemIndex = WEEK_WINDOW_CENTER)
-    val density = LocalDensity.current
+    // ⚠️ 之前这里用的是 `LazyRow` + 官方吸附：它的惯性会**一次翻好几周**
+    //（实测一次快滑直接跳了 4 周、慢拖 20% 又回弹），与 iOS"滑动即切换一周、
+    //  选中日期跟着走一周"完全不是一回事（用户："周视图下周不能左右滑动切换日期，
+    //  滑动之后都会自动跳回到之前的日期。这里和 iOS 的逻辑也不一样"）。
+    val density = LocalDensity.current.density
     val gridLabel = weekDescription(week)
-
-    // **外部换了周 → 把窗口拨回正中**。
-    //
-    // 少了这一条时：点「今天」（或点别的日期）只会换掉 `week` 的内容，
-    // 而 `LazyRow` 的滚动位置停在用户上次滑到的地方 —— 于是周条纹丝不动，
-    // 看起来就是"「今天」按钮没用了"（用户实测反馈）。
-    LaunchedEffect(week.firstOrNull()) {
-        if (state.firstVisibleItemIndex != WEEK_WINDOW_CENTER ||
-            state.firstVisibleItemScrollOffset != 0
-        ) {
-            state.scrollToItem(WEEK_WINDOW_CENTER)
-        }
-    }
-    LaunchedEffect(state) {
-        snapshotFlow { state.isScrollInProgress to state.firstVisibleItemIndex }
-            .collect { (scrolling, index) ->
-                if (scrolling) return@collect
-                if (state.firstVisibleItemScrollOffset != 0) state.animateScrollToItem(index)
-                val moved = index - WEEK_WINDOW_CENTER
-                if (moved != 0) {
-                    onPageWeek(moved)
-                    // 新的一周成为"当前周"之后它就在窗口正中，拨回去即可继续滑
-                    state.scrollToItem(WEEK_WINDOW_CENTER)
-                }
-            }
-    }
+    var dragDp by remember { mutableFloatStateOf(0f) }
+    val tracker = remember { VelocityTracker() }
+    val scope = rememberCoroutineScope()
+    val settleAnim = remember { Animatable(0f) }
+    val pageDp = stripWidth
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .height(CalendarLayout.WEEK_STRIP_H.dp),
-        contentAlignment = Alignment.Center,
+            .width(stripWidth.dp)
+            .height(CalendarLayout.WEEK_STRIP_H.dp)
+            .clipToBounds()
+            .pointerInput(stripWidth) {
+                detectHorizontalDragGestures(
+                    onDragStart = { tracker.resetTracking() },
+                    onDragEnd = {
+                        // 单位统一：位移是 dp，`VelocityTracker` 给 px/s
+                        val velocity = tracker.calculateVelocity().x / density
+                        val predicted = dragDp +
+                            velocity * CalendarLayout.DragPagerMath.PROJECTION_SECONDS
+                        val target = CalendarLayout.DragPagerMath.decide(
+                            translation = dragDp,
+                            predictedEnd = predicted,
+                            hasPrev = true,
+                            hasNext = true,
+                        )
+                        val step = CalendarLayout.stepOf(target)
+                        scope.launch {
+                            settleAnim.animateTo(
+                                targetValue = step * pageDp - dragDp,
+                                animationSpec = tween(
+                                    durationMillis = if (step != 0) {
+                                        CalendarLayout.DragPagerMath.PAGE_SETTLE_MS
+                                    } else {
+                                        CalendarLayout.DragPagerMath.PAGE_CANCEL_MS
+                                    },
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            )
+                            // 落定：把"选中日"挪一周（与 iOS `onPageChange` → `vm.select(+7天)` 一致），
+                            // 再把偏移清零 —— 新的一周此刻正好在正中，视觉上无缝。
+                            if (step != 0) onPageWeek(step)
+                            dragDp = 0f
+                            settleAnim.snapTo(0f)
+                        }
+                    },
+                    onHorizontalDrag = { change, delta ->
+                        change.consume()
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        dragDp = CalendarLayout.DragPagerMath.clampOffset(
+                            dragDp + delta / density,
+                            pageDp,
+                        )
+                    },
+                )
+            },
     ) {
-        LazyRow(
-            state = state,
-            // 官方吸附：惯性 + 停在一周上（周条是**有边界**的翻页，吸附在这里是对的）
-            flingBehavior = rememberSnapFlingBehavior(state),
-            modifier = Modifier.width(stripWidth.dp),
-        ) {
-            items(count = WEEK_WINDOW, key = { it }) { i ->
-                val days = remember(week, i) { week.map { it.plusWeeks((i - WEEK_WINDOW_CENTER).toLong()) } }
-                Box(modifier = Modifier.width(stripWidth.dp)) {
-                    CalendarDayGrid(
-                        rows = listOf(days),
-                        anchorMonth = days.first(),
-                        metrics = metrics,
-                        selectedKey = selectedKey,
-                        todayKey = todayKey,
-                        flags = flags,
-                        onDayClick = onDayClick,
-                        showAdjacent = true,
-                        showLunar = showLunar,
-                        showDividers = false,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                // 只有**当前周**是无障碍节点：左右邻周是纯视觉的过渡内容
-                                if (i == WEEK_WINDOW_CENTER) {
-                                    Modifier.semantics { contentDescription = gridLabel }
-                                } else {
-                                    Modifier.clearAndSetSemantics { }
-                                },
-                            ),
-                    )
-                }
+        // 三页：上一周 / 本周 / 下一周。只有**本周**是无障碍节点（邻周是纯视觉过渡）。
+        for (i in -1..1) {
+            val days = remember(week, i) { week.map { it.plusWeeks(i.toLong()) } }
+            Box(
+                modifier = Modifier
+                    .width(stripWidth.dp)
+                    .height(CalendarLayout.WEEK_STRIP_H.dp)
+                    .graphicsLayer {
+                        // 拖动 + 落定动画都在这里读（延迟读：只让 layer 失效，不重组）
+                        translationX = (i * pageDp + dragDp + settleAnim.value) * density
+                    },
+            ) {
+                CalendarDayGrid(
+                    rows = listOf(days),
+                    anchorMonth = days.first(),
+                    metrics = metrics,
+                    selectedKey = selectedKey,
+                    todayKey = todayKey,
+                    flags = flags,
+                    onDayClick = onDayClick,
+                    showAdjacent = true,
+                    showLunar = showLunar,
+                    showDividers = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (i == 0) {
+                                Modifier.semantics { contentDescription = gridLabel }
+                            } else {
+                                Modifier.clearAndSetSemantics { }
+                            },
+                        ),
+                )
             }
         }
     }
 }
-
-/** 周条窗口的周数（奇数，当前周居中）：左右各留 3 周，足够跟手且不会一次组合太多。 */
-private const val WEEK_WINDOW = 7
-private const val WEEK_WINDOW_CENTER = WEEK_WINDOW / 2
 
 /** 周条在宽窗口里的宽度上限（与当日面板的正文列同一个量级）。 */
 private const val WEEK_STRIP_MAX_WIDTH_DP = 560f

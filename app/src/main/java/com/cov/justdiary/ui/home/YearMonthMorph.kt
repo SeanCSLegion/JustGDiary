@@ -162,6 +162,17 @@ fun YearMonthMorph(
     ) {
         yearLayer()
 
+        // ---- 大标题 + 星期栏：位置不动，只按 `late` 淡入 ----
+        MonthMorphHeader(
+            title = titleText(block.monthFirst),
+            widthDp = widthDp,
+            titleHeight = titleHeight,
+            weekdayHeight = weekdayHeight,
+            weekStart = weekStart,
+            alpha = remember { { CalendarLayout.clamp01(((1f - progress()) - 0.55f) / 0.45f) } },
+            titleStyle = titleStyle,
+        )
+
         Canvas(modifier = Modifier.fillMaxSize()) {
             // ⚠️ 进度**在这里读**（draw 阶段）：只让绘制失效，不触发重组
             val p = progress()
@@ -188,20 +199,23 @@ fun YearMonthMorph(
             val cellPx = m.cellW * density.density
             val rowPx = m.cellH * density.density
 
-            // ⚠️ **一切日期都裁在钉住栏之下**（内容区），与连续流的裁剪逐像素一致。
+            // ---- 上个月露在视口里的那几行：不变换、快速淡出 ----
             //
-            // 少了这一层裁剪：上个月露在视口里的那几行会画到**大标题与星期栏上面**，
-            // 而动画收尾换回真实图层时，流是按内容区裁的 —— 那些日期就"突然消失"
-            // （用户 2026-09-27 的原话）。年→月时更明显：目标月被无动画地拨到静止位置，
-            // 上个月整块都在内容区之上，本来就一行都不该画。
+            // ⚠️ **只有这一段**裁在钉住栏之下（内容区），与连续流的裁剪一致：
+            // 少了它，上个月那几行会画到**大标题与星期栏上面**，收尾换回真实图层时
+            // 又按内容区裁掉 —— 那些日期就"突然消失"（用户 2026-09-27 的原话）。
+            //
+            // ⚠️ **本月网格绝不能一起裁**：它在本月标题/星期栏**之上**（与 iOS
+            // `YearMonthMorphView` 同序：网格是 ZStack 里最后画的那个），缩小过程中会往上
+            // 走进标题带；裁在标题下沿的话，**第一排大数字的上半部分会被切掉一点**
+            //（用户 2026-09-27："原本大的日期缩小的过程中，只有第一排的数字的上半部分
+            //  会有一点遮挡，动画结束后又恢复完整"）。
             clipRect(
                 left = 0f,
                 top = bodyTop,
                 right = size.width,
                 bottom = size.height,
             ) {
-
-            // ---- 上个月露在视口里的那几行：不变换、快速淡出 ----
             val neighborAlpha = 1f - CalendarLayout.clamp01(p * 3f)
             // 上个月那几行只在"源矩形之上确实还露着"时才画：年→月时目标月已经被拨到
             // 静止位置，上个月整块都在内容区之上 —— 一行都不该画（用户：
@@ -235,7 +249,10 @@ fun YearMonthMorph(
                 }
             }
 
+            }   // clipRect：只包"上个月那几行"
+
             // ---- 本月网格（主角）：插值矩形 + 重排格子 ----
+            // 不裁：它画在本月标题之上（与 iOS 同序），缩小过程中允许走进标题带。
             // ⚠️ 网格的**左边**必须一路传下去：格子与分割线都是以"网格左上角"为原点画的，
             // 少了这个偏移，网格会永远贴在最左边（只有宽度在缩）—— 用户报的
             // "计算位置比实际位置偏左"就是它。
@@ -346,20 +363,7 @@ fun YearMonthMorph(
                     alpha = peekAlpha,
                 )
             }
-
-            }   // clipRect：内容区（钉住栏之下）
         }
-
-        // ---- 大标题 + 星期栏：位置不动，只按 `late` 淡入 ----
-        MonthMorphHeader(
-            title = titleText(block.monthFirst),
-            widthDp = widthDp,
-            titleHeight = titleHeight,
-            weekdayHeight = weekdayHeight,
-            weekStart = weekStart,
-            alpha = remember { { CalendarLayout.clamp01(((1f - progress()) - 0.55f) / 0.45f) } },
-            titleStyle = titleStyle,
-        )
     }
 }
 
