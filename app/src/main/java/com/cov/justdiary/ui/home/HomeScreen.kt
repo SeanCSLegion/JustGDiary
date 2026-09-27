@@ -1106,17 +1106,39 @@ fun HomeScreen(
 
                 // 悬浮顶栏：**最后画** = 盖在日历之上；本身没有背景，年层放大后溢出的
                 // 那一条会从胶囊周围（而不是"被顶栏下沿切断"）露出来。
+                // ⚠️ 顶栏的**文案也必须跟着图层交班时机换**，不能跟着 `mode` 立刻换。
+                //
+                // 用户 2026-09-27："闪现的问题是顶栏的缘故，闪现是顶栏突然闪现出来。"
+                // 原来 `mode` 在**点下去那一瞬间**就改了，于是左胶囊的文案立刻从月态的
+                // "2026年" 变成周态的 "‹ 九月" —— 而此时 morph 层里的月标题还在往上滑、
+                // 月视图那一层也还在场上，顶栏就"凭空冒出来"了。
+                //
+                // 现在：周 morph 进行期间，顶栏**暂时按月态的文案显示**（与屏幕上占主
+                // 导的那一层一致），等 morph 收尾、真实周层接手时再换文案。
+                // 判据：**屏幕上哪一层占主导**（morph 过半即算目标形态占主导）。
+                //  · 月→周（p 从 0 涨到 1）：p < 0.5 时月层主导 ⇒ 文案仍是月态；
+                //  · 周→月（p 从 1 降到 0）：p >= 0.5 时周层主导 ⇒ 文案仍是周态。
+                val topBarMode = if (!weekMorphing) {
+                    mode
+                } else if (weekProgress.value >= 0.5f) {
+                    HomeViewMode.WEEK
+                } else {
+                    HomeViewMode.MONTH
+                }
                 HomeTopBar(
                     // 月态只放年份（月份由下面 72dp 的 32sp 大标题承担）；周态放月份名 = 回月历
-                    leftLabel = homeTitle(mode, year, monthFirst, dateFormats, context),
-                    showLeft = mode != HomeViewMode.YEAR,
+                    leftLabel = homeTitle(topBarMode, year, monthFirst, dateFormats, context),
+                    showLeft = topBarMode != HomeViewMode.YEAR,
                     todayLabel = todayPillLabel(selectedDate, today, monthFirst, dateFormats, context),
+                    // morph 期间禁点：此时真实图层还没接手，点它会让状态与画面不一致
                     onLeftClick = {
                         // 月态 → 年历；周态 → 回月态；年态不可点（整枚隐藏）
-                        if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
+                        if (!weekMorphing && !yearMorphing) {
+                            if (mode == HomeViewMode.MONTH) openYear() else backToMonth()
+                        }
                     },
                     onToday = ::goToday,
-                    mode = mode,
+                    mode = topBarMode,
                 )
             }
         }
