@@ -3085,6 +3085,21 @@ Android 侧只有 `DiarySearch.findMatches` 一个函数：计数与高亮都从
   页内搜索（`hello` 4 处命中：正文 2 + 待办 1 + 另一张卡 1）计数、高亮、跳转、循环；图片全屏预览；
   深色 + 浅色；系统字号 1.3× / 2.0× 无裁切；`uiautomator dump` 核对无障碍节点。
 
+### 证据（真机截图，`docs/ui-audit/r27/`）
+
+| 文件 | 内容 |
+| --- | --- |
+| `read-rich-dark.png` | 一天的富文本：标题 / 正文 / 图片（4 个片段） |
+| `read-today-dark.png` | 今天：`今天` 胶囊 + 顶栏写日记入口 |
+| `read-empty-today.png` | 空的一天：Hero 卡 + 「这一天没有留下日记。」 |
+| `read-search-open.png` | 悬浮搜索栏出现（在 Hero 之上，不挤压内容） |
+| `read-search-current-hit-light.png` | 浅色下的**两级高亮**：当前命中实底白字，其余浅底 |
+| `read-search-current-hit-dark.png` | 深色下同上（2/4，已跳到命中卡片） |
+| `read-select-mode.png` | 多选态：顶栏「已选择 1 项」+ 勾选圈 + 2dp 描边 |
+| `read-delete-confirm.png` | 删除确认（N = 选中数） |
+| `read-image-preview.png` | 图片全屏预览 |
+| `read-font-2x.png` | 系统字号 2.0×：段落与待办不裁切 |
+
 ### 仍未做（下一轮）
 
 - **编辑态**并入本轮的新顶栏（现在编辑器还画自己的顶栏），以及格式栏 9 键、插图、保存后回阅读态；
