@@ -1033,7 +1033,8 @@ private fun YearLayer(
                 scaleY = k
                 // 缩放锚点 = **源月卡片（选中月那一张）的中心**，不是整层的中心。
                 // 用层中心时年历是从屏幕正中"炸开"的，与用户点的那个月没关系；
-                // 锚在源卡片上才是"从这张卡长出来"。
+                // 锚在源卡片上才是"从这张卡长出来"。（曾擅自把纵向锚点改成层顶想解决
+                // 第一排被切的问题，用户指出"不要随便改锚点"——已还原，问题另行处理。）
                 transformOrigin = TransformOrigin(
                     pivotFractionX = ((card.x + card.w / 2f) / yearWidth).coerceIn(0f, 1f),
                     pivotFractionY = ((card.y + card.h / 2f) / yearHeight).coerceIn(0f, 1f),

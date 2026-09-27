@@ -1122,36 +1122,17 @@ fun MonthWeekMorph(
                     .fillMaxSize()
                     .clipToBounds(),
             ) {
+                // ⚠️ 小标题画在**日期行之后**（= 在它们上层，但仍在那条当日内容之下）——
+                // 与连续流 `MonthFlowBlock` 的顺序一致（那里也是先网格、后小标题）。
+                // 原来画在行之前，morph 期间会被移动中的日期行整块盖住，等行让开才露出来，
+                // 看着就是"小标题最后才出现"（用户两次提到这一点）。
+                //
                 // 小标题的强调色（今天所在月 = 加粗 + 主色）**必须与连续流一致**：
                 // iOS 的 `MonthFlowLabel` 自己按日期算 `isCurrent`，morph 与流用的是同一个
                 // 视图；Android 这边 `isCurrent` 是入参，morph 里漏传 → 交班那一帧小标题
                 // 会突然由灰变蓝（用户："月视图下月份小标题你没有做动画"）。
                 val todayMonthKey = remember(todayKey) {
                     DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
-                }
-                source.labels.forEach { label ->
-                    MonthFlowLabel(
-                        cellW = cellW,
-                        column = DateUtil.weekdayIndex(label.monthFirst, weekStart),
-                        bandH = source.labelBandH,
-                        text = labelText(label.monthFirst),
-                        isCurrent = label.key == todayMonthKey,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .graphicsLayer {
-                                // 位置**钉在终点**、只用透明度淡入淡出 —— 与 iOS
-                                // `MonthWeekMorphView` 完全一致。
-                                //
-                                // 这里试过两版"有位移"的方案（跟着行一起走 / 额外落位 24dp），
-                                // 也试过让它与日期行同步淡入（`* 1.4`）+ 把它画到行上层，
-                                // 用户最终拍板："就让小标题直接出现就行了。" ——
-                                // **保持现状**：位置钉在终点、`* 2.2` 曲线（后段淡入）、
-                                // 画在日期行之前（与 iOS 同序）。不要再动这三条。
-                                translationY =
-                                    (label.bottom - source.labelBandH - clipTop()) * density
-                                alpha = 1f - CalendarLayout.clamp01(progress() * 2.2f)
-                            },
-                    )
                 }
                 source.rows.forEachIndexed { i, row ->
                     val isSelected = i == source.selectedIndex
@@ -1185,6 +1166,33 @@ fun MonthWeekMorph(
                             density = density,
                         )
                     }
+                }
+                source.labels.forEach { label ->
+                    MonthFlowLabel(
+                        cellW = cellW,
+                        column = DateUtil.weekdayIndex(label.monthFirst, weekStart),
+                        bandH = source.labelBandH,
+                        text = labelText(label.monthFirst),
+                        isCurrent = label.key == todayMonthKey,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .graphicsLayer {
+                                // 位置**钉在终点**、不加位移（用户拍板："让小标题直接在最终
+                                // 位置算了。这样比跳变更好。"）。
+                                //
+                                // 透明度：`p = 0.5` 以下**全不透明**，往上快速淡出 ——
+                                // 也就是"周→月时它一开始就在"（用户："现在周视图切换到月视图
+                                // 的时候，小标题还是最后出现的"），"月→周时它很快消失"。
+                                // ⚠️ 不能用 iOS 那条 `1 - clamp01(p * 2.2)`：那会让它在
+                                // `p < 0.45` 才开始出现、`p < 0.2` 才看得清，别的日期都动完了
+                                // 它才冒出来 —— 用户否掉两次的就是这个观感。
+                                val pp = progress()
+                                alpha = CalendarLayout.clamp01((1f - pp) * 2f)
+                                translationY =
+                                    (label.bottom - source.labelBandH - clipTop()) * density
+                                alpha = 1f - CalendarLayout.clamp01(progress() * 2.2f)
+                            },
+                    )
                 }
             }
         }
