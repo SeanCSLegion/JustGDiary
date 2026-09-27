@@ -34,6 +34,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.draw.clipToBounds
@@ -705,24 +710,17 @@ private fun MonthFlowBlock(
             .height((block.rowCount * rowH).dp)
             .then(if (onPlacedNs != null) Modifier.onPlaced { onPlacedNs() } else Modifier),
     ) {
-        CalendarDayGrid(
-            rows = weeks,
-            anchorMonth = block.monthFirst,
+        BlockCanvas(
+            block = block,
+            weeks = weeks,
             metrics = metrics,
-            canvasCells = true,
-            modifier = Modifier.onPlaced { ScrollProf.measure(System.nanoTime() - placedNs) },
+            rowH = rowH,
+            showLunar = showLunar,
             selectedKey = selectedKey,
             todayKey = todayKey,
             flags = flags,
-            onDayClick = { date ->
-                val row = weeks.indexOfFirst { it.contains(date) }.coerceAtLeast(0)
-                onDayTap(date, row)
-            },
-            showAdjacent = false,
-            showLunar = showLunar,
-            showDividers = true,
-            // 每个月（除整条流的第一块）在首行上方也画一条 ——「月份开始之前」的那条
-            dividerAboveFirst = block.index != 0,
+            onDayTap = onDayTap,
+            modifier = Modifier.onPlaced { ScrollProf.measure(System.nanoTime() - placedNs) },
         )
         // 小标题在**分割线上方**（用户的次序：上个月日期 → 小标题 → 分割线 → 本月日期）。
         // 它借用的是上一行底部那段留白，不额外占高度。
@@ -739,6 +737,165 @@ private fun MonthFlowBlock(
         ScrollProf.composeDone(System.nanoTime() - composeStartNs)
     }
 }
+
+/**
+ * 一个月块的**整块绘制**版本（连续月历流的快路径）。
+ *
+ * ## 为什么要这么做
+ *
+ * 真机实测（`ScrollProf`，MEIZU 21 / 120Hz）：正常帧 8ms（预算内），但**新的一个月首次
+ * 挂载**那一帧要 100~280ms。逐项量过之后定位是：
+ *
+ * | 项目 | 实测 |
+ * | --- | --- |
+ * | 文本测量（整段缓存未命中代价之和） | **24.6ms** |
+ * | 那一帧的**组合段** | 0ms |
+ * | 那一帧的布局/放置段 | 100~280ms |
+ *
+ * 也就是说钱花在**布局节点**上：一个月块有 6 行 × 7 格，每格一个 `Box` + 语义 + 可点，
+ * 外加列/行容器 —— 约 **300 个节点**的 measure/placement。
+ *
+ * 所以这里把整块压成：**一层 Canvas（画全部格子 + 分割线）+ 每行一个命中节点**，
+ * 节点数从 ~300 降到个位数。格子视觉复用 morph 层那套 `drawDayCell` / `drawCellDividers`
+ *（它在"交班那一帧"与真实组件做过 0 像素差比对），所以看起来是同一张图。
+ *
+ * ## 无障碍（已知取舍）
+ *
+ * 这一版**不再为每一格建语义节点**（那正是慢的来源）。整块仍有一个语义节点、
+ * 日期与状态仍在无障碍树里，但**逐格导航**（TalkBack 左右滑动一格一格读）没有了。
+ * 真机上的取舍：先把"用不了"的卡顿解决，逐格语义如果之后要回来，
+ * 应该做成"只在无障碍开启时挂上那些节点"，而不是常驻。
+ */
+@Composable
+private fun BlockCanvas(
+    block: MonthFlowLayout.Block,
+    weeks: List<List<LocalDate>>,
+    metrics: CalendarLayout.DayMetrics,
+    rowH: Float,
+    showLunar: Boolean,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    onDayTap: (LocalDate, Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val fontScale = density.fontScale
+    val measurer = rememberTextMeasurer(cacheSize = BLOCK_TEXT_CACHE)
+    val textLayouts = MorphTextLayouts.shared
+    val scheme = MaterialTheme.colorScheme
+    val baseTextStyle = LocalTextStyle.current
+    val dayFontSize = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
+    val lunarFontSize = DynamicTypeMetrics.calendarSp(metrics.lunarFont.dp, fontScale)
+
+    Box(
+        modifier = modifier
+            .width(CalendarLayout.monthCellW(metrics.cellW * 7f).dp.coerceAtLeast(0.dp))
+            .height((block.rowCount * rowH).dp)
+            // 命中：一格一格的坐标换算，避免为 42 个日期各建一个可点节点。
+            // 起手 2dp 内不消费事件，日期格的点击与月流的拖动互不打架。
+            .pointerInput(block.key, weeks, metrics.cellW, metrics.cellH) {
+                detectTapGestures { pos ->
+                    val row = (pos.y / (metrics.cellH * density.density)).toInt()
+                    val col = (pos.x / (metrics.cellW * density.density)).toInt()
+                    val week = weeks.getOrNull(row) ?: return@detectTapGestures
+                    if (col !in week.indices) return@detectTapGestures
+                    val date = week[col]
+                    // 只有当月日期可点（相邻月在本路径里不画）
+                    if (date.year != block.monthFirst.year ||
+                        date.monthValue != block.monthFirst.monthValue
+                    ) {
+                        return@detectTapGestures
+                    }
+                    onDayTap(date, row)
+                }
+            },
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val cellPx = metrics.cellW * density.density
+            val rowPx = metrics.cellH * density.density
+            // 两个文字盒子高度：真实格子里 `Column[日号, 农历, 标记]` 的总高靠它们算
+            val dayBoxH = measurer.measure(
+                "0",
+                style = baseTextStyle.merge(
+                    TextStyle(fontSize = dayFontSize, color = scheme.onSurface),
+                ),
+            ).size.height / density.density
+            val lunarBoxH = if (showLunar && metrics.lunarAlpha > 0.01f) {
+                measurer.measure(
+                    "初一",
+                    style = baseTextStyle.merge(
+                        TextStyle(fontSize = lunarFontSize, color = scheme.onSurfaceVariant),
+                    ),
+                ).size.height / density.density
+            } else {
+                0f
+            }
+            weeks.forEachIndexed { row, week ->
+                val rowYDp = row * metrics.cellH
+                // 分割线：与真组件同一条规则 —— 只画"这一行里真正属于当月的那几列"，
+                // 且本块的第一行只在"不是整条流第一块"时画（`dividerAboveFirst`）。
+                if (row > 0 || block.index != 0) {
+                    var first = -1
+                    var last = -1
+                    for (i in week.indices) {
+                        val d = week[i]
+                        if (d.year == block.monthFirst.year && d.monthValue == block.monthFirst.monthValue) {
+                            if (first < 0) first = i
+                            last = i
+                        }
+                    }
+                    if (first >= 0) {
+                        drawCellDividers(
+                            columns = (first..last).toList(),
+                            rowY = rowYDp * density.density,
+                            cellW = cellPx,
+                            alpha = metrics.dividerAlpha,
+                            color = scheme.outlineVariant,
+                        )
+                    }
+                }
+                val layout = realCellLayout(
+                    rowYDp = rowYDp,
+                    m = metrics,
+                    lunarBoxHDp = if (metrics.lunarAlpha > 0.01f) lunarBoxH else 0f,
+                    dayBoxHDp = dayBoxH,
+                )
+                week.forEachIndexed { col, date ->
+                    if (date.year != block.monthFirst.year ||
+                        date.monthValue != block.monthFirst.monthValue
+                    ) {
+                        return@forEachIndexed
+                    }
+                    drawDayCell(
+                        day = date,
+                        col = col,
+                        rowY = rowYDp * density.density,
+                        cellW = cellPx,
+                        cellH = rowPx,
+                        m = metrics,
+                        selectedKey = selectedKey,
+                        todayKey = todayKey,
+                        flags = flags,
+                        measurer = measurer,
+                        textLayouts = textLayouts,
+                        fontScale = fontScale,
+                        primary = scheme.primary,
+                        onPrimary = scheme.onPrimary,
+                        onSurface = scheme.onSurface,
+                        onSurfaceVariant = scheme.onSurfaceVariant,
+                        lunarBoxHDp = lunarBoxH,
+                        t = 1f,
+                        monthSideLayout = layout,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 整块绘制路径的文本测量缓存（日号 1..31 + 农历，覆盖相邻月足够）。 */
+private const val BLOCK_TEXT_CACHE = 512
 
 /** 钉住层：大月份标题 + 星期栏。**不随滚动移动**，只跟着换字。 */
 @Composable

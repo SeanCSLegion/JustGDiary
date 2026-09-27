@@ -74,4 +74,5 @@ class MorphTextLayouts {
     fun clear() = cache.clear()
 
     val size: Int get() = cache.size
+
 }
