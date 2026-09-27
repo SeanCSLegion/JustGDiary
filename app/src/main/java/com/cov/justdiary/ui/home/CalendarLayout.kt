@@ -192,6 +192,18 @@ object CalendarLayout {
 
     fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
+    /**
+     * iOS `CalendarLayout.smoothstep`：**五次**平滑（`t³(6t² − 15t + 10)`）——
+     * 注意不是常见那条三次的 `3t² − 2t³`，两端一阶、二阶导都为 0，起步/收尾更"黏"。
+     *
+     * 月↔周 morph 里"选中周中属于相邻月的那几天各走各的路线"用的就是它（iOS
+     * `MonthWeekMorphView.adjacentShifts`）：`away = smoothstep(1 − progress)`。
+     */
+    fun smoothstep(x: Float): Float {
+        val t = clamp01(x)
+        return t * t * t * (t * (t * 6f - 15f) + 10f)
+    }
+
     fun lerp(a: Double, b: Double, t: Double): Double = a + (b - a) * t
 
     fun clamp(value: Float, low: Float, high: Float): Float = max(low, min(high, value))

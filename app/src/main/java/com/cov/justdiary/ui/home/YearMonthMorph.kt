@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LocalTextStyle
@@ -15,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
@@ -104,7 +106,6 @@ fun YearMonthMorph(
     }
     val nextBlock = layout.blocks.getOrNull(blockIndex + 1)
     val prevBlock = layout.blocks.getOrNull(blockIndex - 1)
-    val cellW = CalendarLayout.monthCellW(widthDp)
     val labelH = remember { CalendarLayout.flowLabelBandHeight(compact = false) }
     val labelBlockH = labelH + CalendarLayout.LABEL_TIGHT_GAP
 
@@ -115,30 +116,40 @@ fun YearMonthMorph(
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     val dividerColor = MaterialTheme.colorScheme.outlineVariant
 
-    val titleStyle = remember(fontScale, onSurface) {
-        TextStyle(
-            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.display, fontScale),
-            fontWeight = FontWeight.Bold,
-            color = onSurface,
+    /**
+     * 网格随进度插值出来的矩形（源 = 屏幕上那一块月网格，目标 = 年历里那张迷你月）。
+     *
+     * ⚠️ 组合期**不读进度**：这个函数只在延迟 lambda（`draw` / `graphicsLayer`）里被调用。
+     * 小标题那一层（真实 composable）也要用它，所以抽出来共用一份算式。
+     *
+     * ⚠️ 源矩形必须按**真实放置的取整口径**算：连续流里每个块的位置是
+     * `Modifier.offset { IntOffset(0, ((block.top − off) × density).roundToInt()) }`，
+     * 也就是**整像素**；内容层自己的 `offset(y = (标题槽 + 星期栏).dp)` 同样取整。
+     * 少了这两处取整，morph 的第一帧与屏幕上的月视图会差 ~1px —— 整片日号描边
+     * 会"重影"一下（录屏逐帧可测：整列最佳位移 1px）。
+     */
+    fun morphedGrid(p: Float): CalendarLayout.YearMonthGridMorph {
+        val off = offsetDp()
+        val densityScale = density.density
+        val blockTopDp = (block.top - off).let { raw ->
+            if (densityScale > 0f) {
+                kotlin.math.round(raw * densityScale) / densityScale
+            } else {
+                raw
+            }
+        }
+        val source = CalendarLayout.Rect(0f, blockTopDp, widthDp, block.rowCount * layout.rowH)
+        return CalendarLayout.yearMonthGridMorph(
+            progress = p,
+            source = source,
+            target = targetGrid,
+            sourceMetrics = flowMetrics,
+            showLunar = showLunar,
         )
     }
-    // ⚠️ morph 画的格子必须与**真实日期格逐像素一致**，否则交班（morph ↔ 真实图层）
-    // 那一帧整片日期会跳一下 —— 用户说的"最后会闪一下"就是它。
-    //
-    // 真实格子（`CalendarDayCell`）的竖向布局是：
-    //   Column[ 圆(circleDiameter) , 农历那一行 Text , 有日记的标记(1+2dp) ]
-    //   在格子里**居中**，再整体 `+LUNAR_TIGHTEN/2`、农历自己 `-LUNAR_TIGHTEN`。
-    // 所以农历 Text 的**盒子高度**（不是字号）决定一切 —— 用同一个 `LocalTextStyle`
-    // 量一次，再按字号比例缩放（字号在 morph 里是插值的）。
-    val labelStyle = remember(fontScale, primary, onSurfaceVariant) {
-        TextStyle(
-            fontSize = DynamicTypeMetrics.calendarSp(
-                CalendarLayout.flowLabelFontSize(compact = false).dp,
-                fontScale,
-            ),
-            fontWeight = FontWeight.SemiBold,
-            color = onSurfaceVariant,
-        )
+
+    val todayMonthKey = remember(todayKey) {
+        DateUtil.parseDayKey(todayKey)?.let { CalendarGrid.monthKeyOf(it) } ?: 0
     }
 
     Box(
@@ -151,15 +162,66 @@ fun YearMonthMorph(
         yearLayer()
 
         // ---- 大标题 + 星期栏：位置不动，只按 `late` 淡入 ----
-        MonthMorphHeader(
+        // ⚠️ 与月视图 / 月↔周 morph 共用**同一个 composable**（`MonthPinnedHeader`）。
+        // 各写一份的代价实测过：`Text` 的盒子高度由 `LocalTextStyle` 的行高决定
+        //（`bodyLarge` 的 `lineHeight`），写法稍差一点，交班那一帧整条标题就会上下跳。
+        // 年 morph 不画底色（它底下是正在淡入的年历，压一条会切掉年历顶部）。
+        MonthPinnedHeader(
             title = titleText(block.monthFirst),
             widthDp = widthDp,
             titleHeight = titleHeight,
             weekdayHeight = weekdayHeight,
             weekStart = weekStart,
-            alpha = remember { { CalendarLayout.clamp01(((1f - progress()) - 0.55f) / 0.45f) } },
-            titleStyle = titleStyle,
+            modifier = Modifier.graphicsLayer {
+                alpha = CalendarLayout.clamp01(((1f - progress()) - 0.55f) / 0.45f)
+            },
+            drawBackground = false,
         )
+
+        // ---- 小标题：**真实 composable**（与连续月历流里那个 `MonthFlowLabel` 同一个）
+        //
+        // 用户 2026-09-27："年视图切换到月视图的时候，小标题的高度有些偏高，所以在动画
+        // 结束会跳一下。"
+        //
+        // 根因不是位置算式（两端其实已经对齐），而是**文字排版**：真实的 `MonthFlowLabel`
+        // 是一个 `Text`，它的高度由 `LocalTextStyle` 的行高决定（`bodyLarge` 的
+        // `lineHeight = 24sp`，字号只有 15sp）—— 盒子比字高，字在盒子里居中；
+        // 而 morph 侧原来按 `TextStyle(fontSize = 15sp)` 量出来的是一个 ~21dp 的矮盒子。
+        // 两个盒子**顶边对齐**、高度差 3dp ⇒ 字本身偏高约 1.5dp，收尾换回真图层时往下跳。
+        // 现在两侧共用同一个 composable，排版天然一致。
+        //
+        // ⚠️ 位置**钉在最终位置**（月视图静止时那一处），**不跟网格走** ——
+        // 用户 2026-09-27："年视图切换到月视图的时候，小标题其实是一开始就要在最终位置的，
+        // 也就是小标题这个时候和其他月份日期一样不参与动画。"
+        // 与 iOS 同构：`YearMonthMorphView` 里"下个月那一条"（小标题 + 第一行）就是按
+        // `fullRect` 的**静止几何**画的，只有透明度在变；本月网格缩放的中间态会从它上面
+        // 扫过去（网格画在它之后），所以看起来就是"网格长出来、小标题一直在那儿"。
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height((heightDp - titleHeight - weekdayHeight).dp)
+                .offset(y = (titleHeight + weekdayHeight).dp)
+                // 与真实月流的内容层同一条边界：顶上那块小标题（落在钉住层底下）本来就看不见
+                .clipToBounds()
+                // ⚠️ 透明度必须挂在**这一层（有确定尺寸）**上，不能挂到 `MonthFlowLabel`
+                // 自己身上 —— 见下面"下个月那一条"那处的实测记录。
+                .graphicsLayer {
+                    val p = progress()
+                    alpha = (1f - CalendarLayout.clamp01(p * 2.2f)) * (1f - p)
+                },
+        ) {
+            // 本月小标题：位置钉在最终位置（实测块顶 − 一行字高），**与进度无关**；
+            // 用 `offsetDp()` 而不是公式反算的块顶：冻结侧与真实渲染必须同源。
+            MonthFlowLabel(
+                cellW = CalendarLayout.monthCellW(widthDp),
+                column = DateUtil.weekdayIndex(block.monthFirst, weekStart),
+                text = labelText(block.monthFirst),
+                isCurrent = block.key == todayMonthKey,
+                modifier = Modifier.graphicsLayer {
+                    translationY = (block.top - offsetDp() - labelBlockH) * density.density
+                },
+            )
+        }
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             // ⚠️ 进度**在这里读**（draw 阶段）：只让绘制失效，不触发重组
@@ -171,16 +233,10 @@ fun YearMonthMorph(
             // 不需要靠这个 guard 省性能。
             val off = offsetDp()
             val t = CalendarLayout.clamp01(1f - p)
-            val bodyTop = (titleHeight + weekdayHeight) * density.density
-            val blockTop = block.top - off
-            val source = CalendarLayout.Rect(0f, blockTop, widthDp, block.rowCount * layout.rowH)
-            val grid = CalendarLayout.yearMonthGridMorph(
-                progress = p,
-                source = source,
-                target = targetGrid,
-                sourceMetrics = flowMetrics,
-                showLunar = showLunar,
-            )
+            // ⚠️ 取整口径与真实排版一致：内容层的 `offset(y = (标题槽 + 星期栏).dp)`
+            // 是**整像素**（`roundToPx`），不取整的话 morph 的网格会比真实月视图差 ~1px。
+            val bodyTop = kotlin.math.round((titleHeight + weekdayHeight) * density.density)
+            val grid = morphedGrid(p)
             val m = grid.metrics
             val gridTop = bodyTop + grid.rect.y * density.density
             val cellPx = m.cellW * density.density
@@ -284,36 +340,9 @@ fun YearMonthMorph(
                 }
             }
 
-            // ---- 本月小标题：跟着网格一起缩、一起淡 ----
-            //
-            // ⚠️ 必须**裁在内容区之内**（`top = bodyTop`），不能跟网格一样放开。
-            // 真实月视图里，**顶部那一块**的小标题是画在"内容区上沿之上"的 ——
-            // 它借用上个月最后一行的留白，被钉住栏盖住、也被内容层裁掉，**本来就不可见**
-            //（这正是 iOS 的年 morph 干脆不画它的原因）。
-            // 不裁的话，年→月时它会出现在**顶栏上方**、一路挪到最终位置，交班后又被真实
-            // 图层藏起来 —— 看起来就是"多了个本来不该有的动画，走完立刻消失"
-            //（用户 2026-09-27）。网格保留不裁（见上一条注释）。
-            val labelAlpha = (1f - CalendarLayout.clamp01(p * 2.2f)) * t
-            if (labelAlpha > 0.01f) {
-                clipRect(
-                    left = 0f,
-                    top = bodyTop,
-                    right = size.width,
-                    bottom = size.height,
-                ) {
-                    val text = measurer.measure(labelText(block.monthFirst), labelStyle)
-                    drawText(
-                        textLayoutResult = text,
-                        topLeft = Offset(
-                            x = gridLeft +
-                                DateUtil.weekdayIndex(block.monthFirst, weekStart) * cellPx +
-                                (cellPx - text.size.width) / 2f,
-                            y = gridTop - labelBlockH * density.density,
-                        ),
-                        alpha = labelAlpha,
-                    )
-                }
-            }
+            // ---- 本月小标题 ----
+            // 画在**上面那一层真实 composable** 里（见 `MonthFlowLabel` 那一段的说明）：
+            // 这里只保留网格，位置算式由 `morphedGrid` 两边共用。
 
             // ---- 下个月那一条（小标题 + 能看见的每一行）----
             // 方向不同、处理也不同（与 iOS 的 `peekFadesIn` 一致）：
@@ -357,55 +386,52 @@ fun YearMonthMorph(
                         )
                     }
                 }
-                val text = measurer.measure(labelText(nextBlock.monthFirst), labelStyle)
-                drawText(
-                    textLayoutResult = text,
-                    topLeft = Offset(
-                        x = DateUtil.weekdayIndex(nextBlock.monthFirst, weekStart) * cellW * density.density +
-                            (cellW * density.density - text.size.width) / 2f,
-                        y = nextTop - labelBlockH * density.density,
-                    ),
-                    alpha = peekAlpha,
+            }
+        }
+
+
+        // ---- 下个月那一条的**小标题**：画在网格**之后**（= 最上面）----
+        //
+        // ⚠️ 次序很关键，原来画在网格**之前**，于是整段动画里它都被正在长大的本月网格
+        // 盖住 —— 只有最后一两帧网格让开时才露出来，看起来就是"收尾才蹦出来"。
+        // iOS 的 `YearMonthMorphView` 把 `peek(...)`（小标题 + 下月第一行）放在 `ZStack`
+        // 的**最后**，也就是网格之上；这一层照着改。
+        //
+        // 透明度仍用 iOS 那条曲线（`peekFadesIn`）：年→月 `clamp01((t − 0.55) / 0.45)`、
+        // 月→年 `clamp01((t − 0.9) / 0.1)`；位置与本月小标题一样**钉死在最终位置**。
+        if (nextBlock != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height((heightDp - titleHeight - weekdayHeight).dp)
+                    .offset(y = (titleHeight + weekdayHeight).dp)
+                    // ⚠️ **实测（2026-09-27）**：把 `alpha` 挂在 `MonthFlowLabel` **自己**身上
+                    // （`Modifier.graphicsLayer { alpha = 0.7f }`）时，整块标签**一个像素都不画**
+                    // —— 连挂在同一层的纯色背景也不画；alpha = 1f 时又完全正常。位置
+                    //（`translationY`）在同一层上是好的，所以不是"层没生效"，而是
+                    // "层的尺寸来自 wrap-content 的子节点"时那块离屏缓冲画不出来。
+                    // 结论：**透明度一律挂在外层这个有确定尺寸的 Box 上**，标签自己只做位移。
+                    .graphicsLayer {
+                        val p = progress()
+                        val t = CalendarLayout.clamp01(1f - p)
+                        alpha = if (zoomingIn) {
+                            CalendarLayout.clamp01((t - 0.9f) / 0.1f)
+                        } else {
+                            CalendarLayout.clamp01((t - 0.55f) / 0.45f)
+                        }
+                    },
+            ) {
+                MonthFlowLabel(
+                    cellW = CalendarLayout.monthCellW(widthDp),
+                    column = DateUtil.weekdayIndex(nextBlock.monthFirst, weekStart),
+                    text = labelText(nextBlock.monthFirst),
+                    isCurrent = nextBlock.key == todayMonthKey,
+                    modifier = Modifier.graphicsLayer {
+                        translationY = (nextBlock.top - offsetDp() - labelBlockH) * density.density
+                    },
                 )
             }
         }
-    }
-}
-
-/** morph 层里的大标题 + 星期栏（钉在顶部、位置不动，只淡入淡出）。 */
-@Composable
-private fun MonthMorphHeader(
-    title: String,
-    widthDp: Float,
-    titleHeight: Float,
-    weekdayHeight: Float,
-    weekStart: String,
-    alpha: () -> Float,
-    titleStyle: TextStyle,
-) {
-    Column(
-        modifier = Modifier
-            .width(widthDp.dp)
-            .graphicsLayer { this.alpha = alpha() },
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(titleHeight.dp),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            Text(
-                text = title,
-                modifier = Modifier.padding(horizontal = 20.dp),
-                style = titleStyle,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        CalendarWeekdayHeader(
-            weekStart = weekStart,
-            modifier = Modifier.height(weekdayHeight.dp),
-        )
     }
 }
 
@@ -445,11 +471,29 @@ internal fun DrawScope.drawWeekRow(
     dividerColor: Color,
     hasLunar: Boolean = true,
     t: Float,
+    /**
+     * **相邻月那几格**画在哪个 y（px）。`null`（默认）= 不画它们。
+     *
+     * 只给"选中行"用：一条跨月的周在两个月里各有一行（各画自己那半个月），
+     * 选中它时那一周要在周条里**合成一条**——所以相邻月那几天得从"自己那一行"的位置
+     * 走到周条里（iOS `MonthWeekMorphView.adjacentShifts`）。其余行不传，
+     * 因为它们的相邻月由**对面那一块自己的行**负责画，这里再画一遍就是叠字。
+     */
+    adjacentRowY: Float? = null,
+    /**
+     * `false` = **只画分割线、不画日期格**。
+     *
+     * 给"选中周的另一半"那一行用：它的日期由**选中行里那份**负责画
+     *（那份会从这一行的位置走到周条里）。两边都画 = 同一天有两个动画，
+     * 而且中段并不重合（用户 2026-09-27："有重复的日期动画，而且动画并不完全重合"）。
+     */
+    drawCells: Boolean = true,
 ) {
     if (alpha <= 0.01f) return
     val cellPx = metrics.cellW * density
     val rowPx = metrics.cellH * density
     if (showDivider) {
+        // 分割线只跨**本月**那几列（相邻月那几格的分割线属于它们自己那一行）
         drawCellDividers(
             columns = inMonthColumns(week, anchorMonth),
             rowY = rowY,
@@ -458,12 +502,14 @@ internal fun DrawScope.drawWeekRow(
             color = dividerColor,
         )
     }
+    if (!drawCells) return
     week.forEachIndexed { col, day ->
-        if (!inMonth(day, anchorMonth)) return@forEachIndexed
+        val inMonth = inMonth(day, anchorMonth)
+        if (!inMonth && adjacentRowY == null) return@forEachIndexed
         drawDayCell(
             day = day,
             col = col,
-            rowY = rowY,
+            rowY = if (inMonth) rowY else adjacentRowY!!,
             cellW = cellPx,
             cellH = rowPx,
             m = metrics,
@@ -545,20 +591,6 @@ internal fun DrawScope.drawDayCell(
 ) {
     if (alpha <= 0.01f) return
     val key = DateUtil.dayKeyOf(day)
-    // 临时诊断：记录 (日期 → rowY)。同一天出现在两个 rowY 上 = 重影来源。
-    if (com.cov.justdiary.app.DebugFlags.morphLog) {
-        if (morphDebugFrame != lastMorphFrame) {
-            lastMorphFrame = morphDebugFrame
-            morphRowY.clear()
-        }
-        val prev = morphRowY[key]
-        if (prev != null && kotlin.math.abs(prev - rowY) > 1f) {
-            com.cov.justdiary.service.Log.app.i(
-                "重影：" + key + " 同帧 rowY=" + prev + " / " + rowY,
-            )
-        }
-        morphRowY[key] = rowY
-    }
     val isSelected = key == selectedKey
     val isToday = key == todayKey
     val isFuture = key > todayKey
@@ -721,13 +753,3 @@ private const val MARK_H = 3f
 
 /** "农历靠右"模式里离格子右边线的内边距（dp）。 */
 private const val CELL_SIDE_PAD = 4f
-
-
-private var lastDrawFrame = -1
-private val drawCounts = HashMap<String, Int>()
-
-
-// 临时诊断
-internal var morphDebugFrame = 0
-private var lastMorphFrame = -1
-private val morphRowY = HashMap<String, Float>()

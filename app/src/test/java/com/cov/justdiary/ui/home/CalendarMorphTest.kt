@@ -229,4 +229,22 @@ class CalendarMorphTest {
         assertEquals(1, CalendarLayout.weekRowIndex(LocalDate.of(2026, 9, 7), monthFirst, DateUtil.WEEK_START_MONDAY))
         assertEquals(4, CalendarLayout.weekRowIndex(LocalDate.of(2026, 9, 30), monthFirst, DateUtil.WEEK_START_MONDAY))
     }
+
+    // --------------------------------------------------- 相邻月"各走各的路线"
+
+    @Test
+    fun `smoothstep matches the ios quintic curve`() {
+        // iOS `CalendarLayout.smoothstep` = t³(6t² − 15t + 10)（五次，不是常见那条三次的）
+        assertEquals(0f, CalendarLayout.smoothstep(0f), 1e-6f)
+        assertEquals(1f, CalendarLayout.smoothstep(1f), 1e-6f)
+        assertEquals(0.5f, CalendarLayout.smoothstep(0.5f), 1e-6f)
+        // 越界要夹到 [0,1]（morph 里传的是 1 − progress，浮点上可能差一丝）
+        assertEquals(0f, CalendarLayout.smoothstep(-0.3f), 1e-6f)
+        assertEquals(1f, CalendarLayout.smoothstep(1.3f), 1e-6f)
+        // 两端一阶导为 0：0.1 处必须**远小于**线性（否则"起步"会显得很急）
+        assertTrue(CalendarLayout.smoothstep(0.1f) < 0.03f)
+        // 与三次那条的差异要真的存在（防止以后有人"顺手"换成 3t²−2t³）
+        val cubic = 0.3f * 0.3f * (3f - 2f * 0.3f)
+        assertTrue(kotlin.math.abs(CalendarLayout.smoothstep(0.3f) - cubic) > 0.02f)
+    }
 }

@@ -912,9 +912,11 @@ fun HomeScreen(
                         // 重画那一行与当日内容；年 morph 由 `YearMonthMorph` 重画本月网格
                         // （后者画在年历**之上**，所以月流不能再自己画一遍）。
                         // 滚动位置不受影响 —— 隐藏 ≠ 卸载。
-                        // ⚠️ 按**进度**交班，不按 `morphing`（见真实周层那处的说明）。
-                        visible = mode == HomeViewMode.MONTH && !morphing &&
-                            !(weekMorphing && weekProgress.value > 0f),
+                        // ⚠️ 按**进度**交班，不按 `morphing` 标志位（理由见下面周层那一处）。
+                        // 月态 + 周进度回到 0 ⇒ 真实月流接手；年 morph 期间一律不画
+                        // （那一段由 `YearMonthMorph` 重画本月网格）。
+                        visible = mode == HomeViewMode.MONTH && !yearMorphing &&
+                            weekProgress.value <= 0f,
                         onDayTap = onFlowDayTap,
                         onTopMonthChange = { key -> if (key != monthKey) monthKey = key },
                         onSettle = { key -> if (key != monthKey) monthKey = key },
@@ -940,8 +942,14 @@ fun HomeScreen(
                     // 中间那几帧**两层都不在场**，画面就是"跳一下/闪一下"
                     //（用户 2026-09-27："切换时候的动画最后都有跳动闪现"）。
                     // 带上进度条件后两边严格互补：任意时刻恰好一层在画。
+                    //
+                    // ⚠️ 反过来，**不能**再带 `!morphing`：那样"真层挂上"要等协程收尾，
+                    // 与 morph 层的撤下条件（同上）错开 1~2 帧 —— 实测录屏里那一帧
+                    // 日期区是**整片空的**（当日内容那一大块首次组合要花一帧以上），
+                    // 下一帧才补上，观感就是"最后闪一下"。现在真层在 p 到端点那一帧就挂上，
+                    // 而 morph 层继续在它**上面**多盖几帧（见 morph 层的条件）。
                     val weekSettled = mode == HomeViewMode.WEEK &&
-                        !morphing && weekProgress.value >= 1f
+                        weekProgress.value >= 1f
                     if (weekSettled) {
                         WeekLayer(
                             calendarW = calendarW,
@@ -1069,11 +1077,15 @@ fun HomeScreen(
 
                     // ⑤ 月↔周 morph 层：用**冻结的源几何**重画，两个方向共用一个源。
                     val source = weekSource
-                    // 与上面那条互补：进度到终点就撤，把画面交给真实图层。
+                    // ⚠️ 撤下的条件是**协程收尾**（`weekMorphing` 复位），不再是"进度到端点"。
                     //
-                    // ⚠️ `weekProgress.value` 是**快照状态**，进度一变就会让这段重组，
-                    // 所以交班那一帧是准的（不会"晚一帧"）。
-                    if (weekMorphing && source != null && weekProgress.value < 1f) {
+                    // 真实图层（月流 / 周层）在进度到端点那一帧就接手了，而它**首次接手**
+                    // 要重组一整套日期格与当日内容 —— 真机实测那一帧能到 90ms 以上
+                    //（录屏逐帧：日期区整片空白一帧）。这一层多留的这几帧正好把它盖住：
+                    // 端点处两层画的东西逐像素一致，所以"多画一遍"看不出来，
+                    // 但"空一帧"就再也看不到了。
+                    // 进度仍按读取器传入 —— 终点那一帧画的就是终点本身。
+                    if (weekMorphing && source != null) {
                         MonthWeekMorph(
                             progress = weekProgressReader,
                             source = source,
