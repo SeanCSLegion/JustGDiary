@@ -901,8 +901,6 @@ private fun BlockCanvas(
                         lunarBoxHDp = lunarBoxH,
                         dayBoxHDp = dayBoxH,
                         t = 1f,
-                        // 用户 2026-09-27："把农历放右边，右对齐"
-                        lunarRightAligned = true,
                     )
                 }
             }
