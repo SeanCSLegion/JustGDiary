@@ -2065,6 +2065,34 @@ iOS `MonthWeekMorphView` 是 `content().offset(y: contentOffset)`，其中
 与 iOS 逐字一致。**验证**：月→周尾帧 vs 周态静止 **0 个像素差异**；
 周→月起手帧 vs 周态静止 **0**、尾帧 vs 月视图 **0**。
 
+## R19 · 周条只能翻一次：`pointerInput` 协程里捕获了**组合期的值**
+
+用户："周视图……左右切换不能一直切换下去？只能切换一次似乎？"
+
+日志实测（真机 MEIZU 21，`Log.w`）：
+
+```
+pageWeek delta=1 selectedKey=2026-09-15 selectedDate=2026-09-15 next=2026-09-22  ← 第一次正确
+pageWeek delta=1 selectedKey=2026-09-22 selectedDate=2026-09-15 next=2026-09-22  ← selectedKey 已更新，闭包里的 selectedDate 还是旧的
+pageWeek delta=1 selectedKey=2026-09-22 selectedDate=2026-09-15 next=2026-09-22
+```
+
+根因：周条的翻页手势跑在 `pointerInput(stripWidth)` 的协程里，**那个块只在第一次组合时
+启动一次**（key 不变），它捕获的是当时的 `pageWeek` 闭包 —— 而 `pageWeek` 用的是组合期算出的
+**值** `selectedDate`（`remember(selectedKey) { … }`），那是个普通 `val`，被固化在闭包里。
+于是每次翻周都算"进入周态那一天 + 7"，第二下之后永远原地踏步（连"右滑"也只会回到
+`进入周态那天 − 7`，实测正是 9/15−7=9/8）。
+
+修法：`pageWeek` **现读状态**（`DateUtil.parseDayKey(selectedKey)`），不再用组合期的值；
+`onPageWeek` 另外用 `rememberUpdatedState` 包一层，保证手势回调拿到的是最新的那个函数。
+（年份翻页没这个问题：`pageMonth` 读的是状态 `monthKey`，本身就是活的。）
+
+真机实测（MEIZU 21）：连续左滑 4 次 → 9/14 → 9/21 → 9/28 → 10/5 → 10/12 周，选中日
+9/15 → 9/22 → 9/29 → 10/6 → 10/13（保持星期几，与 iOS 一致）；右滑逐周回退。
+
+> 附带发现：这台机器上 `Log.d` **不出现在 logcat**（被 ROM 过滤），`Log.w` 正常 ——
+> 以后在真机上排查用 `Log.w` / `Log.i`。
+
 ## R18 · 年→月：本月小标题跑到顶栏上方闪一下（R17 放开了网格、把它也放出去了）
 
 用户："从年视图到月视图的时候，原本不应该有动画的小标题（当前月的）也有了动画，

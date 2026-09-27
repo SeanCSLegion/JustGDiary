@@ -398,7 +398,14 @@ fun HomeScreen(
 
     /** 周态下横向翻周：选中日跟着走一周（与 iOS `weekLayer` 的翻周一致）。 */
     fun pageWeek(delta: Int) {
-        val next = selectedDate.plusDays(7L * delta)
+        // ⚠️ **必须现读 `selectedKey`**，不能用组合期的 `selectedDate` 值。
+        // 周条的翻页手势跑在 `pointerInput` 的协程里，那个块只在**第一次组合**时启动，
+        // 捕获的是当时那个 `pageWeek` 闭包 —— 里面固化了当时的 `selectedDate`。
+        // 于是每次翻周都算"进入周态那一天 + 7"，第二下之后永远原地踏步
+        //（用户 2026-09-27："左右切换不能一直切换下去，只能切换一次似乎"；
+        //  日志实测第二次调用：selectedKey 已是 2026-09-22，而 selectedDate 还是 2026-09-15）。
+        val day = DateUtil.parseDayKey(selectedKey) ?: return
+        val next = day.plusDays(7L * delta)
         selectedKey = DateUtil.dayKeyOf(next)
         // 跨月时把月份也带过去（顶栏胶囊与年历源卡片都看它）
         monthKey = CalendarGrid.monthKeyOf(next)
@@ -1269,6 +1276,12 @@ private fun WeekStrip(
     //  滑动之后都会自动跳回到之前的日期。这里和 iOS 的逻辑也不一样"）。
     val density = LocalDensity.current.density
     val gridLabel = weekDescription(week)
+    // ⚠️ 必须取**最新**的回调。`pointerInput(stripWidth)` 的 key 在翻周时不变，
+    // 于是那个协程块只在**第一次组合**时启动一次 —— 直接调用参数 `onPageWeek` 会一直用
+    // 第一次捕获的 lambda，而它闭包着当时的 `selectedDate`：每次翻周都算出"那一天 +7"，
+    // 结果是**只能翻一次**，之后无论怎么滑都停在原地（用户 2026-09-27："左右切换不能
+    // 一直切换下去，只能切换一次似乎"）。`rememberUpdatedState` 让它每次读到的都是新的。
+    val currentOnPageWeek by rememberUpdatedState(onPageWeek)
     var dragDp by remember { mutableFloatStateOf(0f) }
     val tracker = remember { VelocityTracker() }
     val scope = rememberCoroutineScope()
@@ -1282,7 +1295,9 @@ private fun WeekStrip(
             .clipToBounds()
             .pointerInput(stripWidth) {
                 detectHorizontalDragGestures(
-                    onDragStart = { tracker.resetTracking() },
+                    onDragStart = {
+                        tracker.resetTracking()
+                    },
                     onDragEnd = {
                         // 单位统一：位移是 dp，`VelocityTracker` 给 px/s
                         val velocity = tracker.calculateVelocity().x / density
@@ -1309,7 +1324,7 @@ private fun WeekStrip(
                             )
                             // 落定：把"选中日"挪一周（与 iOS `onPageChange` → `vm.select(+7天)` 一致），
                             // 再把偏移清零 —— 新的一周此刻正好在正中，视觉上无缝。
-                            if (step != 0) onPageWeek(step)
+                            if (step != 0) currentOnPageWeek(step)
                             dragDp = 0f
                             settleAnim.snapTo(0f)
                         }
