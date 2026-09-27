@@ -1727,6 +1727,17 @@ private fun DayPanel(
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                 )
+                // 这里**不画**相对日文案（今天 / 昨天 / 明天）：
+                // iOS 的当日标题行只有「日期 + 农历」，"今天"是横屏右栏标题行里那枚**按钮**。
+                // 首轮两处都画，于是横屏标题行出现两个"今天"（实测缺陷 D9）。
+                // ⚠️ 农历**整串靠右**（用户 2026-09-27："周视图下面不是有一条日期的单独的栏吗？
+                // 里面的农历放在右边。现在农历是在日期和星期后面的"；口径确认：放
+                // **整个农历全称**，如「丙午年七月廿七」）。
+                //
+                // ⚠️ 权重必须加在**它前面那个 Spacer** 上，不能加在 `Text` 上：
+                // `weight(1f, fill = false)` 的 Text 只按内容取宽、不占住分配到的空间，
+                // 于是文字还贴在左边（实测：改动"生效"了但位置没动）。用弹性间隔把它顶到右边。
+                Spacer(modifier = Modifier.weight(1f))
                 if (showLunar) {
                     Text(
                         text = lunarLabelOf(selectedDate),
@@ -1735,10 +1746,6 @@ private fun DayPanel(
                         maxLines = 1,
                     )
                 }
-                // 这里**不画**相对日文案（今天 / 昨天 / 明天）：
-                // iOS 的当日标题行只有「日期 + 农历」，"今天"是横屏右栏标题行里那枚**按钮**。
-                // 首轮两处都画，于是横屏标题行出现两个"今天"（实测缺陷 D9）。
-                Spacer(modifier = Modifier.weight(1f))
                 // 分栏时「今天」只在这一处（右栏标题行），竖屏周态不重复画（规范 §3.4）
                 if (onToday != null) {
                     AssistPill(
