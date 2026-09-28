@@ -3,6 +3,10 @@ package com.cov.justdiary.ui.diary
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import com.cov.justdiary.ui.components.AnchoredMenu
+import androidx.compose.runtime.remember
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -116,20 +120,37 @@ class DiaryFormatBarTest {
         rule.onNodeWithContentDescription(str(R.string.editor_tool_strike)).assertIsNotSelected()
     }
 
+    /**
+     * 段落样式菜单：只有三项（**引用不在里面**），点一项上报。
+     *
+     * 菜单的状态由宿主持有（它要浮在格式栏**之上**、且不新开窗口），所以这里按编辑器的
+     * 真实接法把它拼起来：`styleMenuOpen` + 浮层里渲染 `ParagraphStyleMenu`。
+     */
     @Test
     fun `the paragraph style menu offers exactly three styles and reports the picked one`() {
         var picked: EditorBlockStyle? = null
         rule.setContent {
-            DiaryFormatBar(
-                activeBlock = EditorBlockStyle.Heading,
-                flags = InlineFlags(),
-                onBlockStyle = { picked = it },
-            )
+            var open by remember { mutableStateOf(false) }
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                DiaryFormatBar(
+                    activeBlock = EditorBlockStyle.Heading,
+                    flags = InlineFlags(),
+                    onBlockStyle = { picked = it },
+                    styleMenuOpen = open,
+                    onStyleMenuChange = { open = it },
+                )
+                AnchoredMenu(expanded = open, onDismiss = { open = false }) {
+                    ParagraphStyleMenu(
+                        activeBlock = EditorBlockStyle.Heading,
+                        onSelect = { picked = it; open = false },
+                    )
+                }
+            }
         }
 
         rule.onNodeWithContentDescription(str(R.string.editor_tool_style)).performClick()
         rule.onNodeWithText(str(R.string.editor_font_heading)).assertExists()
-        rule.onNodeWithText(str(R.string.editor_font_sub)).assertExists()
+        rule.onNodeWithText(str(R.string.editor_font_heading)).assertExists()
         rule.onNodeWithText(str(R.string.editor_font_body)).assertExists()
 
         rule.onNodeWithText(str(R.string.editor_font_body)).performClick()

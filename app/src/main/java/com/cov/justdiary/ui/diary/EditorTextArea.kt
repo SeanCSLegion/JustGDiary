@@ -379,6 +379,35 @@ class EditorTextState(initialLines: List<EditorLine>) {
         revision += 1
     }
 
+    /**
+     * 插入一张图片，并把光标放到**图片之后的新行**上。
+     *
+     * 对应 iOS `RichTextEngine.insertImage`：那边插入的是"附件 + 一个 `\n`"，然后把
+     * `selectedRange` 设到附件之后 —— 效果就是**光标落在图片下面那一行**，接着输入的字
+     * 出现在图片之后而不是之前（真机实测：早先的实现把图片插在光标行之后、光标却留在原行，
+     * 于是"插图之后继续打字"会打在图片上面）。
+     *
+     * 图片行本身由 [EditorModel.insertImageLine] 建（它是"独立一行"的附件）。
+     */
+    fun insertImage(src: String, width: Double?, height: Double?) {
+        if (composing) return
+        val index = selection.lineIndex.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+        val next = EditorModel.insertImageLine(lines, index, src, width, height)
+        // 图片落在 index + 1；光标要去它**下面**那一行。没有就补一个空行 ——
+        // 这样"插图后直接打字"永远打在图片下面（与 iOS 一致）。
+        val caretLine = index + 2
+        val withCaret = if (caretLine <= next.lastIndex) {
+            next
+        } else {
+            next + EditorModel.EMPTY_LINE
+        }
+        lines = withCaret.ifEmpty { listOf(EditorModel.EMPTY_LINE) }
+        val caret = caretLine.coerceIn(0, lines.lastIndex)
+        selection = EditorSelection(caret, 0, 0)
+        pendingFlags = EditorModel.caretFlags(currentLine, selection.start)
+        revision += 1
+    }
+
     /** 直接替换整个模型（载入已有片段 / 撤销）。 */
     fun replace(newLines: List<EditorLine>, caret: EditorSelection = selection) {
         lines = newLines.ifEmpty { listOf(EditorModel.EMPTY_LINE) }

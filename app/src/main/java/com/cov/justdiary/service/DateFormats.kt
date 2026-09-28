@@ -157,6 +157,14 @@ class DateFormats(
     }
 
     /**
+     * **只有时间**的起始行（`read_start_time`：`8:40 开始写` / `Started at 8:40`）。
+     *
+     * 分享长图的头部用它：那里的第二行不放地点 —— 地点就在下面第一条记录的时间行里，
+     * 重复一遍反而更乱（iOS `ShareRenderer.metaLine` 的注释）。
+     */
+    fun startTimeOnly(time: String): String = format(template(KEY_START_TIME), time)
+
+    /**
      * 片段的元信息行，**受 `auto_time` 控制**。
      *
      * `auto_time` 关闭时不显示开始时间，只剩地点（与 iOS 的 `vm.showsTime` 语义一致）。

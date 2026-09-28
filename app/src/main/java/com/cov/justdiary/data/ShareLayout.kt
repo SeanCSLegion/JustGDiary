@@ -3,281 +3,763 @@ package com.cov.justdiary.data
 import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.model.ContentPartStyle
+import java.time.LocalDate
+import kotlin.math.ceil
 import kotlin.math.max
 
 /**
- * 分享长图的**版式计算**。移植自 iOS `Services/ImageShareService.swift`（`ShareRenderer`）。
+ * 分享长图的**版式计算**。逐项移植自 iOS `Services/ImageShareService.swift` 的
+ * `ShareRenderer`（2026-09 重做版）。
  *
- * 这一层只算"每块内容画在哪、多高"，不碰绘制 —— 因此可以在 JVM 上断言
+ * 这一层只算"画什么、画在哪、多高"，不碰任何 Android 绘图 API —— 因此可以在 JVM 上断言
  * （方案 §8.3：常量必须逐项对齐，否则导出样式会漂移）。
  *
- * ## 与 iOS 的差异（有意修正 3 个已知缺陷）
+ * ## 这一版与上一版的区别（对齐 iOS 的"重做"）
  *
- * | # | iOS 行为 | 这里 |
+ * 旧版是「三个大色球 + 满屏渐变 + 一条悬空的蓝色时间轴」，与 iOS 已经弃用的那一版对应。
+ * iOS 现在是：
+ * - **每条记录一张卡片**（与应用内"每条记录一张卡"的语言一致，文字永远压在浅底上）；
+ * - **克制的背景**：两段竖向渐变 + 两枚极淡的品牌晕染，不抢内容；
+ * - **清楚的头部**：品牌行 → 大日期 + 星期 → 起始时间 → 品牌色短线；
+ * - **正经的页脚**：细线 +「一页时光 · JustADiary」+ 当天 `day_key`。
+ *
+ * ## 与 iOS 的实现差异（都是平台事实，不影响版面）
+ *
+ * | 项 | iOS | 这里 |
  * | --- | --- | --- |
- * | D5 | 地点行固定按 34 前进，但它是**可换行**文本 → 换行时会与下一块重叠 | 按实际换行行数 × 34 前进 |
- * | D6 | 大标题/小标题固定 52+12 / 46+10，**不换行** → 长标题溢出框外 | 按实际行数 × 52 + 12 / × 46 + 10 |
- * | D7 | 逐字符测宽用真实字体度量 | 通过 [CharWidthProvider] 注入：真机用 `Paint.measureText`，测试用等宽近似（见下） |
+ * | 文字量算 | `NSString.boundingRect` + Core Text 行盒 | [FontMetrics] 抽象：真机用 `Paint`，测试用 [InkRatioFontMetrics] |
+ * | 时间轴 / 气泡的裁剪 | `CGContext.clip` | `Canvas.clipRect` / `clipPath`（同一个含义） |
+ * | 白色对勾 | `UIColor.white` | `Color.WHITE`（不受深色主题影响，与 iOS 同） |
  *
- * ## 一处近似
- *
- * iOS 用 `boundingRect` 逐字符量宽。这一层把量宽抽象成 [CharWidthProvider]：
- * 真机实现走 `Paint`（精确），测试与预览走 [InkRatioWidthProvider]（CJK 0.87 / ASCII 0.75 /
- * 其它 0.98 —— 与 iOS 计算行高时用的墨迹比一致）。因此**分享图的最终换行位置在真机上与
- * iOS 基本一致，但不是在字节层面保证一致**；分享图是本地生成物，不属于跨端契约。
+ * 量算抽象带来的唯一差别是**换行位置**可能在个别字符串上与 iOS 差一两个字
+ * （分享图是本地生成物，不属于跨端契约）。
  */
 object ShareLayout {
 
-    // ------------------------------------------------------------------ 常量（逐字对齐 iOS）
+    // ------------------------------------------------------------------ 版面常量（M）
+    //
+    // 逐项对齐 `ImageShareService.swift:28-52`。
 
     const val WIDTH: Double = 720.0
-    const val BLOCK_LEFT: Double = 108.0
-    const val SIDE: Double = 48.0
-    const val TIMELINE_LINE_X: Double = 61.0
-    const val TIMELINE_LINE_W: Double = 3.0
-    const val DATE_Y: Double = 64.0
-    const val FOOTER_H: Double = 34.0
-    const val CONTENT_WIDTH: Double = WIDTH - BLOCK_LEFT - SIDE
+    const val MARGIN: Double = 56.0
+    const val CONTENT: Double = WIDTH - MARGIN * 2
+    const val TOP: Double = 56.0
+    const val BRAND_H: Double = 34.0
+    const val AFTER_BRAND: Double = 24.0
+    const val DATE_H: Double = 74.0
+    const val AFTER_DATE: Double = 12.0
+    const val META_H: Double = 34.0
+    const val AFTER_META: Double = 26.0
+    const val RULE_WIDTH: Double = 64.0
+    const val RULE_HEIGHT: Double = 5.0
+    const val AFTER_RULE: Double = 40.0
+    const val ENTRY_HEAD_H: Double = 38.0
+    const val AFTER_ENTRY_HEAD: Double = 14.0
+    const val CARD_PAD_H: Double = 30.0
+    const val CARD_PAD_V: Double = 28.0
+    const val CARD_RADIUS: Double = 26.0
+    const val BETWEEN_ENTRIES: Double = 30.0
+    const val PART_GAP: Double = 20.0
+    const val LOOSE_GAP: Double = 26.0
+    const val BEFORE_FOOTER: Double = 46.0
+    const val FOOTER_H: Double = 30.0
+    const val BOTTOM: Double = 48.0
 
-    /** 日期（62 bold）之后推进 70。 */
-    const val DATE_ADVANCE: Double = 70.0
-    const val DATE_FONT: Double = 62.0
+    /** 品牌行里那颗品牌色圆点。 */
+    const val BRAND_DOT_RADIUS: Double = 7.0
 
-    /** 起始行（28）的行高与字体。 */
-    const val START_LINE_FONT: Double = 28.0
-    const val START_LINE_HEIGHT: Double = 40.0
+    /** 列表项圆点半径、待办复选框边长与圆角。 */
+    const val ITEM_DOT_RADIUS: Double = 5.5
+    const val CHECKBOX_SIZE: Double = 30.0
+    const val CHECKBOX_RADIUS: Double = 8.0
 
-    /** 地点行：24pt、行高 34（iOS 固定推进 34，这里按实际行数算）。 */
-    const val LOCATION_FONT: Double = 24.0
-    const val LOCATION_LINE_HEIGHT: Double = 34.0
+    /** 列表 / 待办的标记列宽（文字从这里之后开始）。 */
+    const val LIST_MARKER_W: Double = 30.0
+    const val TODO_MARKER_W: Double = 48.0
 
-    /** 每个片段内：时间行（26 bold）之后推进 36 + 20。 */
-    const val TIME_FONT: Double = 26.0
-    const val TIME_ADVANCE: Double = 36.0
-    const val TIME_GAP: Double = 20.0
+    /** 待办项之间的间距（项内已经加了，返回值要扣掉最后一次）。 */
+    const val ITEM_GAP: Double = 16.0
 
-    /** 片段之间的间距。 */
-    const val BLOCK_SPACING: Double = 36.0
+    /** 引用块的左右内缩与上下内边距、左侧色条。 */
+    const val QUOTE_PAD_V: Double = 22.0
+    const val QUOTE_TEXT_INSET: Double = 26.0
+    const val QUOTE_TEXT_RIGHT: Double = 46.0
+    const val QUOTE_RADIUS: Double = 16.0
+    const val QUOTE_BAR_W: Double = 5.0
+    const val QUOTE_BAR_INSET: Double = 10.0
 
-    /** 日期与首个片段之间的发丝线之后的推进：`24 + 2`。 */
-    const val HAIRLINE_ADVANCE: Double = 26.0
-
-    /** 墨迹比：CJK 0.87 / ASCII 0.75 / 其它 0.98（iOS 计算行高用）。 */
-    const val INK_CJK: Double = 0.87
-    const val INK_ASCII: Double = 0.75
-    const val INK_OTHER: Double = 0.98
-
-    /** 引用块左右各留 22（文本框宽 = contentWidth - 22）。 */
-    const val QUOTE_INSET: Double = 22.0
-
-    /** 图片最小高度与缺省宽高比。 */
+    /** 图片：圆角、最小高度、缺省宽高比。 */
+    const val IMAGE_RADIUS: Double = 20.0
     const val IMAGE_MIN_HEIGHT: Double = 120.0
     const val IMAGE_FALLBACK_RATIO: Double = 0.75
 
-    /** 逐字符量宽。 */
-    fun interface CharWidthProvider {
-        fun width(ch: Char, fontSize: Double): Double
+    /** 背景两枚晕染的位置与半径（`drawBackground`）。 */
+    const val GLOW_A_X_RATIO: Double = 0.94
+    const val GLOW_A_Y: Double = -80.0
+    const val GLOW_A_RADIUS: Double = 430.0
+    const val GLOW_A_ALPHA: Double = 0.10
+    const val GLOW_B_X_RATIO: Double = 0.02
+    const val GLOW_B_Y_RATIO: Double = 0.44
+    const val GLOW_B_RADIUS: Double = 380.0
+    const val GLOW_B_ALPHA: Double = 0.06
+
+    // ------------------------------------------------------------------ 字号（F）与行高（LH）
+
+    const val BRAND_FONT: Double = 26.0
+    const val YEAR_FONT: Double = 22.0
+    const val DATE_FONT: Double = 58.0
+    const val WEEKDAY_FONT: Double = 28.0
+    const val META_FONT: Double = 25.0
+    const val TIME_FONT: Double = 27.0
+    const val LOC_FONT: Double = 23.0
+    const val TITLE_FONT: Double = 38.0
+    const val HEADING_FONT: Double = 32.0
+    const val BODY_FONT: Double = 29.0
+    const val QUOTE_FONT: Double = 27.0
+    const val ITEM_FONT: Double = 29.0
+    const val FOOTER_FONT: Double = 22.0
+
+    const val TITLE_LH: Double = 54.0
+    const val HEADING_LH: Double = 46.0
+    const val BODY_LH: Double = 48.0
+    const val QUOTE_LH: Double = 44.0
+    const val ITEM_LH: Double = 46.0
+    const val FOOTER_LH: Double = 30.0
+
+    /**
+     * 一段文本占的高度：`max(lineHeight, 行数 × lineHeight)`。
+     *
+     * iOS 是 `max(lineHeight, ceil(boundingRect.height))` —— `boundingRect` 配
+     * `usesFontLeading` 返回的是**行盒总高**，N 行就是 N × lineHeight，因此这里按行数算。
+     * 这样做同时把 iOS（Core Text）与 Android（`Paint.FontMetrics`）两套度量体系的差异
+     * 挡在版面之外：同一个字符串在两边得到的是同一个高度。
+     */
+    fun textHeight(text: String, font: Double, width: Double, lineHeight: Double, metrics: FontMetrics): Double {
+        if (text.isEmpty() || width <= 0) return lineHeight
+        val lines = wrappedLines(text, font, width, metrics).size
+        return max(lineHeight, ceil(lines * lineHeight))
     }
 
-    /** 测试/预览用的墨迹比近似量宽。 */
-    object InkRatioWidthProvider : CharWidthProvider {
-        override fun width(ch: Char, fontSize: Double): Double = inkRatio(ch) * fontSize
+    /** 单行文本宽（时间行后面接地点时用）。 */
+    fun textWidth(text: String, font: Double, metrics: FontMetrics): Double = metrics.width(text, font)
+
+    // ------------------------------------------------------------------ 量算抽象
+
+    /** 字体度量：宽度 / 高度 / 基线偏移。真机实现走 `Paint`。 */
+    interface FontMetrics {
+        /** 文本宽度（单行）。 */
+        fun width(text: String, fontSize: Double): Double
+
+        /** 字体下降部（`descent`，通常是正值；用来让星期与大日期**基线对齐**）。 */
+        fun descent(fontSize: Double): Double
+
+        /** 字体行盒高（`Paint.FontMetrics` 的 `descent - ascent`）。 */
+        fun lineHeightOf(fontSize: Double): Double
     }
 
-    // ------------------------------------------------------------------ 样式度量
+    /**
+     * 测试与无 `Paint` 场景下的墨迹比近似：CJK 0.87 / ASCII 0.75 / 其它 0.98。
+     *
+     * `descent` 取 0.24×字号（Roboto / SF Pro 的实际值都在这个量级），
+     * 只影响星期与大日期的基线对齐，不影响任何高度。
+     */
+    object InkRatioFontMetrics : FontMetrics {
+        override fun width(text: String, fontSize: Double): Double {
+            var sum = 0.0
+            for (ch in text) sum += inkRatio(ch) * fontSize
+            return sum
+        }
 
-    /** 某一段落样式的字号与行高（`ImageShareService.swift:182-200`）。 */
-    data class StyleMetrics(val fontSize: Double, val lineHeight: Double)
+        override fun descent(fontSize: Double): Double = fontSize * 0.24
 
-    fun metricsFor(style: String): StyleMetrics = when (style) {
-        ContentPartStyle.title -> StyleMetrics(36.0, 52.0)
-        ContentPartStyle.heading -> StyleMetrics(32.0, 46.0)
-        ContentPartStyle.quote -> StyleMetrics(30.0, 40.0)
-        ContentPartStyle.list, ContentPartStyle.todo -> StyleMetrics(30.0, 55.0)
-        ContentPartStyle.image -> StyleMetrics(30.0, 0.0)
-        else -> StyleMetrics(31.0, 50.0)
+        /** 行盒高 ≈ 1.17×字号（Roboto 的实际值在 1.15~1.2 之间）。 */
+        override fun lineHeightOf(fontSize: Double): Double = fontSize * 1.17
     }
 
-    // ------------------------------------------------------------------ 版式
+    // ------------------------------------------------------------------ 绘制指令
+
+    /** 一条绘制指令。排版阶段定好颜色，绘制阶段只执行（两边不会各量一遍文字）。 */
+    sealed interface Op {
+        data class FillRounded(
+            val rect: Rect,
+            val radius: Double,
+            val color: Long,
+            /** `true` 时先按该 alpha 混合到背景（iOS 的 `withAlphaComponent`）。 */
+            val alpha: Double = 1.0,
+        ) : Op
+
+        data class Card(
+            val rect: Rect,
+            val radius: Double,
+            val fill: Long,
+            val border: Long,
+            val shadow: Long,
+        ) : Op
+
+        data class Text(
+            val text: String,
+            val rect: Rect,
+            val font: Double,
+            val lineHeight: Double,
+            val color: Long,
+            val align: Align = Align.Left,
+            /** 加粗（iOS 用 `weight: .semibold/.bold` 的系统字体）。 */
+            val bold: Boolean = false,
+            /** `true` 时先按 [alpha] 混合到背景（iOS 的 `withAlphaComponent`）。 */
+            val alpha: Double = 1.0,
+        ) : Op
+
+        /** 圆角实心条（品牌短线 / 引用左侧色条）。 */
+        data class Bar(
+            val rect: Rect,
+            val radius: Double,
+            val color: Long,
+            val alpha: Double = 1.0,
+        ) : Op
+
+        data class Dot(val cx: Double, val cy: Double, val radius: Double, val color: Long) : Op
+
+        data class Image(
+            val src: String,
+            val rect: Rect,
+            val radius: Double,
+            val fallbackColor: Long,
+            val fallbackAlpha: Double,
+        ) : Op
+
+        data class Checkbox(
+            val rect: Rect,
+            val checked: Boolean,
+            val fill: Long,
+            val border: Long,
+            val mark: Long,
+            val borderAlpha: Double,
+        ) : Op
+    }
+
+    enum class Align { Left, Right }
+
+    data class Rect(val x: Double, val y: Double, val width: Double, val height: Double) {
+        val right: Double get() = x + width
+        val bottom: Double get() = y + height
+    }
+
+    /** 排版结果：整张图的高度 + 一串绘制指令。 */
+    data class Page(val height: Double, val ops: List<Op>)
+
+    // ------------------------------------------------------------------ 配色
+
+    /**
+     * 分享图的调色板（`ImageShareService.swift:79-125`）。
+     *
+     * 与 `Theme.seed`（#2563EB）同源：浅色底用标准品牌色，深色底提亮一档。
+     */
+    data class Palette(
+        val text: Long,
+        val sub: Long,
+        val faint: Long,
+        val accent: Long,
+        val bgTop: Long,
+        val bgBottom: Long,
+        val glowStrong: Long,
+        val glowSoft: Long,
+        val card: Long,
+        val cardBorder: Long,
+        val cardBorderAlpha: Double,
+        val cardShadow: Long,
+        val cardShadowAlpha: Double,
+        val quoteBg: Long,
+        val quoteBgAlpha: Double,
+        val faintLineAlpha: Double,
+    ) {
+        companion object {
+            fun light(): Palette = Palette(
+                text = 0xFF15181DL,
+                sub = 0xFF5B6472L,
+                faint = 0xFF98A1B0L,
+                accent = 0xFF2563EBL,
+                bgTop = 0xFFF8F9FCL,
+                bgBottom = 0xFFEDF0F7L,
+                glowStrong = 0xFF2563EBL,
+                glowSoft = 0xFF7C5CFFL,
+                card = 0xFFFFFFFFL,
+                cardBorder = 0xFF15181DL,
+                cardBorderAlpha = 0.06,
+                cardShadow = 0xFF15181DL,
+                cardShadowAlpha = 0.08,
+                quoteBg = 0xFF2563EBL,
+                quoteBgAlpha = 0.07,
+                faintLineAlpha = 0.35,
+            )
+
+            fun dark(): Palette = Palette(
+                text = 0xFFECEDF1L,
+                sub = 0xFFA7AEBBL,
+                faint = 0xFF6E7683L,
+                accent = 0xFF7C97FFL,
+                bgTop = 0xFF0C0F14L,
+                bgBottom = 0xFF131722L,
+                glowStrong = 0xFF3B6BFFL,
+                glowSoft = 0xFF8A5CFFL,
+                card = 0xFF1A1F29L,
+                cardBorder = 0xFFFFFFFFL,
+                cardBorderAlpha = 0.07,
+                cardShadow = 0xFF000000L,
+                cardShadowAlpha = 0.45,
+                quoteBg = 0xFF7C97FFL,
+                quoteBgAlpha = 0.14,
+                faintLineAlpha = 0.35,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------------ 输入
 
     /** 一个片段的输入（分享只需要时间、地点与内容）。 */
     data class ShareBlock(val time: Long, val location: String, val parts: List<ContentPart>)
 
-    /** 一个绘制矩形（左上角 + 宽高，坐标相对画布左上角）。 */
-    data class LayoutRect(val x: Double, val y: Double, val width: Double, val height: Double)
-
-    data class Layout(
-        /** 整张图的高度。 */
-        val height: Double,
-        /** 每个片段的包围盒。 */
-        val blockRects: List<LayoutRect>,
-        /** 每个片段里每个段落的包围盒（`partRects[blockIndex][partIndex]`）。 */
-        val partRects: List<List<LayoutRect>>,
-        /** 日期文本的基线 y。 */
-        val dateY: Double,
-        /** 起始行的 y 与高度。 */
-        val startLineY: Double,
-        val startLineHeight: Double,
-        /** 时间轴的起止 y。 */
-        val timelineTop: Double,
-        val timelineBottom: Double,
+    /**
+     * 头部与页脚要用的、**已经本地化**的文案。
+     *
+     * 时间相关的文案由调用方用 `DateFormats` 备好（跟随 12/24 小时制与 AM/PM 语言），
+     * 这一层不依赖 Android 资源 —— 因此可以在 JVM 上精确断言。
+     */
+    data class ShareTexts(
+        /** 品牌名（`EntryAbility_label`：一页时光）。 */
+        val brand: String,
+        /** 年份（`date_year`：2026年）。 */
+        val year: String,
+        /** 大日期（`date_day_only`：9月8日）。 */
+        val date: String,
+        /** 星期（`weekdayName`：周二）。 */
+        val weekday: String,
+        /**
+         * 头部第二行（`read_start_time`：`8:40 开始写`）。
+         *
+         * **只有时间，没有地点** —— 地点就在下面第一条记录的时间行里，重复一遍反而更乱。
+         * `auto_time` 关闭时为 `null`，那一行整块不画（图明显变矮）。
+         */
+        val startLine: String?,
+        /** 页脚里的 `一页时光 · JustADiary`。 */
+        val footerBrand: String,
+        /** 页脚右侧的 `day_key`（2026-09-08）。 */
+        val dayKey: String,
     )
 
     /**
-     * 计算整张分享图的版式。
+     * 计算整页的绘制指令。
      *
-     * @param charWidth 逐字符量宽；真机传 `Paint` 实现，测试传 [InkRatioWidthProvider]。
+     * @param showTime `auto_time` 关闭时隐藏头部起始行与每条记录的时间 —— **只影响显示**，
+     *   `ShareBlock.time` 仍照常传入（iOS `render(showTime:)` 同一语义）。
+     * @param imageSize 图片段落的真实像素尺寸（`src` → 宽高）；拿不到时返回 null，
+     *   那时按缺省比例 0.75 算。
      */
-    fun layout(
-        dateText: String,
-        startLine: String,
+    fun makePage(
+        texts: ShareTexts,
         blocks: List<ShareBlock>,
-        charWidth: CharWidthProvider = InkRatioWidthProvider,
-    ): Layout {
-        var y = DATE_Y
-        y += DATE_ADVANCE
-        val startLineY = y
-        // iOS 的 `startLineHeight` 是**行数 × 行高**（不带墨迹），与 `wrappedHeight` 不同：
-        // 起始行只是"写了几行就占几行"，不像引用块那样需要额外的墨迹与内边距。
-        val startLineHeight = max(1, wrappedLines(startLine, START_LINE_FONT, CONTENT_WIDTH, charWidth).size) *
-            START_LINE_HEIGHT
-        y += startLineHeight
-        y += HAIRLINE_ADVANCE
+        showTime: Boolean,
+        palette: Palette,
+        metrics: FontMetrics = InkRatioFontMetrics,
+        imageSize: (String) -> Pair<Int, Int>? = { null },
+        /** 每条记录时间行的文案（`timeOf`，跟随 12/24 小时制）；`showTime` 为假时不看它。 */
+        timeLabel: (Long) -> String = { "" },
+    ): Page {
+        val ops = mutableListOf<Op>()
+        var y = TOP
 
-        val timelineTop = y
-        val blockRects = mutableListOf<LayoutRect>()
-        val partRects = mutableListOf<List<LayoutRect>>()
+        // 1) 品牌行：左边品牌点 + 名字，右边年份。
+        ops += Op.Dot(
+            cx = MARGIN + 7,
+            cy = y + 17,
+            radius = BRAND_DOT_RADIUS,
+            color = palette.accent,
+        )
+        ops += Op.Text(
+            text = texts.brand,
+            rect = Rect(MARGIN + 26, y, CONTENT - 140, BRAND_H),
+            font = BRAND_FONT,
+            lineHeight = BRAND_H,
+            color = palette.text,
+            bold = true,
+        )
+        ops += Op.Text(
+            text = texts.year,
+            rect = Rect(MARGIN, y + 5, CONTENT, 26.0),
+            font = YEAR_FONT,
+            lineHeight = 26.0,
+            color = palette.faint,
+            align = Align.Right,
+        )
+        y += BRAND_H + AFTER_BRAND
 
-        for (block in blocks) {
-            val blockTop = y
-            y += TIME_ADVANCE
-            y += TIME_GAP
+        // 2) 大日期 + 星期（两者基线对齐）。
+        ops += Op.Text(
+            text = texts.date,
+            rect = Rect(MARGIN, y, CONTENT, DATE_H),
+            font = DATE_FONT,
+            lineHeight = DATE_H,
+            color = palette.text,
+            bold = true,
+        )
+        val dateWidth = textWidth(texts.date, DATE_FONT, metrics)
+        // 行盒高 LH 时，第一行基线在盒顶下方 (LH + descender)；用它把星期压到同一条基线上。
+        val weekdayLh = ceil(metrics.lineHeightOf(WEEKDAY_FONT))
+        val dateBaseline = y + DATE_H + metrics.descent(DATE_FONT)
+        ops += Op.Text(
+            text = texts.weekday,
+            rect = Rect(
+                x = MARGIN + dateWidth + 16,
+                y = dateBaseline - (weekdayLh + metrics.descent(WEEKDAY_FONT)),
+                width = max(40.0, CONTENT - dateWidth - 16),
+                height = weekdayLh,
+            ),
+            font = WEEKDAY_FONT,
+            lineHeight = weekdayLh,
+            color = palette.sub,
+        )
+        y += DATE_H + AFTER_DATE
 
-            // D5：地点行按**实际换行行数**前进，而不是固定 34
-            val locationLines = wrappedLines(
-                block.location,
-                fontSize = LOCATION_FONT,
-                maxWidth = CONTENT_WIDTH,
-                charWidth = charWidth,
+        // 3) 起始时间（只有时间，没有地点 —— 地点在下面第一条记录的时间行里）。
+        val meta = texts.startLine?.takeIf { showTime && blocks.any { block -> block.time > 0 } }
+        if (meta != null) {
+            val metaH = textHeight(meta, META_FONT, CONTENT, META_H, metrics)
+            ops += Op.Text(
+                text = meta,
+                rect = Rect(MARGIN, y, CONTENT, metaH),
+                font = META_FONT,
+                lineHeight = META_H,
+                color = palette.sub,
             )
-            y += max(1, locationLines.size) * LOCATION_LINE_HEIGHT
-
-            val rects = block.parts.map { part ->
-                val rect = partRect(part, y, charWidth)
-                y += rect.height
-                rect
-            }
-            partRects.add(rects)
-            y += BLOCK_SPACING
-            blockRects.add(LayoutRect(0.0, blockTop, WIDTH, y - blockTop))
+            y += metaH + AFTER_META
+        } else {
+            y += AFTER_META
         }
 
-        val timelineBottom = y - BLOCK_SPACING
-        y += FOOTER_H
-
-        return Layout(
-            height = y,
-            blockRects = blockRects,
-            partRects = partRects,
-            dateY = DATE_Y,
-            startLineY = startLineY,
-            startLineHeight = startLineHeight,
-            timelineTop = timelineTop,
-            timelineBottom = max(timelineTop, timelineBottom),
+        // 4) 品牌色短线。
+        ops += Op.FillRounded(
+            rect = Rect(MARGIN, y, RULE_WIDTH, RULE_HEIGHT),
+            radius = RULE_HEIGHT / 2,
+            color = palette.accent,
         )
+        y += RULE_HEIGHT + AFTER_RULE
+
+        // 5) 每条记录：时间 / 地点行 + 卡片。
+        var wroteEntry = false
+        for (block in blocks) {
+            val timeText = if (showTime && block.time > 0) block.time else null
+            val locText = block.location.trim()
+            val hasContent = block.parts.isNotEmpty()
+            if (!hasContent && timeText == null && locText.isEmpty()) continue
+
+            if (wroteEntry) y += BETWEEN_ENTRIES
+            wroteEntry = true
+
+            if (timeText != null || locText.isNotEmpty()) {
+                var headX = MARGIN
+                if (timeText != null) {
+                    val label = timeLabel(timeText)
+                    ops += Op.Text(
+                        text = label,
+                        rect = Rect(headX, y, 160.0, ENTRY_HEAD_H),
+                        font = TIME_FONT,
+                        lineHeight = ENTRY_HEAD_H,
+                        color = palette.accent,
+                        bold = true,
+                    )
+                    headX += textWidth(label, TIME_FONT, metrics) + 14
+                }
+                if (locText.isNotEmpty() && headX < MARGIN + CONTENT - 60) {
+                    ops += Op.Text(
+                        text = locText,
+                        rect = Rect(headX, y + 6, MARGIN + CONTENT - headX, 30.0),
+                        font = LOC_FONT,
+                        lineHeight = 30.0,
+                        color = palette.sub,
+                    )
+                }
+                y += ENTRY_HEAD_H + AFTER_ENTRY_HEAD
+            }
+
+            // 空片段（只有时间、没有内容）不画空卡片。
+            if (!hasContent) continue
+            val cardTop = y
+            // 卡片本体要画在**这段内容之前**（iOS 是把卡片指令 insert 到内容指令之前）：
+            // 先记下插入点，内容画完再回头插进去 —— 否则卡片会盖住自己的文字。
+            val cardIndex = ops.size
+            var contentY = cardTop + CARD_PAD_V
+            val innerWidth = CONTENT - CARD_PAD_H * 2
+            block.parts.forEachIndexed { index, part ->
+                if (index > 0) contentY += gapBefore(part)
+                contentY += appendPart(
+                    part = part,
+                    x = MARGIN + CARD_PAD_H,
+                    y = contentY,
+                    width = innerWidth,
+                    ops = ops,
+                    palette = palette,
+                    metrics = metrics,
+                    imageSize = imageSize,
+                )
+            }
+            val cardHeight = contentY - cardTop + CARD_PAD_V
+            ops.add(
+                cardIndex,
+                Op.Card(
+                    rect = Rect(MARGIN, cardTop, CONTENT, cardHeight),
+                    radius = CARD_RADIUS,
+                    fill = palette.card,
+                    border = palette.cardBorder,
+                    shadow = palette.cardShadow,
+                ),
+            )
+            y = cardTop + cardHeight
+        }
+
+        // 6) 页脚：细线 + 品牌 + 当天日期。
+        y += BEFORE_FOOTER
+        ops += Op.FillRounded(
+            rect = Rect(MARGIN, y, CONTENT, 1.0),
+            radius = 0.5,
+            color = palette.faint,
+            // iOS 是 `faint.withAlphaComponent(0.35)`
+            alpha = palette.faintLineAlpha,
+        )
+        y += 22
+        ops += Op.Text(
+            text = texts.footerBrand,
+            rect = Rect(MARGIN, y, CONTENT * 0.6, FOOTER_H),
+            font = FOOTER_FONT,
+            lineHeight = FOOTER_LH,
+            color = palette.faint,
+            bold = true,
+        )
+        ops += Op.Text(
+            text = texts.dayKey,
+            rect = Rect(MARGIN + CONTENT * 0.4, y, CONTENT * 0.6, FOOTER_H),
+            font = FOOTER_FONT,
+            lineHeight = FOOTER_LH,
+            color = palette.faint,
+            align = Align.Right,
+            bold = true,
+        )
+        y += FOOTER_H + BOTTOM
+
+        return Page(height = y, ops = ops)
     }
 
-    /** 单个段落的包围盒（`ImageShareService.swift:93-116`）。 */
-    fun partRect(part: ContentPart, y: Double, charWidth: CharWidthProvider = InkRatioWidthProvider): LayoutRect {
-        val metrics = metricsFor(part.style)
+    /** 段与段之间的间距：标题 / 小标题离上面远一点，离下面的正文近一点。 */
+    fun gapBefore(part: ContentPart): Double = when (part.style) {
+        ContentPartStyle.title, ContentPartStyle.heading -> LOOSE_GAP
+        else -> PART_GAP
+    }
+
+    /**
+     * 画一段内容，返回它占的高度（`appendPart`）。
+     *
+     * `x` 是**卡片内的左边界**（已经加过 `CARD_PAD_H`），`width` 是卡片内宽。
+     */
+    fun appendPart(
+        part: ContentPart,
+        x: Double,
+        y: Double,
+        width: Double,
+        ops: MutableList<Op>,
+        palette: Palette,
+        metrics: FontMetrics,
+        imageSize: (String) -> Pair<Int, Int>? = { null },
+    ): Double {
         val text = ContentFlatten.flattenPart(part)
         return when (part.style) {
             ContentPartStyle.title -> {
-                // D6：按实际行数算高度，长标题不再溢出
-                val lines = wrappedLines(text, metrics.fontSize, CONTENT_WIDTH, charWidth)
-                LayoutRect(0.0, y, WIDTH, max(1, lines.size) * metrics.lineHeight + 12.0)
+                val h = textHeight(text, TITLE_FONT, width, TITLE_LH, metrics)
+                ops += Op.Text(
+                    text = text,
+                    rect = Rect(x, y, width, h),
+                    font = TITLE_FONT,
+                    lineHeight = TITLE_LH,
+                    color = palette.text,
+                    bold = true,
+                )
+                h
             }
 
             ContentPartStyle.heading -> {
-                val lines = wrappedLines(text, metrics.fontSize, CONTENT_WIDTH, charWidth)
-                LayoutRect(0.0, y, WIDTH, max(1, lines.size) * metrics.lineHeight + 10.0)
+                val h = textHeight(text, HEADING_FONT, width, HEADING_LH, metrics)
+                ops += Op.Text(
+                    text = text,
+                    rect = Rect(x, y, width, h),
+                    font = HEADING_FONT,
+                    lineHeight = HEADING_LH,
+                    color = palette.text,
+                    bold = true,
+                )
+                h
             }
 
             ContentPartStyle.quote -> {
-                val height = wrappedHeight(
-                    text = text,
-                    fontSize = metrics.fontSize,
-                    maxWidth = CONTENT_WIDTH - QUOTE_INSET,
-                    lineHeight = metrics.lineHeight,
-                    charWidth = charWidth,
-                    padding = 40.0,
+                val textX = x + QUOTE_TEXT_INSET
+                val textW = width - QUOTE_TEXT_RIGHT
+                val textH = textHeight(text, QUOTE_FONT, textW, QUOTE_LH, metrics)
+                val boxH = textH + QUOTE_PAD_V * 2
+                ops += Op.FillRounded(
+                    rect = Rect(x, y, width, boxH),
+                    radius = QUOTE_RADIUS,
+                    color = palette.quoteBg,
+                    alpha = palette.quoteBgAlpha,
                 )
-                LayoutRect(0.0, y, WIDTH, height)
+                ops += Op.Bar(
+                    rect = Rect(x, y + QUOTE_BAR_INSET, QUOTE_BAR_W, boxH - QUOTE_BAR_INSET * 2),
+                    radius = QUOTE_BAR_W / 2,
+                    color = palette.accent,
+                )
+                ops += Op.Text(
+                    text = text,
+                    rect = Rect(textX, y + QUOTE_PAD_V, textW, textH),
+                    font = QUOTE_FONT,
+                    lineHeight = QUOTE_LH,
+                    color = palette.text,
+                )
+                boxH
             }
 
-            ContentPartStyle.list, ContentPartStyle.todo -> {
+            ContentPartStyle.list -> appendItems(
+                items = part.items.orEmpty(),
+                done = null,
+                x = x,
+                y = y,
+                width = width,
+                ops = ops,
+                palette = palette,
+                metrics = metrics,
+            )
+
+            ContentPartStyle.todo -> {
                 val items = part.items.orEmpty()
-                LayoutRect(0.0, y, WIDTH, items.size * metrics.lineHeight)
+                val done = part.done ?: List(items.size) { false }
+                appendItems(
+                    items = items,
+                    done = done,
+                    x = x,
+                    y = y,
+                    width = width,
+                    ops = ops,
+                    palette = palette,
+                    metrics = metrics,
+                )
             }
 
-            ContentPartStyle.image -> LayoutRect(0.0, y, WIDTH, imageHeight(part))
+            ContentPartStyle.image -> {
+                val boxH = imageHeight(part, width, imageSize)
+                val src = part.src
+                if (src != null) {
+                    ops += Op.Image(
+                        src = src,
+                        rect = Rect(x, y, width, boxH),
+                        radius = IMAGE_RADIUS,
+                        fallbackColor = palette.quoteBg,
+                        fallbackAlpha = palette.quoteBgAlpha,
+                    )
+                }
+                boxH
+            }
 
             else -> {
-                val lines = wrappedLines(text, metrics.fontSize, CONTENT_WIDTH, charWidth)
-                LayoutRect(0.0, y, WIDTH, lines.size * metrics.lineHeight + 10.0)
+                val h = textHeight(text, BODY_FONT, width, BODY_LH, metrics)
+                ops += Op.Text(
+                    text = text,
+                    rect = Rect(x, y, width, h),
+                    font = BODY_FONT,
+                    lineHeight = BODY_LH,
+                    color = palette.text,
+                )
+                h
             }
         }
     }
 
     /**
-     * 图片高度：`max(120, contentWidth * ratio)`，比例取 `h/w`，
-     * 缺失时按加载到的图片算，再不行用 0.75（`ImageShareService.swift:135-147`）。
+     * 列表 / 待办的逐项绘制。
+     *
+     * 列表用品牌色圆点（标记列 30），待办用 30×30 复选框（标记列 48）；
+     * 已完成项的**文字用 `sub` 色**（视觉上"划掉"），未完成用正文色。
      */
-    fun imageHeight(part: ContentPart, fallbackRatio: Double = IMAGE_FALLBACK_RATIO): Double {
-        val w = part.w ?: 0.0
-        val h = part.h ?: 0.0
-        val ratio = if (w > 0 && h > 0) h / w else fallbackRatio
-        return max(IMAGE_MIN_HEIGHT, CONTENT_WIDTH * ratio)
+    private fun appendItems(
+        items: List<String>,
+        done: List<Boolean>?,
+        x: Double,
+        y: Double,
+        width: Double,
+        ops: MutableList<Op>,
+        palette: Palette,
+        metrics: FontMetrics,
+    ): Double {
+        var cursor = y
+        val markerW = if (done == null) LIST_MARKER_W else TODO_MARKER_W
+        val textW = width - markerW
+        items.forEachIndexed { i, item ->
+            val isDone = done != null && i in done.indices && done[i]
+            val h = textHeight(item, ITEM_FONT, textW, ITEM_LH, metrics)
+            if (done == null) {
+                ops += Op.Dot(
+                    cx = x + 9,
+                    cy = cursor + ITEM_LH / 2 - 3,
+                    radius = ITEM_DOT_RADIUS,
+                    color = palette.accent,
+                )
+            } else {
+                ops += Op.Checkbox(
+                    rect = Rect(x, cursor + 8, CHECKBOX_SIZE, CHECKBOX_SIZE),
+                    checked = isDone,
+                    fill = palette.accent,
+                    border = palette.faint,
+                    mark = 0xFFFFFFFFL,
+                    borderAlpha = palette.faintLineAlpha,
+                )
+            }
+            ops += Op.Text(
+                text = item,
+                rect = Rect(x + markerW, cursor, textW, h),
+                font = ITEM_FONT,
+                lineHeight = ITEM_LH,
+                color = if (isDone) palette.sub else palette.text,
+            )
+            cursor += h + ITEM_GAP
+        }
+        return max(0.0, cursor - y - ITEM_GAP)
     }
 
     /**
-     * 引用块/起始行的高度：`max(1, 行数 - 1) * 行高 + 墨迹 + padding`
-     * （`ImageShareService.swift:118-133`）。墨迹取所有行里最大的"字符墨迹比 × 字号"。
+     * 图片高度：`max(120, width × ratio)`。
+     *
+     * 比例优先取段落里存的 `h/w`，缺失时问 [imageSize]（读文件真实尺寸），再缺省 0.75。
      */
-    fun wrappedHeight(
-        text: String,
-        fontSize: Double,
-        maxWidth: Double,
-        lineHeight: Double,
-        charWidth: CharWidthProvider = InkRatioWidthProvider,
-        padding: Double,
-    ): Double {
-        val lines = wrappedLines(text, fontSize, maxWidth, charWidth)
-        var ink = 0.0
-        for (line in lines) {
-            var maxRatio = 0.0
-            for (ch in line) maxRatio = max(maxRatio, inkRatio(ch))
-            ink = max(ink, maxRatio * fontSize)
+    fun imageHeight(part: ContentPart, width: Double, imageSize: (String) -> Pair<Int, Int>? = { null }): Double {
+        val w = part.w ?: 0.0
+        val h = part.h ?: 0.0
+        val ratio = when {
+            w > 0 && h > 0 -> h / w
+            else -> {
+                val size = part.src?.let(imageSize)
+                if (size != null && size.first > 0) size.second.toDouble() / size.first else IMAGE_FALLBACK_RATIO
+            }
         }
-        return max(1, lines.size - 1) * lineHeight + ink + padding
+        return max(IMAGE_MIN_HEIGHT, width * ratio)
     }
 
-    /** 贪心逐字符换行（`ImageShareService.swift:149-173`）。 */
+    /** 贪心逐字符换行（与阅读 / 编辑的排版同一策略：CJK 逐字、ASCII 也逐字符）。 */
     fun wrappedLines(
         text: String,
         fontSize: Double,
         maxWidth: Double,
-        charWidth: CharWidthProvider = InkRatioWidthProvider,
-        maxLines: Int = Int.MAX_VALUE,
+        metrics: FontMetrics = InkRatioFontMetrics,
     ): List<String> {
         val lines = mutableListOf<String>()
         val current = StringBuilder()
         var currentWidth = 0.0
         for (ch in text) {
-            val w = charWidth.width(ch, fontSize)
+            val w = metrics.width(ch.toString(), fontSize)
             if (currentWidth + w > maxWidth && current.isNotEmpty()) {
-                lines.add(current.toString())
-                if (lines.size >= maxLines) return lines
+                lines += current.toString()
                 current.setLength(0)
                 current.append(ch)
                 currentWidth = w
@@ -286,19 +768,23 @@ object ShareLayout {
                 currentWidth += w
             }
         }
-        if (current.isNotEmpty()) lines.add(current.toString())
+        if (current.isNotEmpty()) lines += current.toString()
         return lines
     }
 
-    /** 字符的墨迹比（行高计算用；顺带作为测试用的量宽比例）。 */
+    /** 字符的墨迹比（[InkRatioFontMetrics] 用）。 */
     fun inkRatio(ch: Char): Double = when {
-        isCjk(ch) -> INK_CJK
-        ch.code < 128 -> INK_ASCII
-        else -> INK_OTHER
+        isCjk(ch) -> 0.87
+        ch.code < 128 -> 0.75
+        else -> 0.98
     }
 
     private fun isCjk(ch: Char): Boolean {
         val cp = ch.code
         return cp in 0x4E00..0x9FFF || cp in 0x3400..0x4DBF || cp in 0x3000..0x303F
     }
+
+    /** 页面高度的一个保守下限：只有页眉与页脚时的高度（iOS 测试要求 200~420）。 */
+    fun headerFooterOnlyHeight(): Double = TOP + BRAND_H + AFTER_BRAND + DATE_H + AFTER_DATE +
+        AFTER_META + RULE_HEIGHT + AFTER_RULE + BEFORE_FOOTER + 1 + 22 + FOOTER_H + BOTTOM
 }

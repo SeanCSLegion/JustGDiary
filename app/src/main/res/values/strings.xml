@@ -201,6 +201,14 @@
     <string name="a11y_back">Back</string>
     <string name="a11y_share">Share</string>
     <string name="a11y_insert_image">Insert image</string>
+    <string name="share_sheet_title">Share image</string>
+    <string name="share_rendering">Generating image…</string>
+    <string name="share_action_share">Share…</string>
+    <string name="share_action_save">Save to Photos</string>
+    <string name="share_saved">Saved to Photos</string>
+    <string name="share_save_failed">Couldn\'t save. Please try again later.</string>
+    <string name="share_preview_desc">Share preview</string>
+    <string name="share_sheet_meta">%1$s · %2$d × %3$d</string>
     <string name="delete">Delete</string>
     <string name="discard">Discard</string>
     <string name="editor_save_exit">Save &amp; exit</string>

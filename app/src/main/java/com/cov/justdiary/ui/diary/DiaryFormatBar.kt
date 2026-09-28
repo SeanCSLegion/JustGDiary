@@ -18,8 +18,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,6 +43,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.R
+import com.cov.justdiary.ui.components.AnchoredMenuItem
 import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.theme.Radius
 
@@ -91,6 +90,14 @@ fun DiaryFormatBar(
     onToggleQuote: () -> Unit = {},
     onToggleTodo: () -> Unit = {},
     onToggleInline: (InlineFlag) -> Unit = {},
+    /**
+     * 段落样式菜单是否开着（**由 `EditorScreen` 持有**）。
+     *
+     * 菜单要浮在格式栏**之上**，所以它画在编辑器的浮层里，而不是格式栏内部 ——
+     * 状态因此提升到编辑器一层。
+     */
+    styleMenuOpen: Boolean = false,
+    onStyleMenuChange: (Boolean) -> Unit = {},
 ) {
     val styleLabel = stringResource(R.string.editor_tool_style)
     val currentStyleLabel = blockStyleLabel(activeBlock)
@@ -116,7 +123,8 @@ fun DiaryFormatBar(
                     enabled = enabled,
                     label = styleLabel,
                     currentStyleLabel = currentStyleLabel,
-                    onSelect = onBlockStyle,
+                    open = styleMenuOpen,
+                    onOpenChange = onStyleMenuChange,
                 )
                 FormatButton(
                     icon = AppIcons.AlignCenter,
@@ -189,73 +197,51 @@ private fun BlockStyleMenuButton(
     enabled: Boolean,
     label: String,
     currentStyleLabel: String,
-    onSelect: (EditorBlockStyle) -> Unit,
+    open: Boolean,
+    onOpenChange: (Boolean) -> Unit,
 ) {
-    var open by remember { mutableStateOf(false) }
     val menuBackground = MaterialTheme.colorScheme.secondaryContainer
+    // 非聚焦浮层收不到返回键的 window 事件，菜单开着时由这里接管：先关菜单，不退出编辑态。
+    androidx.activity.compose.BackHandler(enabled = open) { onOpenChange(false) }
 
-    Box {
-        Row(
-            modifier = Modifier
-                .width(FormatBarMetrics.MenuWidth)
-                .height(FormatBarMetrics.TouchHeight)
-                .clip(CircleShape)
-                .background(if (activeBlock != EditorBlockStyle.Body) menuBackground else Color.Transparent)
-                .alpha(if (enabled) 1f else FormatBarMetrics.DisabledAlpha)
-                .clickable(enabled = enabled, onClickLabel = label) { open = true }
-                .semantics {
-                    role = Role.Button
-                    contentDescription = label
-                    // 当前段落样式作为 value 读出来（TalkBack：「段落样式，大标题」）
-                    stateDescription = currentStyleLabel
-                    selected = activeBlock != EditorBlockStyle.Body
-                },
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = AppIcons.FormatSize,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = if (activeBlock != EditorBlockStyle.Body) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-            Icon(
-                imageVector = AppIcons.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = if (activeBlock != EditorBlockStyle.Body) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            // 菜单只有三项：**引用不在里面**（它有自己的按钮）
-            listOf(EditorBlockStyle.Title, EditorBlockStyle.Heading, EditorBlockStyle.Body).forEach { style ->
-                DropdownMenuItem(
-                    text = { Text(blockStyleLabel(style)) },
-                    trailingIcon = {
-                        if (style == activeBlock) {
-                            Icon(
-                                Icons.Filled.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    },
-                    onClick = {
-                        open = false
-                        onSelect(style)
-                    },
-                )
-            }
-        }
+    Row(
+        modifier = Modifier
+            .width(FormatBarMetrics.MenuWidth)
+            .height(FormatBarMetrics.TouchHeight)
+            .clip(CircleShape)
+            .background(if (activeBlock != EditorBlockStyle.Body) menuBackground else Color.Transparent)
+            .alpha(if (enabled) 1f else FormatBarMetrics.DisabledAlpha)
+            .clickable(enabled = enabled, onClickLabel = label) { onOpenChange(!open) }
+            .semantics {
+                role = Role.Button
+                contentDescription = label
+                // 当前段落样式作为 value 读出来（TalkBack：「段落样式，大标题」）
+                stateDescription = currentStyleLabel
+                selected = activeBlock != EditorBlockStyle.Body
+            },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = AppIcons.FormatSize,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = if (activeBlock != EditorBlockStyle.Body) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Icon(
+            imageVector = AppIcons.ExpandMore,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = if (activeBlock != EditorBlockStyle.Body) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
     }
 }
 
@@ -336,4 +322,25 @@ private fun blockStyleLabel(style: EditorBlockStyle): String = when (style) {
     EditorBlockStyle.Heading -> stringResource(R.string.editor_font_sub)
     EditorBlockStyle.Body -> stringResource(R.string.editor_font_body)
     EditorBlockStyle.Quote -> stringResource(R.string.editor_tool_quote)
+}
+
+/**
+ * 段落样式菜单的面板（三项：大标题 / 小标题 / 正文）。**引用不在里面** —— 它有自己的按钮。
+ *
+ * 由 `EditorScreen` 的浮层调用（见 [com.cov.justdiary.ui.components.AnchoredMenu]）：
+ * 菜单浮在格式栏之上、且不新开窗口，所以打开它**不会收键盘**。
+ */
+@Composable
+fun ParagraphStyleMenu(
+    activeBlock: EditorBlockStyle,
+    onSelect: (EditorBlockStyle) -> Unit,
+) {
+    listOf(EditorBlockStyle.Title, EditorBlockStyle.Heading, EditorBlockStyle.Body).forEach { style ->
+        AnchoredMenuItem(
+            label = blockStyleLabel(style),
+            selected = style == activeBlock,
+            trailingIcon = Icons.Filled.Check,
+            onClick = { onSelect(style) },
+        )
+    }
 }

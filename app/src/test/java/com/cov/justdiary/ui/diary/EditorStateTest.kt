@@ -135,6 +135,40 @@ class EditorStateTest {
         assertEquals(ContentPartStyle.title, state.lines.single().blockStyle)
     }
 
+    // ------------------------------------------------------------------ 插图后的光标位置
+
+    @Test
+    fun `inserting an image puts the caret on the line below it`() {
+        val state = state(EditorLine(text = "第一行"), EditorLine(text = "第二行"))
+        state.onSelectionChanged(EditorSelection(0, 3, 3))
+
+        state.insertImage(src = "images/a.jpg", width = 800.0, height = 600.0)
+
+        // 图片落在第 1 行，光标应该在它**下面**（第 2 行）—— 否则插图之后接着打字会打在上面
+        assertEquals("images/a.jpg", state.lines[1].imageSrc)
+        assertEquals(2, state.selection.lineIndex)
+        assertTrue(state.selection.isCollapsed)
+        assertEquals(0, state.selection.start)
+
+        assertEquals("只插了一张图", 1, state.lines.count { it.imageSrc != null })
+        // "第二行"还在（排在图片之后），不是被顶掉
+        assertEquals("第二行", state.lines[2].text)
+    }
+
+    @Test
+    fun `inserting an image at the end appends an empty line for the caret`() {
+        val state = state(EditorLine(text = "只有一行"))
+        state.onSelectionChanged(EditorSelection(0, 4, 4))
+
+        state.insertImage(src = "images/b.jpg", width = 100.0, height = 100.0)
+
+        assertEquals(3, state.lines.size)
+        assertEquals("images/b.jpg", state.lines[1].imageSrc)
+        assertEquals(2, state.selection.lineIndex)
+        assertEquals("", state.lines[2].text)
+        assertTrue("新加的空行不是图片行", state.lines[2].imageSrc == null)
+    }
+
     @Test
     fun `format is ignored while the ime is composing`() {
         val state = state(EditorLine(text = "正文"))

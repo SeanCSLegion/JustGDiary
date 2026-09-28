@@ -85,6 +85,25 @@ class DiaryPageStateTest {
         return DateUtil.dayKeyForUtc(System.currentTimeMillis(), settings.dayStartHour)
     }
 
+    /** 昨天那一天的 day_key（`dayStartHour` 参与，与 [todayKey] 同一条公式）。 */
+    private fun yesterdayKey(): String = DateUtil
+        .parseDayKey(todayKey())!!
+        .minusDays(1)
+        .toString()
+
+    /**
+     * 昨天**正午**的 epoch 毫秒。
+     *
+     * 走 `LocalDate` 的日历运算，拿到的就是本地墙上时钟的昨天 12:00 —— 离前后两条换日线
+     * 都隔着 8 小时以上，`dayStartHour` 与时区都不会改变它的归属。
+     */
+    private fun yesterdayNoonMillis(): Long = DateUtil
+        .parseDayKey(yesterdayKey())!!
+        .atTime(12, 0)
+        .atZone(java.time.ZoneId.systemDefault())
+        .toInstant()
+        .toEpochMilli()
+
     /** 今天写两条片段，返回它们的 id。 */
     private fun seedToday(): List<Long> = runBlocking {
         val now = System.currentTimeMillis()
@@ -377,6 +396,151 @@ class DiaryPageStateTest {
         assertTrue(state.isRead)
         assertTrue("空的一天也要能写", state.canEditToday)
         assertEquals(null, state.alert)
+    }
+
+    // ------------------------------------------------------------------ 新建片段的保存链路
+
+    private fun parts(text: String) =
+        listOf(ContentPart(style = ContentPartStyle.body, text = text))
+
+    /** 点「写日记」进编辑态（首页当日面板走的就是这条），并等定位流程收尾。 */
+    private fun openTodayInWrite() {
+        viewModel.open(todayKey(), startInWrite = true)
+        awaitState { !it.isRead && !it.locating && it.loadToken > 0 }
+    }
+
+    @Test
+    fun `saving a new block without a location asks first`() {
+        openTodayInWrite()
+
+        // 夹具环境没有定位权限 → 位置始终是 null（"未获取到位置"那一档）
+        assertEquals("定位拿不到就停在未记录地点", null, viewModel.state.value.location)
+
+        viewModel.save(EditorSavePayload(parts = parts("第一条"), startTimeUtc = System.currentTimeMillis()))
+
+        val state = viewModel.state.value
+        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, state.alert)
+        assertTrue("点过保存 = 有待写入项", state.pendingSave != null)
+        assertTrue("确认之前一个字都不入库", state.blocks.isEmpty())
+
+        // 「仍然保存」—— 这条分支以前从来没走通过：iOS 的 D3 在 Android 侧整个是缺的
+        viewModel.confirmSaveAnyway()
+        scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
+        scheduler.runCurrent()
+
+        val saved = awaitState { it.blocks.size == 1 }
+        assertTrue("保存后回到阅读态（不关页）", saved.isRead)
+        assertNull(saved.alert)
+        assertNull("待写入项用完就清掉", saved.pendingSave)
+        assertEquals("无位置保存：地址列为空", "", saved.blocks[0].locText)
+        assertEquals(LocPrecision.none, saved.blocks[0].locPrecision)
+    }
+
+    @Test
+    fun `cancelling the location confirmation writes nothing`() {
+        openTodayInWrite()
+        viewModel.save(EditorSavePayload(parts = parts("先不写"), startTimeUtc = System.currentTimeMillis()))
+        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, viewModel.state.value.alert)
+
+        viewModel.cancelPendingSave()
+        scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
+        scheduler.runCurrent()
+
+        val state = viewModel.state.value
+        assertNull(state.alert)
+        assertNull("取消 = 这次保存作废", state.pendingSave)
+        assertTrue("取消之后不落库", state.blocks.isEmpty())
+        assertFalse("取消不离开编辑态", state.isRead)
+    }
+
+    @Test
+    fun `saving across the day boundary asks where the block will land`() {
+        openTodayInWrite()
+        val yesterdayKey = yesterdayKey()
+        // 起始时刻取"昨天的换日线之后一小时"：不论跑在一天里的什么时候，它都落在昨天
+        val yesterday = yesterdayNoonMillis()
+        assertEquals("前置条件：起始时刻属于另一天", yesterdayKey, DateUtil.dayKeyForUtc(yesterday, container.settings.load().dayStartHour))
+
+        viewModel.save(EditorSavePayload(parts = parts("熬到后半夜才写完"), startTimeUtc = yesterday))
+        // 先过 D3（无位置），再落到 D4（跨日）
+        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, viewModel.state.value.alert)
+        viewModel.confirmSaveAnyway()
+        scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
+        scheduler.runCurrent()
+
+        val prompting = viewModel.state.value
+        assertEquals(DiaryPageViewModel.DiaryAlert.CrossDay(yesterdayKey), prompting.alert)
+        assertTrue("跨日弹窗期间同样不落库", prompting.blocks.isEmpty())
+
+        // 「保存并退出」：写进的是弹窗里说的那一天
+        viewModel.confirmCrossDay()
+        // 等"落库 + 回到阅读态"都到位：`actualDayKey` 先换、`isRead` 由随后的 reload 复位
+        val saved = awaitState { it.actualDayKey == yesterdayKey && it.isRead }
+        assertNull(saved.alert)
+        runBlocking {
+            val block = container.repository.getBlocks(
+                container.repository.getDiaryByDay(yesterdayKey)!!.id,
+            ).single()
+            assertEquals("跨日保存写的是那一天的日记", "熬到后半夜才写完", ContentFlatten.parseContent(block.contentJson).single().text)
+            // 今天这一天仍然是空的，不能被顺手建出来
+            assertNull(container.repository.getDiaryByDay(todayKey()))
+        }
+    }
+
+    @Test
+    fun `cancelling the cross day confirmation writes nothing`() {
+        openTodayInWrite()
+        val yesterdayKey = yesterdayKey()
+        // 昨天的正午：离两边的换日线都足够远，时区/夏令时都不影响归属
+        val yesterday = yesterdayNoonMillis()
+
+        viewModel.save(EditorSavePayload(parts = parts("还是别存了"), startTimeUtc = yesterday))
+        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, viewModel.state.value.alert)
+        viewModel.confirmSaveAnyway()
+        scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
+        scheduler.runCurrent()
+        assertTrue(viewModel.state.value.alert is DiaryPageViewModel.DiaryAlert.CrossDay)
+
+        viewModel.cancelPendingSave()
+        val state = viewModel.state.value
+        assertNull(state.alert)
+        assertNull(state.pendingSave)
+        runBlocking { assertNull("取消跨日 = 那一天也没多出东西", container.repository.getDiaryByDay(yesterdayKey)) }
+    }
+
+    @Test
+    fun `an existing block is saved in place without the two confirmations`() {
+        seedToday()
+        openToday()
+        viewModel.enterEditBlock(0)
+
+        // 已有片段：既问不着"未获取到位置"，也问不着跨日（时间戳用片段自己的）
+        viewModel.save(
+            EditorSavePayload(
+                parts = parts("改写过的正文"),
+                startTimeUtc = viewModel.state.value.blocks[0].startTimeUtc,
+            ),
+        )
+
+        val state = awaitState {
+            ContentFlatten.parseContent(it.blocks[0].contentJson).firstOrNull()?.text == "改写过的正文"
+        }
+        assertTrue(state.isRead)
+        assertNull(state.alert)
+        assertNull(state.pendingSave)
+        assertEquals("条数不变（是改不是增）", 2, state.blocks.size)
+    }
+
+    @Test
+    fun `an empty new block closes the page instead of asking anything`() {
+        openTodayInWrite()
+
+        viewModel.save(EditorSavePayload(parts = emptyList(), startTimeUtc = System.currentTimeMillis()))
+
+        val state = viewModel.state.value
+        assertNull(state.alert)
+        assertTrue("空内容 = 没写：整页关掉", state.requestDismiss)
+        runBlocking { assertNull(container.repository.getDiaryByDay(todayKey())) }
     }
 
     // ------------------------------------------------------------------ 待办

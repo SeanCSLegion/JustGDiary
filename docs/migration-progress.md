@@ -3190,3 +3190,118 @@ R27 之前记录过"D8：居中空行回车 → 允许换行、新行继承居�
 - 预测性返回（`PredictiveBackHandler`）；
 - 图片插入的编辑态体验（插入后光标定位、图片与文字混排的间距）尚未逐条走查。
 
+
+---
+
+## R29 · 新建片段的完整链路 + 分享面板 + 分享长图复刻 iOS + 三个编辑态细节（2026-09-28，真机 MEIZU 21 / Android 16）
+
+> 规范：[`docs/android-design/04-diary.md`](android-design/04-diary.md) §1 / §3.2 / §3.6b / §4。
+> 上一轮见 **R28**（编辑态）。本轮把 R28 的"仍未做"逐条做掉，并按用户要求
+> **照 iOS 最新版的分享长图重做渲染器**。
+
+### 1. 新建片段的完整链路（R28 只走通了解析那一半）
+
+保存前的**两个确认弹窗**原先整个是缺的（只有 `CrossDay` 的壳，且触发条件不对）：
+
+| # | 触发 | 这一轮之前 | 现在 |
+| --- | --- | --- | --- |
+| D3 | 新建 + `auto_loc` 开 + 无位置 | 弹窗画在 `EditorScreen` 里，条件用"状态不是 Hidden"，**跨日那一步永远走不到**（弹窗点确认时重新从编辑器取内容） | 移进 ViewModel：点保存那一刻**冻结**待写入项（内容 / 起始时刻 / 位置快照），D3 → 延迟 0.3s → D4 → 落库 |
+| D4 | `start_time_utc` 算出的 `day_key` ≠ 今天 | 只在"今天"这一侧判，落库后页面不跟着走 | 同上；确认后页面**切到那一天**的阅读态（`actualDayKey` + `todayKey` 一起刷新） |
+
+顺带修掉两条**只有真机才暴露**的缺陷：
+
+- **`DiaryPageViewModel.refreshSettings()` 是死代码**（没有任何调用点）。它的作用是重算
+  `todayKey`，而 `todayKey` 决定"能不能再写一条"与保存时的跨日判定 —— 不刷新的话，
+  用户在编辑页切后台待一会儿再回来、或改了「新一天的开始时间」，**保存时会少问一次**，
+  内容悄悄落到另一天。
+  现在接了两条触发：设置保存（`SettingsStore.version`）与**每次回到前台**
+  （新增进程级 `AppForeground.tick`，由 `MainActivity.onStart` 自增，对应 iOS 的
+  `scenePhase == .active`）。
+- 保存时**位置整组在点保存那一刻冻结**（文案 / 档位 / 坐标 / 地区）：两个弹窗期间用户
+  还能回去点「显示精度」，那不该改动这一次的写入内容。
+
+真机走查（两条分支都走通，截图在 `docs/ui-audit/r29/`）：
+
+| 分支 | 怎么造出来 | 结果 |
+| --- | --- | --- |
+| 「仍然保存」 | 定位超时（8s）→ 保存 → D3 | 弹窗文案正确；确认后按**无位置**落库、回阅读态、键盘收起（`new-location-confirm.png` / `new-saved-anyway-read.png`） |
+| 「取消」 | 同上，点取消 | 不落库、**留在编辑态**且内容不丢 |
+| 「跨日 → 保存并退出」 | 编辑页开着时把系统时间拨过换日时刻（`dayStartHour=6`，从 05:01 拨到 06:00），回到前台让 `refreshSettings` 重算 | D4 弹出且写明"将保存为 2026-09-26"；确认后内容写进**那一天**、页面跟着切过去（`new-cross-day-saved.png`） |
+
+### 2. 分享面板（规范 §4，R28 时仍是"直接渲染长图 → 系统面板"）
+
+新增 `ui/diary/ShareSheet.kt` + ViewModel 的四个动作（`openSharePanel` / `shareDiary` /
+`dismissSharePanel` / `saveShareToGallery`）：
+
+- **一步弹出**：点顶栏分享 → `ModalBottomSheet`（`skipPartiallyExpanded`）立刻出现，
+  面板里先画进度圈 +「正在生成分享图…」（最小高 220dp），渲染完换成预览；
+- **预览**：文件名 + 真实像素尺寸（`JustDiary-2026-09-27.png · 720 × 1403`）+ 200dp 宽长图，
+  12dp 圆角 + `outlineVariant` 描边；
+- **两个动作**：`分享…`（filled）→ 系统 Sharesheet（`ACTION_SEND` + `FileProvider`）；
+  `保存到相册`（tonal）→ 新增 `service/GallerySaver.kt`，写 `MediaStore`
+  的 `Pictures/JustDiary`（`IS_PENDING` 两段式，写坏要撤回条目）；
+- 渲染失败 / 这一天没有片段 → **关面板 + 一条「分享失败」**；面板关闭时清 `cacheDir/share/`。
+
+**一处只有真机才看得出的坑**：一次性提示（「已保存到相册」）原先放在 `Surface` 里的**底部**，
+而 `ModalBottomSheet` 是独立窗口、盖住整屏 —— 提示**根本不出现**。现在钉在**页面顶部**
+（`SnackbarHost` 与面板同级且排在它后面），真机可见。
+
+### 3. 分享长图**照 iOS 新版复刻**（用户点名要求）
+
+iOS 在 2026-09 把 `ShareRenderer` 整个重做过（旧版是"三个大色球 + 满屏渐变 + 悬空时间轴"）。
+Android 这一轮的旧实现对应的正是 iOS **已弃用**的那一版，于是按新版**重写**：
+
+- `data/ShareLayout.kt`：改成"**排版阶段产出绘制指令 → 绘制阶段只执行指令**"（iOS 同一条结构），
+  因此不会出现"量出来 3 行、画出来 4 行"；常量 / 字号 / 行高 / 配色逐项对齐
+  `ImageShareService.swift:28-125`；
+- `service/ImageShareRenderer.kt`：只执行指令；量宽与基线走 `Paint`（对应 iOS 的
+  `NSString.boundingRect` + Core Text 行盒）；
+- 版面：品牌行（圆点 + 一页时光 + 年份）→ 大日期 58 bold + 星期（基线对齐）→ 起始时间行
+  （**只有时间，没有地点**）→ 品牌色短线 → **每条记录一张卡片**（时间 + 地点在卡上方）→
+  细线 +「一页时光 · JustADiary」+ dayKey 页脚；
+- 配色：品牌蓝 `#2563EB`（深色下 `#7C97FF`）+ 中性底，与 `Theme.seed` 同源；
+- 两种主题各一套（浅色白卡 / 深色 `#1A1F29` 卡）。
+
+`ShareLayoutTest` 按新常量重写（33 条：常量 / 配色 / 纵向结构 / 每种段落的绘制 / 卡片画在
+内容**之前** / `auto_time` 关掉变矮 / 空的一天不画空卡片 / 图片高度三档）。
+
+### 4. 段落样式菜单不再"闪一下键盘"
+
+真机逐条试过三种"另起窗口"的做法，**都躲不掉** Android 的行为（输入法跟的是焦点窗口，
+前台一换窗口系统就收 IME）：
+
+| 做法 | 结果 |
+| --- | --- |
+| M3 `DropdownMenu`（`Popup(focusable = true)`） | 能点，但**抢焦点 → 键盘闪一下**（原先的现状） |
+| `Popup(focusable = false)` | 键盘不动，但**窗口收不到触摸**（菜单项点不动，连"点空白关"的遮罩都会吃掉点击） |
+| `Dialog`（含 `FLAG_NOT_FOCUSABLE` / `FLAG_ALT_FOCUSABLE_IM`） | 能点，但**一显示就把键盘收掉**（`mInputShown` 立刻变 false） |
+
+最终做法：**不新开窗口**，在编辑器自己的组合树上加一层浮层（`ui/components/AnchoredMenu.kt`），
+菜单从格式栏上沿长出来。真机实测：打开前 / 打开后 / 选中后 `mInputShown` **全程 true**，
+`dumpsys input_method` 三处都是 `true`。
+
+菜单状态因此提升到 `EditorScreen`（`styleMenuOpen` / `precisionMenuOpen`），
+地点精度菜单也换成同一个浮层（原先同样是 `DropdownMenu`）。
+
+### 5. 图片插入后的光标
+
+对齐 iOS `RichTextEngine.insertImage`：那边插入的是"附件 + 一个 `\n`"，把 `selectedRange`
+设到附件之后 —— 效果是光标落在**图片下面那一行**。Android 原先只把图片插在光标行之后、
+**光标留在原行**，"插图后接着打字"会打在图片**上面**。现在
+`EditorTextState.insertImage()` 一步做完（插图 + 光标下移一行，没有下一行就补一个空行），
+`EditorStateTest` 两条钉住。
+
+### 测试
+
+- **JVM 单测 480 条全绿**（R28 是 464，本轮 **+16**：新建片段的保存链路 6 · 分享面板 3 ·
+  插图光标 2 · 分享版式重写净 +5）；
+- 真机实测：新建片段两条确认分支 · 分享面板（进度→预览→分享→保存到相册→提示）·
+  分享长图浅色渲染 · 段落样式菜单全程不收键盘 · 插图后光标在下。
+
+### 仍未做（下一轮）
+
+- **预测性返回**：本轮做完了（`PredictiveBackHandler` + `enableOnBackInvokedCallback` +
+  跟手位移/淡出），但**用户明确说不做**，已整段回退 —— 不要重做；
+- 分享长图的**深色**版本只在单测里覆盖，真机没走查（切到深色主题再分享一次即可）；
+- 分享面板在**平板 / 横屏**下的预览宽度（`SharePanelLayout.previewWidthDp`）没有真机验证；
+- 图片插入后**在图片行中间点一下**（光标落在图片行内）时 `ImageSpan` 的 caret 位置未走查。

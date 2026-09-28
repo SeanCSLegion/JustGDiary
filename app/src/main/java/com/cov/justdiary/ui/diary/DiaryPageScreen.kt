@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -17,16 +19,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cov.justdiary.JustDiaryApplication
+import com.cov.justdiary.app.AppForeground
 import com.cov.justdiary.R
 import com.cov.justdiary.data.DiaryProgress
+import com.cov.justdiary.data.ShareLayout
 import com.cov.justdiary.data.DiaryTopBarState
 import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.service.DateFormats
@@ -59,6 +65,14 @@ fun DiaryPageScreen(
      * 只有当天可写时才生效（[DiaryPageViewModel.enterWrite] 自己会再判一次）。
      */
     startInWrite: Boolean = false,
+    /**
+     * 设置版本号（设置页保存一次 +1）。
+     *
+     * 本页要跟着刷新的是**"今天"**：`dayStartHour` 改了之后，"今天"可能变成另一天，
+     * 而本页的 `todayKey` 是在 [DiaryPageViewModel.open] 时算好并一直存着的 ——
+     * 不刷新的话，用户改完换日时刻回来，保存时的跨日判定用的是**旧规则**（少一次确认）。
+     */
+    settingsVersion: Int = 0,
 ) {
     val context = LocalContext.current
     val container = remember(context) {
@@ -74,6 +88,24 @@ fun DiaryPageScreen(
     var editorDirty by remember { mutableStateOf(false) }
 
     LaunchedEffect(dayKey) { viewModel.open(dayKey, startInWrite) }
+    // 设置变过（尤其是"新一天的开始时间"）：重算 todayKey 与位置/时间等显示设置。
+    // 编辑态与待确认的保存**一律不动** —— 只换设置，不碰内容。
+    // 首帧跳过：那时 `open()` 还没跑，refreshSettings 会先按默认设置算一次 todayKey。
+    val lastSettingsVersion = remember { mutableIntStateOf(settingsVersion) }
+    LaunchedEffect(settingsVersion) {
+        if (settingsVersion == lastSettingsVersion.intValue) return@LaunchedEffect
+        lastSettingsVersion.intValue = settingsVersion
+        viewModel.refreshSettings()
+    }
+    // 回到前台同样要重算：在编辑页切出去待一会儿再回来，"今天"可能已经是另一天了
+    // （iOS 的 `scenePhase == .active` 分支；这也是保存时跨日确认能问对问题的前提）。
+    val foregroundTick by AppForeground.tick.collectAsState()
+    val lastForegroundTick = remember { mutableIntStateOf(foregroundTick) }
+    LaunchedEffect(foregroundTick) {
+        if (foregroundTick == lastForegroundTick.intValue) return@LaunchedEffect
+        lastForegroundTick.intValue = foregroundTick
+        viewModel.refreshSettings()
+    }
     LaunchedEffect(state.requestDismiss) {
         if (state.requestDismiss) {
             viewModel.consumeDismiss()
@@ -81,16 +113,32 @@ fun DiaryPageScreen(
             onClose()
         }
     }
-    // 分享图渲染完成后交给系统分享面板（标题先在这里取好：LaunchedEffect 里不是 composable 作用域）
+    // 分享面板里的「分享…」：交给系统 Sharesheet。
+    // 这里**不再**用 `LaunchedEffect(state.shareImageFile)` 自动弹 —— 面板要先把预览画出来，
+    // 由用户点「分享…」才走系统面板（规范 §4.2；iOS 是内嵌 UIActivityViewController，
+    // Android 的系统面板是独立 UI，只能按钮触发）。
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
-    LaunchedEffect(state.shareImageFile) {
-        val file = state.shareImageFile ?: return@LaunchedEffect
-        runCatching {
-            context.startActivity(
-                ShareIntents.shareImage(context, file, shareChooserTitle),
-            )
+    val shareNow2: () -> Unit = {
+        state.shareImageFile?.let { file ->
+            runCatching {
+                context.startActivity(ShareIntents.shareImage(context, file, shareChooserTitle))
+            }
         }
-        viewModel.consumeShareImage()
+    }
+
+    // 一次性提示（保存到相册的结果）→ Snackbar。
+    val snackbarHostState = remember { SnackbarHostState() }
+    val savedMessage = stringResource(R.string.share_saved)
+    val saveFailedMessage = stringResource(R.string.share_save_failed)
+    LaunchedEffect(state.message) {
+        val message = state.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            when (message) {
+                DiaryPageViewModel.DiaryMessage.SavedToGallery -> savedMessage
+                DiaryPageViewModel.DiaryMessage.SaveToGalleryFailed -> saveFailedMessage
+            },
+        )
+        viewModel.consumeMessage()
     }
 
     androidx.activity.compose.BackHandler {
@@ -109,25 +157,44 @@ fun DiaryPageScreen(
     }
     // 分享图的深浅色跟随"当下界面"的取色规则（与 iOS 的 `UITraitCollection` 一致）
     val darkTheme = isDarkTheme(state.settings.themeMode)
-    // 「分享」：渲染这一天的长图（由 `LaunchedEffect(state.shareImageFile)` 交给系统面板）。
-    // 分享面板（预览 + 保存到相册）是规范 §4 的另一块，不在阅读态这一轮。
+    // 「分享」：**一步**弹面板（规范 §4.1）。面板先画进度圈，渲染完成换成预览
+    // （iOS `DiaryViewModel.shareDiary()` 同一条链：先拉起面板 → 后台渲染 → 预览替换进度）。
+    //
+    // 分享图里的文案全部在这里用 `DateFormats` 备好（跟随语言 / 12-24 小时制 / `auto_time`）：
+    // 品牌行与页脚的「一页时光」是应用名，与 iOS 的 `EntryAbility_label` 同一个来源。
+    val appLabel = stringResource(R.string.app_name)
+    val shareTextsFor: (String) -> ShareLayout.ShareTexts = { dayKey ->
+        val date = com.cov.justdiary.model.DateUtil.parseDayKey(dayKey) ?: java.time.LocalDate.now()
+        val firstTime = state.blocks.firstOrNull()?.startTimeUtc ?: 0L
+        ShareLayout.ShareTexts(
+            brand = appLabel,
+            year = formats.year(date.year),
+            date = formats.dateOnly(date),
+            weekday = formats.weekdayShort(date),
+            // 头部第二行**只有时间**（`read_start_time`）：地点在第一条记录的时间行里
+            startLine = if (firstTime > 0) {
+                formats.startTimeOnly(formats.timeOf(java.time.Instant.ofEpochMilli(firstTime)))
+            } else {
+                null
+            },
+            footerBrand = "$appLabel · JustADiary",
+            dayKey = dayKey,
+        )
+    }
     val shareNow: (DiaryPageViewModel.State) -> Unit = { current ->
+        viewModel.openSharePanel()
         viewModel.shareDiary(
             isDark = darkTheme,
-            dateText = formats.dayTitle(
-                com.cov.justdiary.model.DateUtil.parseDayKey(current.actualDayKey)
-                    ?: java.time.LocalDate.now(),
-            ),
-            startLine = formats.blockStartLine(
-                showTime = current.settings.autoTime,
-                time = formats.timeOf(java.time.Instant.ofEpochMilli(current.startTimeUtc)),
-                locText = current.locationText,
-            ),
+            showTime = current.settings.autoTime,
+            textsFor = shareTextsFor,
+            timeLabel = { epoch -> formats.timeOf(java.time.Instant.ofEpochMilli(epoch)) },
         )
     }
 
-    Surface(
-        modifier = modifier.fillMaxSize(),
+    // 外层 Box 只为一件事：把一次性提示（Snackbar）与分享面板叠在页面之上。
+    Box(modifier = modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
         // 全屏路由没有外层 Scaffold，系统栏避让要自己做（对应 iOS 的 safeArea）
@@ -267,6 +334,30 @@ fun DiaryPageScreen(
         }
     }
 
+    // 一次性提示（保存到相册成功/失败）。
+    //
+    // **钉在顶部**，不是底部：分享面板是 M3 `ModalBottomSheet`，它自带一个**独立窗口**
+    // 盖住整屏 —— 底部的 Snackbar 会被那个窗口整个遮住（真机实测：提示根本不出现）。
+    // 顶部这一段在面板占位之上（面板最高到 `skipPartiallyExpanded` 的顶部留白），
+    // 因此"已保存到相册"能真的被看见。
+    SnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(top = DiaryTopBarHeight),
+    )
+
+    // 分享面板（规范 §4）：预览 + 「分享…」+「保存到相册」。关闭时清掉临时分享图。
+    ShareSheet(
+        visible = state.sharePanelVisible,
+        rendering = state.sharing,
+        imageFile = state.shareImageFile,
+        onDismiss = viewModel::dismissSharePanel,
+        onShare = shareNow2,
+        onSaveToGallery = viewModel::saveShareToGallery,
+    )
+
     state.alert?.let { alert ->
         DiaryAlertDialog(
             alert = alert,
@@ -278,6 +369,7 @@ fun DiaryPageScreen(
                 onClose()
             },
         )
+    }
     }
 }
 
@@ -360,6 +452,13 @@ private fun DiaryAlertDialog(
             onConfirm = viewModel::confirmCrossDay
         }
 
+        DiaryPageViewModel.DiaryAlert.LocationMissing -> {
+            title = LOCATION_MISSING_TITLE
+            message = LOCATION_MISSING_MESSAGE
+            confirmLabel = SAVE_ANYWAY_LABEL
+            onConfirm = viewModel::confirmSaveAnyway
+        }
+
         DiaryPageViewModel.DiaryAlert.SaveFailed -> {
             title = SAVE_FAILED_TITLE
             message = SAVE_FAILED_MESSAGE
@@ -383,8 +482,14 @@ private fun DiaryAlertDialog(
         }
     }
 
+    // 「取消」对两个确认弹窗（未获取到位置 / 跨日）意味着**放弃这次保存**：
+    // 只清 alert 不够，待写入项也得一起丢掉，否则下次点保存会拿旧内容重来。
+    val alertIsSaveConfirm = alert is DiaryPageViewModel.DiaryAlert.CrossDay ||
+        alert is DiaryPageViewModel.DiaryAlert.LocationMissing
+    val cancel: () -> Unit = if (alertIsSaveConfirm) viewModel::cancelPendingSave else viewModel::consumeAlert
+
     AlertDialog(
-        onDismissRequest = viewModel::consumeAlert,
+        onDismissRequest = cancel,
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = {
@@ -395,13 +500,16 @@ private fun DiaryAlertDialog(
             }
         },
         dismissButton = if (confirmLabel != null) {
-            { TextButton(onClick = viewModel::consumeAlert) { Text(CANCEL_LABEL) } }
+            { TextButton(onClick = cancel) { Text(CANCEL_LABEL) } }
         } else {
             null
         },
     )
 }
 
+
+/** 顶栏高度（一次性提示要落在它下面）。与 `DiaryTopBar` 的 64dp 一致。 */
+private val DiaryTopBarHeight = 64.dp
 
 private val OK_LABEL: String
     @Composable get() = stringResource(R.string.ok)
@@ -413,6 +521,12 @@ private val DELETE_LABEL: String
     @Composable get() = stringResource(R.string.delete)
 private val SAVE_EXIT_LABEL: String
     @Composable get() = stringResource(R.string.editor_save_exit)
+private val LOCATION_MISSING_TITLE: String
+    @Composable get() = stringResource(R.string.editor_location_retry)
+private val LOCATION_MISSING_MESSAGE: String
+    @Composable get() = stringResource(R.string.editor_location_missing_msg)
+private val SAVE_ANYWAY_LABEL: String
+    @Composable get() = stringResource(R.string.editor_save_anyway)
 
 private val HISTORY_NO_ADD_TITLE: String
     @Composable get() = stringResource(R.string.editor_history_no_add_title)

@@ -190,6 +190,14 @@
     <string name="a11y_back">返回</string>
     <string name="a11y_share">分享</string>
     <string name="a11y_insert_image">插入图片</string>
+    <string name="share_sheet_title">分享长图</string>
+    <string name="share_rendering">正在生成分享图…</string>
+    <string name="share_action_share">分享…</string>
+    <string name="share_action_save">保存到相册</string>
+    <string name="share_saved">已保存到相册</string>
+    <string name="share_save_failed">保存失败，请稍后重试。</string>
+    <string name="share_preview_desc">分享预览</string>
+    <string name="share_sheet_meta">%1$s · %2$d × %3$d</string>
     <string name="delete">删除</string>
     <string name="discard">放弃</string>
     <string name="editor_save_exit">保存并退出</string>

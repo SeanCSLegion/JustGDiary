@@ -18,12 +18,14 @@ import com.cov.justdiary.service.LocationFix
 import com.cov.justdiary.service.LocationResolver
 import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.service.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -80,10 +82,22 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         val scrollTargetBlockId: Long? = null,
         /** 分享图生成完成后交给宿主的文件。 */
         val shareImageFile: File? = null,
+        /** 分享面板是否开着（规范 §4：点分享**一步**弹面板，渲染在面板里进行）。 */
+        val sharePanelVisible: Boolean = false,
+        /** 分享图正在渲染（面板里显示进度圈 + 「正在生成分享图…」）。 */
+        val sharing: Boolean = false,
+        /** 一次性提示（成功类；失败类走 [alert]）。由界面消费成 Snackbar。 */
+        val message: DiaryMessage? = null,
         /** "今天"的 day_key（受 `dayStartHour` 影响）—— 决定能否新建片段。 */
         val todayKey: String = "",
-        /** 跨日确认时暂存待写入的内容（`json` + 起始时刻）。 */
-        val pendingSave: Pair<String, Long>? = null,
+        /**
+         * 已经点过保存、正在等确认弹窗（未获取到位置 / 跨日）。**没有**它就等于没点过保存。
+         *
+         * 两个确认弹窗之间要交代的东西（内容 / 起始时刻 / 位置快照）全在这里，
+         * 因此「仍然保存」之后不需要编辑器再回投一次内容 —— 它背后还活着，
+         * 这期间用户改的任何一个字都不该悄悄进入这一次写入。
+         */
+        val pendingSave: PendingNewBlock? = null,
     ) {
         val canEditToday: Boolean get() = actualDayKey.isNotEmpty() && actualDayKey == todayKey
 
@@ -99,6 +113,32 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
                 val snapshot = location ?: return emptyList()
                 return LocationRules.precisionOptions(snapshot)
             }
+    }
+
+    /**
+     * 一次待确认的新建片段（点过保存、还没落库）。
+     *
+     * 内容与时间在**点保存的那一刻**冻结：两个确认弹窗期间编辑器仍然在背后活着，
+     * 用户还能改精度、甚至重新定位 —— 那些都不该悄悄改动这一次的写入内容（iOS 同此）。
+     */
+    data class PendingNewBlock(
+        val contentJson: String,
+        val startTimeUtc: Long,
+        /** 保存那一刻的位置文案（未取到位置时为空串）。 */
+        val locText: String,
+        val locPrecision: String,
+        val latitude: Double = 0.0,
+        val longitude: Double = 0.0,
+        val region: LocRegion = EMPTY_REGION,
+    )
+
+    /** 一次性提示（成功类；文案由界面层解析）。 */
+    sealed interface DiaryMessage {
+        /** 「已保存到相册」（`share_saved`）。 */
+        data object SavedToGallery : DiaryMessage
+
+        /** 「保存失败」（`share_save_failed`）。 */
+        data object SaveToGalleryFailed : DiaryMessage
     }
 
     /** 一次性的结果提示（文案由界面层解析，保持 ViewModel 与资源解耦）。 */
@@ -117,6 +157,15 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
         /** 跨日保存（`editor_cross_day_*`）。 */
         data class CrossDay(val dayKey: String) : DiaryAlert
+
+        /**
+         * 新建片段、`auto_loc` 开着却还没拿到位置（`editor_location_retry`：
+         * 标题「未获取到位置」· 确认「仍然保存」）。
+         *
+         * 保存之后这个片段**再也补不上位置**（`LocationRules.canAddLocationAfterSave`），
+         * 所以要先问一句 —— 与 iOS D3 同一处、同一组文案。
+         */
+        data object LocationMissing : DiaryAlert
 
         data object SaveFailed : DiaryAlert
 
@@ -145,6 +194,9 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     val state: StateFlow<State> = _state.asStateFlow()
 
     private var searchJob: Job? = null
+
+    /** 关闭分享面板后清缓存的作业（下一次分享前不必等它）。 */
+    private var shareCleanupJob: Job? = null
 
     /** 打开某一天。`dayKey` 为空表示"今天"。 */
     /**
@@ -182,7 +234,6 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             todayKey = DateUtil.dayKeyForUtc(System.currentTimeMillis(), settings.dayStartHour),
         )
     }
-
     /**
      * 重新从库里读这一天（从别处返回、或收到"数据变过"的通知时）。
      *
@@ -409,69 +460,106 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
 
-        val dayKey = DateUtil.dayKeyForUtc(payload.startTimeUtc, current.settings.dayStartHour)
-        if (dayKey != current.todayKey) {
-            // 跨日：提醒用户这笔内容会落在哪一天（与 iOS 一致）
-            _state.value = current.copy(
-                alert = DiaryAlert.CrossDay(dayKey),
-                pendingSave = contentJson to payload.startTimeUtc,
-            )
+        // ---- 新建片段：D3「未获取到位置」→ D4「跨日」→ 落库（iOS `saveEditor` 同一顺序）----
+        // 位置整组在**这一刻**冻结（文案 / 档位 / 坐标 / 地区）：两个弹窗期间用户还能
+        // 回去点「显示精度」，那不该改动这一次的写入内容。
+        val snapshot = current.location
+        val pending = PendingNewBlock(
+            contentJson = contentJson,
+            startTimeUtc = payload.startTimeUtc,
+            locText = snapshot?.locText.orEmpty(),
+            locPrecision = snapshot?.locPrecision ?: LocPrecision.none,
+            latitude = snapshot?.latitude ?: 0.0,
+            longitude = snapshot?.longitude ?: 0.0,
+            region = snapshot?.region ?: EMPTY_REGION,
+        )
+        // 已经点过保存、弹窗还开着时再点一次：用**新内容**刷新待写入项，不叠加弹窗。
+        _state.value = current.copy(pendingSave = pending)
+        if (current.location == null && current.settings.autoLoc) {
+            _state.value = _state.value.copy(alert = DiaryAlert.LocationMissing)
             return
         }
-        insertBlock(dayKey, payload.startTimeUtc, contentJson)
+        promptCrossDayOrInsert()
+    }
+
+    /**
+     * 「未获取到位置」的确认（D3）：**仍然保存**。
+     *
+     * 之后**延迟 0.3 秒**再走跨日判定 —— iOS `DiaryViewModel.swift:251-264` 就是
+     * `Task.sleep(0.3)`：两个弹窗会前后脚弹出，不留这点时间前一个还没收干净。
+     */
+    fun confirmSaveAnyway() {
+        if (_state.value.alert !is DiaryAlert.LocationMissing) return
+        _state.value = _state.value.copy(alert = null)
+        viewModelScope.launch {
+            delay(CROSS_DAY_PROMPT_DELAY_MS)
+            promptCrossDayOrInsert()
+        }
+    }
+
+    /** 取消这次保存（两个确认弹窗共用的"取消"）。 */
+    fun cancelPendingSave() {
+        _state.value = _state.value.copy(alert = null, pendingSave = null)
     }
 
     /** 跨日确认后继续（内容来自 [State.pendingSave]）。 */
     fun confirmCrossDay() {
         val alert = _state.value.alert as? DiaryAlert.CrossDay ?: return
-        val pending = _state.value.pendingSave
-        _state.value = _state.value.copy(alert = null, pendingSave = null)
-        if (pending == null) return
-        insertBlock(alert.dayKey, pending.second, pending.first)
+        val pending = _state.value.pendingSave ?: return
+        insertBlock(alert.dayKey, pending)
+    }
+
+    /**
+     * 跨日弹窗的判定（D4）：内容会落到**哪一天**由 `start_time_utc` + `dayStartHour` 算，
+     * 与"今天"不是同一天就先问一句（iOS `finishNewBlockSave`）。
+     */
+    private fun promptCrossDayOrInsert() {
+        val current = _state.value
+        val pending = current.pendingSave ?: return
+        val dayKey = DateUtil.dayKeyForUtc(pending.startTimeUtc, current.settings.dayStartHour)
+        if (dayKey != current.todayKey) {
+            _state.value = current.copy(alert = DiaryAlert.CrossDay(dayKey))
+            return
+        }
+        insertBlock(dayKey, pending)
     }
 
     /**
      * 真正写库。
      *
      * 已有日记 → `addBlockToDiary`；没有则 `addBlock`（它会顺带建"这一天"、写
-     * `diary_flag` 并重算检索文本）。位置列只在**新建**时写入，与 iOS 的
-     * `saveByDayKey` 一致。
+     * `diary_flag` 并重算检索文本）。位置取的是**点保存那一刻**冻结的快照，
+     * 与 iOS 的 `saveByDayKey` 一致。
      */
-    private fun insertBlock(dayKey: String, startTimeUtc: Long, contentJson: String) {
+    private fun insertBlock(dayKey: String, pending: PendingNewBlock) {
         val current = _state.value
-        val snapshot = current.location
-        val region = snapshot?.region ?: LocRegion(
-            country = "",
-            countryCode = "",
-            region1 = "",
-            region2 = "",
-            region3 = "",
-            locQuality = LocQuality.none,
-        )
+        val dayStartHour = current.settings.dayStartHour
+        // 弹窗一确认，待写入项就作数了：留着它的话，保存失败再点一次会拿旧内容重来
+        _state.value = _state.value.copy(alert = null, pendingSave = null)
         viewModelScope.launch {
             runCatching {
                 val existing = container.repository.getDiaryByDay(dayKey)
                 if (existing != null) {
                     container.repository.addBlockToDiary(
                         diaryId = existing.id,
-                        startTimeUtc = startTimeUtc,
-                        locText = snapshot?.locText.orEmpty(),
-                        latitude = snapshot?.latitude ?: 0.0,
-                        longitude = snapshot?.longitude ?: 0.0,
-                        locPrecision = snapshot?.locPrecision ?: LocPrecision.none,
-                        region = region,
-                        contentJson = contentJson,
+                        startTimeUtc = pending.startTimeUtc,
+                        locText = pending.locText,
+                        latitude = pending.latitude,
+                        longitude = pending.longitude,
+                        locPrecision = pending.locPrecision,
+                        region = pending.region,
+                        contentJson = pending.contentJson,
                     )
                 } else {
                     container.repository.addBlock(
-                        startTimeUtc = startTimeUtc,
-                        locText = snapshot?.locText.orEmpty(),
-                        latitude = snapshot?.latitude ?: 0.0,
-                        longitude = snapshot?.longitude ?: 0.0,
-                        locPrecision = snapshot?.locPrecision ?: LocPrecision.none,
-                        region = region,
-                        contentJson = contentJson,
-                        dayStartHour = current.settings.dayStartHour,
+                        startTimeUtc = pending.startTimeUtc,
+                        locText = pending.locText,
+                        latitude = pending.latitude,
+                        longitude = pending.longitude,
+                        locPrecision = pending.locPrecision,
+                        region = pending.region,
+                        contentJson = pending.contentJson,
+                        dayStartHour = dayStartHour,
                     )
                 }
             }.onFailure {
@@ -479,7 +567,12 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
                 _state.value = _state.value.copy(alert = DiaryAlert.SaveFailed)
                 return@launch
             }
-            _state.value = _state.value.copy(actualDayKey = dayKey)
+            // 落到了别的 day_key（跨日）：页面要跟着去看那一天，否则用户眼前还是原来那一天，
+            // 而刚写的内容在别处。`todayKey` 也跟着刷新，"能不能再写一条"以当下为准。
+            _state.value = _state.value.copy(
+                actualDayKey = dayKey,
+                todayKey = DateUtil.dayKeyForUtc(System.currentTimeMillis(), dayStartHour),
+            )
             reload()
         }
     }
@@ -612,8 +705,48 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
     // ------------------------------------------------------------------ 分享
 
-    /** 生成分享长图（IO 上渲染），完成后由宿主分享。 */
-    fun shareDiary(isDark: Boolean, dateText: String, startLine: String) {
+    /**
+     * 点顶栏「分享」：**一步**弹出分享面板，渲染在面板里进行（规范 §4.1）。
+     *
+     * iOS 的做法是"先拉起面板（立刻有反馈）→ 后台渲染 → 预览替换进度圈"
+     * （`DiaryViewModel.swift:584-593`）。因此这里只把面板打开并置 `rendering`，
+     * 渲染在 [shareDiary] 里继续。面板已开时重复点击直接返回（不重渲染，预览不会闪回进度圈）。
+     */
+    fun openSharePanel() {
+        if (_state.value.sharePanelVisible) return
+        _state.value = _state.value.copy(
+            sharePanelVisible = true,
+            shareImageFile = null,
+            sharing = true,
+        )
+    }
+
+    /** 关面板：顺手清掉上一次的分享图（规范 §4.2）。 */
+    fun dismissSharePanel() {
+        _state.value = _state.value.copy(sharePanelVisible = false, sharing = false, shareImageFile = null)
+        shareCleanupJob?.cancel()
+        shareCleanupJob = viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.imageShareRenderer.clearShareDir() }
+        }
+    }
+
+    /**
+     * 生成分享长图（IO 上渲染）。
+     *
+     * - 渲染中：面板里是进度圈（`sharing = true`）；
+     * - 渲染就位：`shareImageFile` 有值，预览出现、两个动作可用；
+     * - 渲染失败 / 这一天没有片段：**关面板** + 一条「分享失败」（规范 §4.1 最后一步）。
+     *
+     * 文案（日期 / 星期 / 品牌 / 起始行）由宿主用 `DateFormats` 备好 —— 这一层不碰资源，
+     * 与其它"文案由界面层解析"的约定一致。`showTime` 就是 `auto_time`：
+     * 关掉时头部起始行与每条记录的时间都不画（iOS `render(showTime:)` 同一语义）。
+     */
+    fun shareDiary(
+        isDark: Boolean,
+        showTime: Boolean,
+        textsFor: (dayKey: String) -> com.cov.justdiary.data.ShareLayout.ShareTexts,
+        timeLabel: (Long) -> String,
+    ) {
         val dayKey = _state.value.actualDayKey
         val blocks = _state.value.blocks.map { block ->
             com.cov.justdiary.data.ShareLayout.ShareBlock(
@@ -623,25 +756,63 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         if (blocks.isEmpty()) {
-            _state.value = _state.value.copy(alert = DiaryAlert.ShareFailed)
+            // 空的一天：iOS 只画品牌页眉 + 页脚；这边的渲染器要求至少一个片段，
+            // 因此按"分享失败"处理并在界面上说清楚（不是静默什么都不发生）
+            _state.value = _state.value.copy(
+                sharePanelVisible = false,
+                sharing = false,
+                alert = DiaryAlert.ShareFailed,
+            )
             return
         }
         viewModelScope.launch {
-            val file = runCatching {
-                container.imageShareRenderer.renderToFile(
-                    dayKey = dayKey,
-                    dateText = dateText,
-                    startLine = startLine,
-                    blocks = blocks,
-                    isDark = isDark,
-                )
-            }.onFailure { Log.backup.e("渲染分享图失败：${it.message}") }.getOrNull()
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    container.imageShareRenderer.renderToFile(
+                        dayKey = dayKey,
+                        texts = textsFor(dayKey),
+                        blocks = blocks,
+                        isDark = isDark,
+                        showTime = showTime,
+                        timeLabel = timeLabel,
+                    )
+                }.onFailure { Log.backup.e("渲染分享图失败：${it.message}") }.getOrNull()
+            }
             _state.value = _state.value.copy(
+                sharing = false,
                 shareImageFile = file,
+                // 渲染失败：关面板 + 一条提示（iOS D8 同此）
+                sharePanelVisible = if (file == null) false else _state.value.sharePanelVisible,
                 alert = if (file == null) DiaryAlert.ShareFailed else _state.value.alert,
             )
         }
     }
+
+    /**
+     * 把当前分享图写进相册（`Pictures/JustDiary`）。
+     *
+     * 成功后给一条「已保存到相册」的一次性消息（[State.message]）。
+     */
+    fun saveShareToGallery() {
+        val file = _state.value.shareImageFile ?: return
+        val name = file.name
+        viewModelScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                runCatching { com.cov.justdiary.service.GallerySaver.saveToGallery(context(), file, name) }
+                    .onFailure { Log.backup.e("保存到相册失败：${it.message}") }
+                    .getOrNull()
+            }
+            _state.value = _state.value.copy(
+                message = if (uri != null) DiaryMessage.SavedToGallery else DiaryMessage.SaveToGalleryFailed,
+            )
+        }
+    }
+
+    fun consumeMessage() {
+        _state.value = _state.value.copy(message = null)
+    }
+
+    private fun context(): android.content.Context = container.appContext
 
     // ------------------------------------------------------------------ 图片
 
@@ -675,6 +846,19 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     companion object {
         /** 页内搜索的防抖（iOS 为 150ms）。 */
         const val SEARCH_DEBOUNCE_MS = 150L
+
+        /** 「仍然保存」→ 跨日弹窗之间的停顿（iOS 是 `Task.sleep(0.3)`）。 */
+        const val CROSS_DAY_PROMPT_DELAY_MS = 300L
+
+        /** 没有位置时写库的空地区（与 `LocQuality.none` 一起表达"无位置"）。 */
+        private val EMPTY_REGION = LocRegion(
+            country = "",
+            countryCode = "",
+            region1 = "",
+            region2 = "",
+            region3 = "",
+            locQuality = LocQuality.none,
+        )
 
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer { DiaryPageViewModel(container) }

@@ -87,6 +87,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // "回到前台"信号：日记页据此重算 todayKey / 重读设置（iOS 的 didBecomeActive 分支）。
+        // 这一条也是**跨日保存**能问对问题的前提：在编辑页切出去待一会儿再回来时，
+        // "今天"可能已经是另一天了（用户在系统里改时区、或正好跨过换日时刻）。
+        AppForeground.onStart()
         lifecycleScope.launch {
             runCatching { settingsViewModel.onForeground() }
                 .onFailure { Log.app.w("回前台重排提醒失败：${it.message}") }

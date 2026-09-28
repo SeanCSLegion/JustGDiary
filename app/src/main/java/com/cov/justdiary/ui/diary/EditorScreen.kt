@@ -25,13 +25,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -59,6 +55,9 @@ import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
+import com.cov.justdiary.ui.components.AnchoredMenu
+import com.cov.justdiary.ui.components.AnchoredMenuItem
+import com.cov.justdiary.ui.components.MenuDefaults
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
@@ -140,7 +139,6 @@ fun EditorScreen(
         onDirtyChange(dirty)
     }
 
-    var showLocationConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -154,15 +152,13 @@ fun EditorScreen(
             scope.launch {
                 // 调用方用 MediaStore 把图片导入应用目录（最长边 2048 / JPEG 85）
                 val imported = onImportImage(uri) ?: return@launch
-                state.apply { lines ->
-                    EditorModel.insertImageLine(
-                        lines,
-                        index = state.selection.lineIndex,
-                        src = imported.src,
-                        width = imported.width,
-                        height = imported.height,
-                    )
-                }
+                // 插图 + **把光标移到图片下面那一行**（iOS `insertImage` 同一行为）：
+                // 否则插图之后接着打字会打在图片上面。
+                state.insertImage(
+                    src = imported.src,
+                    width = imported.width,
+                    height = imported.height,
+                )
             }
         }
     }
@@ -172,20 +168,10 @@ fun EditorScreen(
         actions.onInsertImage = {
             pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
-        actions.onSave = {
-            if (
-                LocationRules.needsSaveConfirmation(
-                    isNewBlock = isNewBlock,
-                    autoLoc = locationState !is LocationRules.EditorLocationState.Hidden,
-                    hasLocation = locationState is LocationRules.EditorLocationState.Recorded,
-                )
-            ) {
-                // 新建片段 + auto_loc 开 + 还没有位置：先问一句（保存后不能再补）
-                showLocationConfirm = true
-            } else {
-                onSave(buildPayload(state.lines, locationState, startTimeUtc))
-            }
-        }
+        // 「保存时还没有位置」的二次确认（规范 §3.6 D3）在 **ViewModel** 里做，
+        // 不在这一层：它后面还紧跟着跨日确认（D4），两个弹窗共用同一个待写入项，
+        // 分在两处会出现"弹窗点确认时编辑器内容已经变了"这种不一致。
+        actions.onSave = { onSave(buildPayload(state.lines, startTimeUtc)) }
         actions.onDismissKeyboard = { dismissKeyboard(context, editText, focusManager) }
     }
 
@@ -197,10 +183,14 @@ fun EditorScreen(
     val columnWidth: Dp = LocalAdaptiveLayout.current
         .contentColumn(EditorLayout.CONTENT_MAX_WIDTH).dp
 
+    // 段落样式菜单与地点精度菜单都画在**这个 Box 的最上层**（同一个窗口 → 不收键盘）。
+    // 两者共用一条"格式栏上沿"的对齐：菜单从格式栏上边长出来。
+    var styleMenuOpen by remember { mutableStateOf(false) }
+    var precisionMenuOpen by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier.fillMaxSize().padding(contentPadding)) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(contentPadding),
+        modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // 编辑卡占满剩余高度（weight 挂在有界高度的外层 Column 上），格式栏钉在底部：
@@ -225,7 +215,7 @@ fun EditorScreen(
                         state = locationState,
                         isNewBlock = isNewBlock,
                         onRequestLocation = onRequestLocation,
-                        onPrecisionChange = onPrecisionChange,
+                        onPrecisionClick = { precisionMenuOpen = true },
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     EditorTextArea(
@@ -263,7 +253,10 @@ fun EditorScreen(
                 isCentered = currentLine.align == EditorModel.ALIGN_CENTER,
                 // IME 组合期间禁用整栏（[FormatGate]：组合区里改 span 会被输入法覆盖）
                 enabled = !state.composing,
+                styleMenuOpen = styleMenuOpen,
+                onStyleMenuChange = { styleMenuOpen = it },
                 onBlockStyle = { style ->
+                    styleMenuOpen = false
                     state.apply { EditorModel.setBlockStyle(it, state.lineRange, style.partStyle) }
                 },
                 onToggleCenter = {
@@ -305,24 +298,51 @@ fun EditorScreen(
         Spacer(modifier = Modifier.height(8.dp))
     }
 
-    // 保存时还没有位置的二次确认（规范 §3.6 D3）
-    if (showLocationConfirm) {
-        AlertDialog(
-            onDismissRequest = { showLocationConfirm = false },
-            title = { Text(LOCATION_TITLE) },
-            text = { Text(LOCATION_MESSAGE) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showLocationConfirm = false
-                    onSave(buildPayload(state.lines, locationState, startTimeUtc))
-                }) { Text(SAVE_ANYWAY_LABEL) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLocationConfirm = false }) { Text(CANCEL_LABEL) }
-            },
-        )
+        // ---- 浮层：两个菜单都画在这里（同一个窗口 → 打开菜单不收键盘）----------------
+        //
+        // 对齐到「格式栏上沿」：格式栏高 56 + 与它的间距 8 + 内容底边距 8 = 72dp。
+        // 两者共用同一条对齐，因此段落样式菜单与精度菜单出现在**同一个位置**，
+        // 与 iOS 的 `Menu` 一样是"从格式栏长出来的"。
+        AnchoredMenu(
+            expanded = styleMenuOpen,
+            onDismiss = { styleMenuOpen = false },
+            alignment = Alignment.BottomStart,
+            modifier = Modifier.padding(start = 8.dp, bottom = MenuBarOffset),
+        ) {
+            ParagraphStyleMenu(
+                activeBlock = EditorBlockStyle.fromPartStyle(currentLine.blockStyle),
+                onSelect = { style ->
+                    styleMenuOpen = false
+                    state.apply { EditorModel.setBlockStyle(it, state.lineRange, style.partStyle) }
+                },
+            )
+        }
+        AnchoredMenu(
+            expanded = precisionMenuOpen,
+            onDismiss = { precisionMenuOpen = false },
+            alignment = Alignment.BottomStart,
+            modifier = Modifier.padding(start = 8.dp, bottom = MenuBarOffset),
+        ) {
+            val recorded = locationState as? LocationRules.EditorLocationState.Recorded
+            if (recorded != null) {
+                LocationRules.precisionOptions(recorded.snapshot).forEach { option ->
+                    AnchoredMenuItem(
+                        label = precisionLabel(option),
+                        selected = option == recorded.snapshot.locPrecision,
+                        trailingIcon = Icons.Filled.LocationOn,
+                        onClick = {
+                            precisionMenuOpen = false
+                            onPrecisionChange(option)
+                        },
+                    )
+                }
+            }
+        }
     }
 }
+
+/** 菜单底边距：格式栏（56）+ 与它的间距（8）+ 页面底边距（8）。 */
+private val MenuBarOffset = 72.dp
 
 /**
  * 顶栏驱动编辑器的把手（宿主 `remember` 一个，编辑器在组合时把动作挂上来）。
@@ -389,7 +409,8 @@ private fun LocationRow(
     state: LocationRules.EditorLocationState,
     isNewBlock: Boolean,
     onRequestLocation: () -> Unit,
-    onPrecisionChange: (String) -> Unit,
+    /** 「显示精度」被点击 —— 菜单本身画在 [EditorScreen] 的浮层里（见那里的注释）。 */
+    onPrecisionClick: () -> Unit,
 ) {
     if (state is LocationRules.EditorLocationState.Hidden) return
 
@@ -406,7 +427,6 @@ private fun LocationRow(
     }
     val canRefetch = LocationRules.canRefetchLocation(isNewBlock, state)
     val recorded = state as? LocationRules.EditorLocationState.Recorded
-    var precisionMenu by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
@@ -442,40 +462,17 @@ private fun LocationRow(
             )
         }
         if (recorded != null) {
-            Box {
-                Text(
-                    text = stringResource(R.string.editor_location_precision),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable(onClickLabel = stringResource(R.string.editor_location_precision)) {
-                            precisionMenu = true
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-                DropdownMenu(expanded = precisionMenu, onDismissRequest = { precisionMenu = false }) {
-                    LocationRules.precisionOptions(recorded.snapshot).forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(precisionLabel(option)) },
-                            trailingIcon = {
-                                if (option == recorded.snapshot.locPrecision) {
-                                    Icon(
-                                        Icons.Filled.LocationOn,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            },
-                            onClick = {
-                                precisionMenu = false
-                                onPrecisionChange(option)
-                            },
-                        )
+            Text(
+                text = stringResource(R.string.editor_location_precision),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClickLabel = stringResource(R.string.editor_location_precision)) {
+                        onPrecisionClick()
                     }
-                }
-            }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
     }
 }
@@ -543,15 +540,15 @@ private fun hasChanges(
     history: EditorHistory,
 ): Boolean = state.lines != initialLines || history.canUndo
 
-/** 保存载荷：调用方据此调用 `addBlock` / `updateBlockContent`。 */
+/**
+ * 保存载荷：内容 + **这一刻的起始时刻**。
+ *
+ * 位置不在载荷里 —— 它由 ViewModel 在收到保存时从自己那份 `location` 快照冻结
+ * （新建只写一次、编辑只改精度两条规则都在 `LocationRules` / ViewModel 里，
+ * 不重复放到界面层判断）。
+ */
 data class EditorSavePayload(
     val parts: List<ContentPart>,
-    /**
-     * 新建片段时写库用（无位置时为空串）；编辑时由调用方改走
-     * `updateBlockContent(..., locText, locPrecision)` 只改这两列。
-     */
-    val locText: String?,
-    val locPrecision: String?,
     val startTimeUtc: Long,
 )
 
@@ -560,30 +557,15 @@ data class ImportedImage(val src: String, val width: Double?, val height: Double
 
 private fun buildPayload(
     lines: List<EditorLine>,
-    locationState: LocationRules.EditorLocationState,
     startTimeUtc: Long,
-): EditorSavePayload {
-    val recorded = locationState as? LocationRules.EditorLocationState.Recorded
-    return EditorSavePayload(
-        parts = EditorModel.linesToParts(lines),
-        // 编辑态不写位置（精度调整由 onPrecisionChange 单独走 updateBlockContent）
-        locText = recorded?.snapshot?.locText,
-        locPrecision = recorded?.snapshot?.locPrecision,
-        // 开始时间**永远**记录，与 `auto_time` 无关：
-        // `day_key` / `created_utc` / 排序都依赖它，写 0 或改写都会破坏跨端契约。
-        startTimeUtc = startTimeUtc,
-    )
-}
+): EditorSavePayload = EditorSavePayload(
+    parts = EditorModel.linesToParts(lines),
+    // 开始时间**永远**记录，与 `auto_time` 无关：
+    // `day_key` / `created_utc` / 排序都依赖它，写 0 或改写都会破坏跨端契约。
+    startTimeUtc = startTimeUtc,
+)
 
 private val PLACEHOLDER_NEW: String
     @Composable get() = stringResource(R.string.editor_placeholder_new)
 private val PLACEHOLDER_EDIT: String
     @Composable get() = stringResource(R.string.editor_placeholder_existing)
-private val LOCATION_TITLE: String
-    @Composable get() = stringResource(R.string.editor_location_retry)
-private val LOCATION_MESSAGE: String
-    @Composable get() = stringResource(R.string.editor_location_missing_msg)
-private val SAVE_ANYWAY_LABEL: String
-    @Composable get() = stringResource(R.string.editor_save_anyway)
-private val CANCEL_LABEL: String
-    @Composable get() = stringResource(R.string.cancel)

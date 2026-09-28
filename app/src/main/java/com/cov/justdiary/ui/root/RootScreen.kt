@@ -77,6 +77,11 @@ fun RootScreen(modifier: Modifier = Modifier) {
     var selectedName by rememberSaveable { mutableStateOf(AppTab.Home.name) }
     val selected = AppTab.entries.firstOrNull { it.name == selectedName } ?: AppTab.Home
 
+    // 设置版本号：设置页改完（含"新一天的开始时间"）后，**已经活着**的页面要跟着刷新。
+    // 日记页也要（`DiaryPageViewModel.refreshSettings` 原先没有任何调用点）：
+    // `dayStartHour` 一变，"今天"跟着变，页面里那份 `todayKey` 不能停在旧值上。
+    val settingsVersion by container.settings.version.collectAsState()
+
     // 全屏的日记页（阅读/编辑）在标签页之上：对应 iOS 的 `.fullScreenCover`
     var openDayKey by rememberSaveable { mutableStateOf<String?>(null) }
     // 「写日记 / 继续写日记」直接进编辑器（对应 iOS 的 `openEditor`），
@@ -100,6 +105,7 @@ fun RootScreen(modifier: Modifier = Modifier) {
                 onClose = { openDayKey = null; openInWrite = false },
                 onDataChanged = { dataVersion++ },
                 startInWrite = openInWrite,
+                settingsVersion = settingsVersion,
             )
         }
         return
@@ -131,6 +137,7 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         tab = selected,
                         container = container,
                         dataVersion = dataVersion,
+                        settingsVersion = settingsVersion,
                         onOpenDay = { openDayKey = it },
                         onWriteDay = { openInWrite = true; openDayKey = it },
                         modifier = Modifier.weight(1f),
@@ -157,6 +164,7 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         tab = selected,
                         container = container,
                         dataVersion = dataVersion,
+                        settingsVersion = settingsVersion,
                         onOpenDay = { openDayKey = it },
                         onWriteDay = { openInWrite = true; openDayKey = it },
                         modifier = Modifier
@@ -181,6 +189,8 @@ private fun TabContent(
     tab: AppTab,
     container: AppContainer,
     dataVersion: Int,
+    /** 设置版本号（设置页保存一次 +1）：各页面据此刷新自己那份"已经读进来的"设置。 */
+    settingsVersion: Int,
     onOpenDay: (String) -> Unit,
     /** 直接进编辑器（首页当日面板的「写日记」）。 */
     onWriteDay: (String) -> Unit,
@@ -196,8 +206,7 @@ private fun TabContent(
             val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(container))
             val state by viewModel.state.collectAsState()
             LaunchedEffect(dataVersion) { viewModel.refresh() }
-            // 设置变化（auto_time / 周起始…）后刷新这个**已经活着**的标签页
-            val settingsVersion by container.settings.version.collectAsState()
+            // 设置变化（auto_time / 周起始 / 换日时刻…）后刷新这个**已经活着**的标签页
             LaunchedEffect(settingsVersion) { viewModel.refreshSettings() }
             HomeScreen(
                 modifier = modifier,
@@ -254,8 +263,7 @@ private fun TabContent(
             // 日记数据变过之后重查（与其它的标签页一致）。原来是唯一漏掉这条的页面，
             // 于是在日记页改完内容回到搜索页，结果还是旧的。
             LaunchedEffect(dataVersion) { viewModel.refresh() }
-            val searchSettingsVersion by container.settings.version.collectAsState()
-            LaunchedEffect(searchSettingsVersion) { viewModel.refresh() }
+            LaunchedEffect(settingsVersion) { viewModel.refresh() }
             SearchScreen(
                 state = state.ui,
                 filterItems = state.filterItems,
