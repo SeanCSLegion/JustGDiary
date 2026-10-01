@@ -178,4 +178,49 @@ class LocationRulesTest {
         assertFalse(empty.hasLocation)
         assertTrue(recorded.hasLocation)
     }
+
+    // ------------------------------------------------------------------ 缓存点的年龄窗口
+
+    @Test
+    fun `a cached fix ages out of the fresh window after two minutes`() {
+        assertTrue(LocationRules.isFreshFix(0))
+        assertTrue(LocationRules.isFreshFix(LocationRules.FRESH_FIX_MAX_AGE_MS))
+        assertFalse(LocationRules.isFreshFix(LocationRules.FRESH_FIX_MAX_AGE_MS + 1))
+        // 负数（时钟异常）不算新鲜
+        assertFalse(LocationRules.isFreshFix(-1))
+    }
+
+    @Test
+    fun `the stale window is half an hour and never negative`() {
+        assertTrue(LocationRules.isUsableStaleFix(LocationRules.FRESH_FIX_MAX_AGE_MS + 1))
+        assertTrue(LocationRules.isUsableStaleFix(LocationRules.STALE_FIX_MAX_AGE_MS))
+        assertFalse(LocationRules.isUsableStaleFix(LocationRules.STALE_FIX_MAX_AGE_MS + 1))
+        // 真机上见过系统里存着好几天前、甚至另一个城市的缓存点：那种点绝不能用
+        assertFalse(LocationRules.isUsableStaleFix(8L * 24 * 60 * 60 * 1000))
+        assertFalse(LocationRules.isUsableStaleFix(-1))
+    }
+
+    @Test
+    fun `the age of a fix is computed from the monotonic clock`() {
+        val now = 1_000_000_000_000L // ns
+        assertEquals(0L, LocationRules.ageMillisOf(elapsedRealtimeNanos = now, nowNanos = now))
+        assertEquals(1500L, LocationRules.ageMillisOf(elapsedRealtimeNanos = now - 1_500_000_000L, nowNanos = now))
+        // 时间戳比"现在"还新（跨重启 / 厂商实现异常）时按 0 处理，不能变成负数
+        assertEquals(0L, LocationRules.ageMillisOf(elapsedRealtimeNanos = now + 5_000_000_000L, nowNanos = now))
+    }
+
+    // ------------------------------------------------------------------ 回前台补定位
+
+    @Test
+    fun `coming back to the foreground only retries a locating new block`() {
+        // 正例：编辑器里正在新建、auto_loc 开着、还没拿到位置、也没在取
+        assertTrue(LocationRules.shouldRetryOnForeground(false, false, true, false, false))
+
+        // 阅读态 / 编辑已有片段 / auto_loc 关 / 已经有位置 / 正在取：都不补
+        assertFalse("阅读态不补", LocationRules.shouldRetryOnForeground(true, false, true, false, false))
+        assertFalse("编辑已有片段不补", LocationRules.shouldRetryOnForeground(false, true, true, false, false))
+        assertFalse("auto_loc 关不补", LocationRules.shouldRetryOnForeground(false, false, false, false, false))
+        assertFalse("已经有位置不补", LocationRules.shouldRetryOnForeground(false, false, true, true, false))
+        assertFalse("正在取不重复发", LocationRules.shouldRetryOnForeground(false, false, true, false, true))
+    }
 }

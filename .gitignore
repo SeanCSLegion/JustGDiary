@@ -108,3 +108,4 @@ $RECYCLE.BIN/
 # ---------- 编辑/工具 ----------
 .vscode/
 !.vscode/settings.json.sample
+__pycache__/

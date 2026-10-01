@@ -123,19 +123,6 @@ object EditorSelectionMap {
         }
     }
 
-    /**
-     * 工具栏作用的行区间。
-     *
-     * 本项目的格式按钮**只对当前行生效**（与 iOS `toggleMarker` 只作用于光标行一致）：
-     * 因此这里永远返回单行区间。保留成函数是为了让"多行选区怎么办"这个问题有明确答案，
-     * 而不是散落在各按钮里各写一遍。
-     */
-    fun targetLineRange(selection: EditorSelection, lines: List<EditorLine>): IntRange {
-        val index = selection.lineIndex.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
-        return index..index
-    }
-
-
     private fun markerLength(line: EditorLine): Int = displayLength(line) - line.text.length
 
     private fun stripMarker(line: EditorLine, displayOffset: Int): Int =

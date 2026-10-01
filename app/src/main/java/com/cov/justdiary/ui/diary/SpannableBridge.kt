@@ -33,6 +33,21 @@ import com.cov.justdiary.model.ContentPartStyle
  */
 object SpannableBridge {
 
+    /**
+     * **段落级 span 的统一标志：起点包含、终点不包含**。
+     *
+     * 为什么不能两头都 INCLUSIVE（真机缺陷，用户 2026-09-28："居中的作用范围不对劲……
+     * 取消的时候没有真的取消，不知道是不是和换行有关系"）：
+     *
+     * 段落 span 的右端**含本行的终止换行**，也就是说它的终点正好落在**下一行的行首**。
+     * 两头 INCLUSIVE 时，用户在下一行行首敲的第一个字符会被**上一段的 span 吞进去** ——
+     * 屏幕上那一行就带着上一段的居中/字号，而模型里它明明是正文（解析按"span 起点 == 行首"
+     * 判定，所以模型没错）。于是出现"看着还居中、其实已经不是居中了、取消也取消不掉"的怪象。
+     *
+     * 起点包含则是必须的：在行首插入文字（比如把光标放到行首打字）应当留在这一段里。
+     */
+    private const val ParagraphSpanFlags = Spanned.SPAN_INCLUSIVE_EXCLUSIVE
+
     /** 承载块样式的自定义段落 span（对应 iOS 的 `.diaryBlockStyle`）。 */
     class BlockStyleSpan(val style: String) : android.text.style.ParagraphStyle
 
@@ -97,26 +112,38 @@ object SpannableBridge {
             paint: android.text.TextPaint,
         ) = applyHeight(text, end, fm)
 
+        /** 字号对应的**原始字体度量**（下面算绝对值时用，见 [applyHeight] 的说明）。 */
+        private val baseMetrics = android.text.TextPaint()
+            .apply { textSize = textSizePx.toFloat() }
+            .fontMetricsInt
+
+        /**
+         * 把这一行的 ascent/descent **算成绝对值**写回去。
+         *
+         * ⚠️ 必须算绝对值、不能在传进来的 `fm` 上累加：平台对同一行的
+         * `chooseHeight` 会调用**不止一次**（排版量一遍、落位再一遍），而 `fm` 是就地改的 ——
+         * 累加的实现会让段后距**翻倍**（实测行框比预期高 2×24px，编辑器里段落间距变成 16dp，
+         * 引用底也跟着多出一大截，看起来像"引用把下一行也包进来了"）。
+         * 真机缺陷记录：用户 2026-09-28 "引用的作用范围现在也不对"。
+         */
         private fun applyHeight(
             text: CharSequence,
             end: Int,
             fm: android.graphics.Paint.FontMetricsInt,
         ) {
-            val natural = fm.descent - fm.ascent
+            val natural = baseMetrics.descent - baseMetrics.ascent
             if (natural <= 0) return
             // 行高：按比例拉开 ascent/descent（保持基线位置的比例），得到 M3 角色的行高
-            if (lineHeightPx > natural) {
-                val scale = lineHeightPx.toFloat() / natural
-                fm.ascent = (fm.ascent * scale).toInt()
-                fm.descent = (fm.descent * scale).toInt()
-            }
+            val scale = if (lineHeightPx > natural) lineHeightPx.toFloat() / natural else 1f
+            val ascent = (baseMetrics.ascent * scale).toInt()
+            var descent = (baseMetrics.descent * scale).toInt()
             // 段后距：只加在段落最后一行（行尾是换行，或已到文末）
             val lastOfParagraph = end >= text.length || text[end] == '\n'
-            if (lastOfParagraph && paragraphSpacingPx > 0) {
-                fm.descent += paragraphSpacingPx
-            }
-            fm.top = fm.ascent
-            fm.bottom = fm.descent
+            if (lastOfParagraph && paragraphSpacingPx > 0) descent += paragraphSpacingPx
+            fm.ascent = ascent
+            fm.descent = descent
+            fm.top = ascent
+            fm.bottom = descent
         }
     }
 
@@ -146,6 +173,8 @@ object SpannableBridge {
         containerWidthPx: Int = 0,
         /** 段落样式 → 编辑器排版；null 表示不设字号（纯文本模式，测试用）。 */
         metricsFor: ((String) -> BlockMetrics?)? = null,
+        /** 引用段的底色与内边距；null 表示不画（纯文本模式 / 测试不关心外观时）。 */
+        quoteStyle: QuoteStyle? = null,
     ): SpannableStringBuilder {
         val builder = SpannableStringBuilder()
         val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
@@ -178,7 +207,19 @@ object SpannableBridge {
                     end,
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
                 )
-                if (index < lines.size - 1) builder.append('\n')
+                val hasTerminator = index < lines.size - 1
+                if (hasTerminator) builder.append('\n')
+                // **图片段居中**（对应 iOS `PartsCodec.imageParagraphStyle()`：
+                // `alignment = .center`，让图片永远不会贴在宽栏的左边）。
+                // 这是**渲染规则**，不是持久化数据：`content_json` 里图片段落不带 `align`
+                // （iOS 同样只把段落样式挂在附件上、不写进 JSON），`parseLine` 也在读到
+                // 图片行时提前返回，因此这个 span 不会污染模型。
+                builder.setSpan(
+                    android.text.style.AlignmentSpan.Standard(android.text.Layout.Alignment.ALIGN_CENTER),
+                    start,
+                    if (hasTerminator) end + 1 else end,
+                    ParagraphSpanFlags,
+                )
                 return@forEachIndexed
             }
 
@@ -193,24 +234,33 @@ object SpannableBridge {
 
             // 段落级 span 的右端**含本行的终止换行**（iOS 把块属性挂在终止换行上）：
             // 空行因此也有承载（一个只有标记的空行、或"刚设了样式还没输入"的空行不会丢样式），
-            // 且在行尾继续输入时样式会延续（`SPAN_INCLUSIVE_INCLUSIVE`）。
+            // 行内继续输入时样式也会延续（靠 [ParagraphSpanFlags] 的"起点包含"）。
             val paragraphEnd = if (hasTerminator) end + 1 else end
             if (paragraphEnd > start) {
+                val style = effectiveBlockStyle(line)
                 builder.setSpan(
-                    BlockStyleSpan(line.blockStyle),
+                    BlockStyleSpan(style),
                     start,
                     paragraphEnd,
-                    Spanned.SPAN_INCLUSIVE_INCLUSIVE,
+                    ParagraphSpanFlags,
                 )
-                if (line.align == EditorModel.ALIGN_CENTER) {
-                    builder.setSpan(
-                        android.text.style.AlignmentSpan.Standard(android.text.Layout.Alignment.ALIGN_CENTER),
-                        start,
-                        paragraphEnd,
-                        Spanned.SPAN_INCLUSIVE_INCLUSIVE,
-                    )
-                }
-                metricsFor?.invoke(line.blockStyle)?.let { metrics ->
+                // **每一段都显式挂对齐 span**，左对齐也挂（`ALIGN_NORMAL`）。
+                // 原因不是"更保险"，而是必须：视图级的 `gravity` 是留给"末尾空行"的
+                // （那一行没有字符、挂不上任何 span，见 `EditorTextArea` / `EditorModel.blocksNewline`），
+                // 只有把每一段都显式定死，改 gravity 才**只**影响末尾那一行。
+                builder.setSpan(
+                    android.text.style.AlignmentSpan.Standard(
+                        if (line.align == EditorModel.ALIGN_CENTER) {
+                            android.text.Layout.Alignment.ALIGN_CENTER
+                        } else {
+                            android.text.Layout.Alignment.ALIGN_NORMAL
+                        },
+                    ),
+                    start,
+                    paragraphEnd,
+                    ParagraphSpanFlags,
+                )
+                metricsFor?.invoke(style)?.let { metrics ->
                     builder.setSpan(
                         BlockMetricsSpan(
                             textSizePx = metrics.textSizePx,
@@ -219,7 +269,24 @@ object SpannableBridge {
                         ),
                         start,
                         paragraphEnd,
-                        Spanned.SPAN_INCLUSIVE_INCLUSIVE,
+                        ParagraphSpanFlags,
+                    )
+                }
+                // 引用：圆角底 + 左侧内边距（与阅读态同参数，见 [QuoteStyle]）。
+                // 底画在**文字下面**（`LineBackgroundSpan` 平台保证在文字之前绘制），
+                // 因此不需要动文字颜色。
+                if (quoteStyle != null && style == ContentPartStyle.quote) {
+                    builder.setSpan(
+                        android.text.style.LeadingMarginSpan.Standard(quoteStyle.paddingHorizontalPx),
+                        start,
+                        paragraphEnd,
+                        ParagraphSpanFlags,
+                    )
+                    builder.setSpan(
+                        QuoteBackgroundSpan(quoteStyle, containerWidthPx, start, paragraphEnd),
+                        start,
+                        paragraphEnd,
+                        ParagraphSpanFlags,
                     )
                 }
             }
@@ -236,8 +303,183 @@ object SpannableBridge {
         return builder
     }
 
-    private fun applyInlineSpans(builder: SpannableStringBuilder, start: Int, end: Int, run: com.cov.justdiary.model.TextRun) {
-        if (end <= start) return
+    /**
+     * 这一行**画出来**用的段落样式。
+     *
+     * 列表 / 待办的标记行一律按正文画（与 iOS `EditorBlockStyle(partStyle:)` 一致：
+     * 它们有自己的持久化名字，但绘制时用正文属性）—— 字号因此也跟正文走，
+     * 光标高度自然跟着变（用户规则 6）。
+     */
+    fun effectiveBlockStyle(line: EditorLine): String =
+        if (line.marker != null) ContentPartStyle.body else line.blockStyle
+
+    /**
+     * 文档**末尾那一行**（光标可能停在上面的空行）该用的视图级排版：字号来自它的段落样式。
+     *
+     * ## 为什么需要它（用户规则 4 / 6）
+     *
+     * 段落级 span 只能挂在字符上。文档末尾如果是空行，它**一个字符都没有**
+     * （它的终止换行属于上一段的边界），因此挂不上任何 `MetricAffectingSpan` /
+     * `AlignmentSpan`。而平台的 `Editor.updateCursorPosition`
+     * （`android-37.0/android/widget/Editor.java:2449-2464`）算光标高度与水平位置用的就是
+     * `layout.getLineTop/Bottom(line)` 与 `layout.getPrimaryHorizontal(offset)` ——
+     * 那一行没有 span，就只能落到**视图级**的 `textSize` 与 `gravity` 上
+     * （`TextView.getLayoutAlignment()` 把 gravity 翻成 `Layout.Alignment`）。
+     *
+     * 返回 null 表示末尾那一行**有内容**（它有 span 撑着，视图级设置不影响任何一行）。
+     */
+    fun tailDefaults(
+        lines: List<EditorLine>,
+        metricsFor: ((String) -> BlockMetrics?)?,
+    ): BlockMetrics? {
+        val tail = lines.lastOrNull() ?: return null
+        if (!EditorModel.isBlankLine(tail)) return null
+        return metricsFor?.invoke(effectiveBlockStyle(tail))
+    }
+
+    /**
+     * 末尾空行是**引用**时的外观 —— 它一个字符都没有，[QuoteBackgroundSpan] 挂不上，
+     * 只能由 `DiaryEditText` 自己把这块底画出来（与 span 共用 [QuoteStyle.drawBox]）。
+     * 返回 null 表示末尾不是"空的引用行"，不需要兜底。
+     */
+    fun tailQuoteStyle(lines: List<EditorLine>, quoteStyle: QuoteStyle?): QuoteStyle? {
+        val tail = lines.lastOrNull() ?: return null
+        if (!EditorModel.isBlankLine(tail)) return null
+        return if (tail.blockStyle == ContentPartStyle.quote) quoteStyle else null
+    }
+
+    /** 末尾空行是不是居中的（视图级 `gravity` 的来源，与 [tailDefaults] 配对）。 */
+    fun tailCentered(lines: List<EditorLine>): Boolean {
+        val tail = lines.lastOrNull() ?: return false
+        return EditorModel.isBlankLine(tail) && tail.align == EditorModel.ALIGN_CENTER
+    }
+
+    /**
+     * 引用段在**编辑器**里的样子。
+     *
+     * 逐项对着阅读态（规范 §2.5 / `DiaryReadScreen` 的 `render.style == quote` 分支）：
+     * `surfaceContainerHigh` 底 + 4dp 圆角 + 6×10dp 内边距 —— 编辑态与阅读态必须看起来是同一件事
+     * （用户 2026-09-28 的"样式参考 Google 官方 SDK / 未覆盖处对齐 iOS"里，iOS 编辑态的引用**也是有底的**）。
+     *
+     * ⚠️ 平台限制记一笔：`Spannable` 只有**左边**的 `LeadingMarginSpan`，没有右边距 span，
+     * 所以那 10dp 只能缩进左侧；换行时文字会贴到引用底的右边缘（与正文贴右边缘一致）。
+     * 阅读态是左右对称的 10dp —— 这是两者唯一的外观差异。
+     */
+    data class QuoteStyle(
+        val backgroundColor: Int,
+        val cornerRadiusPx: Float,
+        val paddingHorizontalPx: Int,
+        val paddingVerticalPx: Int,
+        /**
+         * 段后距（px）—— 必须与 [BlockMetricsSpan] 用的是**同一个值**。
+         *
+         * 段后距是烘进 `LineHeightSpan` 的 descent 里的，于是 `drawBackground` 拿到的
+         * `bottom` **含**这段距离：不减掉它，引用底会比文字往下多出一大截，
+         * 看起来像"引用把下一行也包进来了"（用户 2026-09-28 实测："引用的作用范围现在也不对"）。
+         */
+        val paragraphSpacingPx: Int = 0,
+    ) {
+        /**
+         * 在画布上画一块引用底。**两处共用同一套几何**：
+         * [QuoteBackgroundSpan]（有字符的段落）与 `DiaryEditText.onDraw`
+         * （末尾那个空行没有字符、挂不上任何 span，只能由视图自己补）。
+         *
+         * 圆角只给整块底的最外沿：首行上边、末行下边（多行拼起来才是一个连续的块）。
+         */
+        fun drawBox(
+            canvas: android.graphics.Canvas,
+            paint: android.graphics.Paint,
+            path: android.graphics.Path,
+            radii: FloatArray,
+            left: Float,
+            top: Float,
+            right: Float,
+            bottom: Float,
+            roundTop: Boolean,
+            roundBottom: Boolean,
+        ) {
+            java.util.Arrays.fill(radii, 0f)
+            if (roundTop) {
+                radii[0] = cornerRadiusPx
+                radii[1] = cornerRadiusPx
+                radii[2] = cornerRadiusPx
+                radii[3] = cornerRadiusPx
+            }
+            if (roundBottom) {
+                radii[4] = cornerRadiusPx
+                radii[5] = cornerRadiusPx
+                radii[6] = cornerRadiusPx
+                radii[7] = cornerRadiusPx
+            }
+            path.reset()
+            path.addRoundRect(left, top, right, bottom, radii, android.graphics.Path.Direction.CW)
+            canvas.drawPath(path, paint)
+        }
+    }
+
+    /**
+     * 引用段的圆角底（`LineBackgroundSpan` 是平台给的**官方**做法：Compose 的 `ParagraphStyle`
+     * 没有背景属性，`BasicTextField` 里画不出段落底）。
+     *
+     * 一个引用段可能折成多行，因此：
+     * - **纵向**：首行向上扩 6dp、末行向下扩 6dp，中间行不扩 —— 多行拼起来是一个连续的底，不留缝；
+     * - **横向**：铺满可用宽度（与阅读态的整块底同宽）；
+     * - **圆角**：只圆"整段最外沿"的那两个角（首行上、末行下）。
+     */
+    class QuoteBackgroundSpan(
+        private val style: QuoteStyle,
+        private val containerWidthPx: Int,
+        private val paragraphStart: Int,
+        private val paragraphEnd: Int,
+    ) : android.text.style.LineBackgroundSpan {
+
+        private val boxPaint = android.graphics.Paint().apply {
+            // ⚠️ 这里的 `style` 是**本 span 的构造参数**（QuoteStyle），不是 Paint 的 style ——
+            // `Paint.style` 与它同名，直接写 `style = …` 会被解析成 Paint 的属性。
+            color = this@QuoteBackgroundSpan.style.backgroundColor
+            isAntiAlias = true
+            this.style = android.graphics.Paint.Style.FILL
+        }
+        private val radii = FloatArray(8)
+        private val path = android.graphics.Path()
+
+        override fun drawBackground(
+            canvas: android.graphics.Canvas,
+            paint: android.graphics.Paint,
+            left: Int,
+            right: Int,
+            top: Int,
+            baseline: Int,
+            bottom: Int,
+            text: CharSequence,
+            start: Int,
+            end: Int,
+            lineNumber: Int,
+        ) {
+            // `end` 是**含终止换行**的行尾（`Layout.getLineEnd(line, visibleEnd = false)`），
+            // 所以"这一行是不是整段的最后一行"用 end >= paragraphEnd 判定。
+            val first = start <= paragraphStart
+            val last = end >= paragraphEnd
+            style.drawBox(
+                canvas = canvas,
+                paint = boxPaint,
+                path = path,
+                radii = radii,
+                left = 0f,
+                top = (if (first) top - style.paddingVerticalPx else top).toFloat(),
+                right = containerWidthPx.toFloat(),
+                // 末行的 `bottom` 含段后距（见 QuoteStyle.paragraphSpacingPx），要减掉，
+                // 这样上下内边距才对称；中间行不减（那段距离正好是多行之间的行距）
+                bottom = (
+                    if (last) bottom + style.paddingVerticalPx - style.paragraphSpacingPx else bottom
+                    ).toFloat(),
+                roundTop = first,
+                roundBottom = last,
+            )
+        }
+    }
+
+    private fun applyInlineSpans(builder: SpannableStringBuilder, start: Int, end: Int, run: com.cov.justdiary.model.TextRun) {        if (end <= start) return
         val flag = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         val style = when {
             run.bold == true && run.italic == true -> Typeface.BOLD_ITALIC

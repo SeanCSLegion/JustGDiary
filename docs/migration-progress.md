@@ -3158,6 +3158,11 @@ R27 之前记录过"D8：居中空行回车 → 允许换行、新行继承居�
 **允许换行（不吞按键），但新行不居中** —— 规范那句"不产生新的居中空行"的结果一致，
 而按键始终有响应。`EditorModel.repairAfterEnter` 有单测钉住。
 
+> **R31 更新：D8 已被用户规则 4 取代。** 用户 2026-09-28 明确要求"居中状态时，本行没有内容
+> 且上一行也没有内容，那么**点击换行不执行**"，因此现在居中空行上的回车被直接吃掉
+> （`EditorModel.blocksNewline` + `DiaryEditText.dispatchKeyEvent` / `EditorTextState.onUserText`
+> 两条输入路径），与 iOS `shouldBlockNewline` 的结果一致。R27 那条"不吞按键"的折中不再生效。
+
 另外两处与 iOS 的差异，本轮确认**不需要**动作：
 
 - iOS 保存后调 `ReminderService.markTodayWritten()`（打卡）；Android 的提醒在**投递时刻**才查
@@ -3305,3 +3310,407 @@ Android 这一轮的旧实现对应的正是 iOS **已弃用**的那一版，于
 - 分享长图的**深色**版本只在单测里覆盖，真机没走查（切到深色主题再分享一次即可）；
 - 分享面板在**平板 / 横屏**下的预览宽度（`SharePanelLayout.previewWidthDp`）没有真机验证；
 - 图片插入后**在图片行中间点一下**（光标落在图片行内）时 `ImageSpan` 的 caret 位置未走查。
+
+---
+
+## R30 · 日记页返工五条 + 行内样式被段落级操作抹掉（2026-09-28，真机 MEIZU 21 / Android 16）
+
+> 用户 2026-09-28 提出的五条 + 复测中追加的第六条。规范同步在
+> [`docs/android-design/04-diary.md`](android-design/04-diary.md) §1 / §3.1 / §3.2 / §3.3 / §3.4。
+> 证据截图：`docs/ui-audit/r30/`。**全部在真机上逐条复现 → 改 → 复测**。
+
+### 1. 首页「继续写日记」不再直接进编辑态（进阅读态）
+
+`HomeScreen` 的当日面板把「继续写日记」接到 `onOpenDay`（阅读态），空态的「写日记」保持
+`onWrite`（编辑态）—— 这一天已经有内容，先让用户看到它。**与 iOS 的 `openEditor` 是有意偏离**
+（iOS 两个入口都直接进编辑器），规范 §1 已写明。
+
+`DayPanel` 放宽到 `internal`，新增 `HomeDayPanelTest`（3 条）钉住：有内容 → 阅读态 ·
+空态 → 编辑态 · 过去的一天两个入口都不给。
+
+### 2. 定位"明明给了权限却经常拿不到"
+
+真机复现（`adb logcat`）：每次都打印 `定位超时（8000ms）或失败`。逐层查下来是**两件事**：
+
+| # | 真因 | 证据 | 修法 |
+| --- | --- | --- | --- |
+| ① | 判据是"装了 GMS 就只用 GMS"，而国行 ROM 上 Google 的网络定位后端不可达、高精度请求又非要等一个 GPS 定位（该机 GNSS 的 **TTFF 均值 5.8s**，室内等不到） | `dumpsys location`：`fused provider` 的 last fix 是 5 天前的；`gps provider mStarted=false` | **两条来源赛跑**：GMS 融合定位 ∥ 平台 `LocationManager`（每个可用 provider 一个请求），谁先回来用谁（`LocationService.firstFix`） |
+| ② | 拿到了坐标也白拿：系统会**在定位过程中重启厂商定位服务**，正在跑的 `getFromLocation` 直接吃 `DeadObjectException`；原先把它当成"没有地址"，而按规则"没有地址 = 没有位置" | `ActivityManager: Force stopping com.meizu.location` → `ServiceWatcher: [GeocoderProxy] died` → `JustDiary.location: 反地理编码失败：android.os.DeadObjectException` | 反地理编码**重试 4 次**（400ms / 900ms / 1800ms 退避 —— 服务重启实测约 500ms，刚起来的 geocoder 头几秒还会返回空地址） |
+
+另外补了三条兜底（都写进规范 §3.2 的表）：
+
+- **新鲜缓存点**（2 分钟内）直接用 —— 这是 iOS `liveUpdates()` 首帧就能给出位置的原因；
+- 实时取点失败 → **30 分钟内的缓存点**兜底（真机上见过系统里存着好几天前、甚至另一个城市的
+  缓存点，那种绝不能用：不再是"我写这条日记时在哪"）；
+- **回到前台补一次**（新建片段 + `auto_loc` 开 + 没位置 + 没有正在跑的请求）。
+
+授权链路也补齐了：编辑器里那颗胶囊在未授权时**先申请权限再取点**（iOS 的
+`requestPermission()` + 600ms 复查；Android 走 `ActivityResultContracts.RequestMultiplePermissions`），
+新建片段进编辑器时若 `auto_loc` 开着且没授权也会主动要一次。原先 `beginLocate()` 在未授权时
+只是 `locating = false` 就返回 —— 真机上点那颗胶囊**什么都不会发生**。
+
+纯规则下沉（可 JVM 断言）：`LocationRules.ageMillisOf / isFreshFix / isUsableStaleFix /
+shouldRetryOnForeground`，5 条新断言。
+
+真机复测：进编辑器 1 秒内出地址（`用新鲜缓存点（29699ms 前）` → `已记录位置：…（exact）`），
+截图 `r30/editor-location-chip-recorded.png`。
+
+### 3. 地点行改成 iOS 那样**一枚胶囊**
+
+原先"左状态 + 右按钮"两块拼起来（`未记录地点` + `重新获取位置`），iOS 从头到尾只有一个
+`locationChipLabel`，处在"新建 + 还没拿到位置"时**这枚胶囊本身就是那个按钮**。现在照 iOS 重写：
+
+| 情形 | 胶囊 | 点击 |
+| --- | --- | --- |
+| 定位中 | `位置获取中…`（primary） | — |
+| 还没拿到位置 | `重新获取位置`（primary） | 取一次（未授权先申请） |
+| 有位置 | 地址（primary，单行省略） | 打开精度菜单 |
+| 编辑已有片段且无地点 | `未记录地点`（onSurfaceVariant） | — |
+
+- 不再有单独的「显示精度」文字按钮（点胶囊就是菜单）；
+- 精度菜单末尾为**新片段**补上「重新获取位置」+ 分隔线（iOS `canRelocate`）。
+
+`EditorLocationChipTest`（6 条）钉住形态：每一档**只有一枚**胶囊、静态档不带点击动作、
+编辑已有片段没有任何获取入口、`auto_loc` 关时整行不显示。
+
+### 4. 插图：居中 + 一行一张 + 光标下移
+
+- **居中**：图片段挂 `AlignmentSpan.ALIGN_CENTER`（对应 iOS `PartsCodec.imageParagraphStyle()`
+  的 `alignment = .center`）。这是**渲染规则**：`content_json` 里图片段不写 `align`（iOS 也不写），
+  `SpannableBridge.parseLine` 读到图片行会提前返回，所以这个 span 不会污染模型 —— 两条测试钉住。
+- **一行一张**：`EditorModel.insertImageLine` 现在分两种情况：光标行是**空行** → 图片落在这
+  一行（不再多留一张空行，与 iOS "在光标处原地插入附件"等价）；否则插在光标行**下面**新开的
+  一行。带着光标停在图片行上再插一张，也一定另起一行（3 条新断言）。
+- **光标下移**：仍是 R29 的行为（图片下面那一行，没有就补空行）。
+
+真机验证：推了一张 **300×150** 的测试图进相册（满列宽的图看不出居中），插入后
+**列中心 539.5px、图片中心 539.5px**（`r30/editor-image-centered.png`），光标在图片下面。
+
+### 5. 编辑页：提示语改成输入框自己的 `hint`
+
+原来提示语是一块独立的 `Text` 叠在输入区顶部，而 `EditText` 从宿主主题继承来的 gravity 把
+第一行**垂直居中**了 —— 真机上提示语在顶部、光标在输入区正中间，**相差 65dp**，
+看上去就是"提示语单独占了一块空间"。现在：
+
+- `EditText.hint = 占位文案`（`hintTextColor = onSurfaceVariant`，字号 = 正文）；
+- `DiaryEditText` 显式 `gravity = TOP or START`（真机复测：光标在 `y=517..581`，
+  正好是输入区（`[77,517][1003,957]`）的第一行）；
+- 提示语不再进 Compose 语义树，但 **`uiautomator dump` 里 `EditText` 节点的 text 就是提示语** ——
+  TalkBack 照常播报（`EditorLocationChipTest` 有一条"那一块单独的文本没有了"）。
+
+### 6. 【复测追加】换段落样式/加去列表时，B/I/S/U 被一起抹掉
+
+用户在真机上指出：切段落样式时，**加粗 / 斜体 / 删除线 / 下划线**也被去掉了，而这四种样式
+不应该跟着段落格式变。查下来是两处**重建 `EditorLine` 时只 copy 了 `text`，`spans` 掉在地上**：
+
+| 位置 | 触发 |
+| --- | --- |
+| `EditorModel.setBlockStyle` | 段落样式菜单（大标题/小标题/正文）与「引用」按钮，作用在**列表/待办行**上时 |
+| `EditorModel.setMarkerOnRange` | 「列表」/「待办」按钮（开与关两条分支） |
+
+iOS 那边写得很明确（`RichTextEngine.restyle`：*"Restyles one paragraph (newline included),
+**preserving bold/italic traits**"*），所以这是缺陷而不是设计。两处改成 `copy(...)`：
+
+- 换段落样式仍然会丢掉列表/待办**标记**（iOS 同样会 drop marker，这是对的）；
+- 加/去标记时也不再动行内样式（标记行不能居中那条规则保留）。
+
+回归测试 5 条（`EditorModelTest` 4 + `EditorStateTest` 2，含"经 Spannable 往返后仍然带着
+四种样式"），**已经把旧的实现挂掉验证过**（临时回退 → 用例 FAILED → 恢复）。
+
+真机复测：`• boldBISU`（B 粗 / I 斜 / S 删除线 / U 下划线）→ 切「小标题」→ 字号变了、
+项目符号按规则没了，**四种行内样式全部还在**（`r30/inline-styles-survive-paragraph-style.png`）。
+
+### 7. 【复测追加】只要这一天里有图片，分享必定失败
+
+复测时误触顶栏「分享」，弹出的不是预览而是「分享失败：日记图片生成失败，请稍后重试。」。
+日志一句话定位：
+
+```
+E JustDiary.backup: 渲染分享图失败：Software rendering doesn't support hardware bitmaps
+```
+
+分享长图画在**软件画布**上（`Bitmap(ARGB_8888)` + `Canvas`），而 `MediaStore.image()` 给的是
+`ImageDecoder` 解码出来的 **HARDWARE bitmap**（API 28+ 的默认分配器），
+`Canvas.drawBitmap(hardwareBitmap, …)` 在软件画布上会直接抛
+`IllegalArgumentException: Software rendering doesn't support hardware bitmaps`。
+
+修法：`ImageShareRenderer.drawImage` 里按需 `copy(ARGB_8888, false)`（`HARDWARE` 之外原样返回，
+不多花一次拷贝）。真机复测：同一天（含 1 张图片）分享面板正常出预览
+（`720 × 1665`，`r30/share-with-image-fixed.png`）。
+
+> 这是 R29 分享长图重写留下的（R29 的真机走查用的是一张没有图片的日子），
+> 与用户本轮提的五条无关，但既然复测撞上了就一并修掉。
+
+### 8. 格式栏按钮：待返工清单（用户："先记着，之后统一改"）
+
+本轮**没有动**格式栏的按钮功能，只把真机实测到的现象记进
+[`docs/android-design/04-diary.md`](android-design/04-diary.md) §3.3 的「待返工清单」：
+
+- **F1：编辑态点「引用」没有任何可见反馈** —— 按钮高亮，正文外观逐像素不变
+  （实测同一点 RGB 都是 `(23,29,30)`）。阅读态里引用有 `surfaceContainerHigh` 底，
+  编辑器只挂了 `BlockStyleSpan`、没有背景 span。证据 `r30/format-bar-quote-no-feedback.png`。
+- 其余按钮（列表 / 待办 / 居中 / B / I / S / U / 段落样式菜单）本轮实测**功能正常**，
+  等用户逐项指出后再统一改。
+
+### 测试与验证
+
+- **JVM 单测 505 条全绿**（R29 是 480，本轮 **+25**：首页两个入口 3 · 地点胶囊 6 ·
+  图片一行一张 3 · 图片居中 2 · 定位年龄窗口 3 · 回前台补定位 1 · 行内样式不丢 6 ·
+  提示语不再是独立文本 1）；
+- 真机逐条复测（截图在 `docs/ui-audit/r30/`）：继续写日记 → 阅读态 · 地点胶囊三档 ·
+  提示语与光标同一行（帧差定位光标 `y=517..581`）· 窄图居中（中心 539.5）·
+  行内样式跨段落样式存活 · 含图日记的分享长图 · 定位权限申请链路（撤销权限 → 进编辑器
+  自动弹系统权限框 → 授权后自动取到位置）；
+- 测试期间插入的草稿与推到相册的测试图都已撤销/删除，没有留下脏数据。
+
+### 仍未做（下一轮）
+
+- 格式栏按钮的**统一返工**（F1 起，等用户逐项列出）；
+- 引用在**编辑态**的背景（F1）—— 需要给 `Spannable` 加背景 span，且要保证与阅读态
+  的内边距/圆角一致（`BackgroundColorSpan` 画不出圆角，可能要自绘）；
+- **编辑态图片宽度**与阅读态不一致：编辑器按"自然宽度不超列宽"（iOS `DiaryImageView` 同源），
+  阅读态按列宽铺满（`fillMaxWidth + aspectRatio`）。窄图会出现"编辑时居中留白、阅读时拉满"，
+  两边口径要对齐一次；
+- **iOS 写出的图片 `w/h` 是 pt、Android 按 px 读**：一份 iOS 备份里的图片（`w≈343`）
+  在 Android 编辑态会显示成 343px（≈125dp，明显偏小）。属于跨端口径问题，待统一。
+
+---
+
+## R31 · 格式栏按钮**按用户六条规则返工**（2026-09-28，真机 MEIZU 21 / Android 16）
+
+用户本轮把格式栏的按钮功能逐条定稿（原话见 `04-diary.md` §3.3 的"按钮功能规则"表），
+并要求"以我说的为主，我没说到的以 iOS 版为主"。实现集中在三个文件：
+`EditorModel`（纯逻辑：互斥 / 作用域 / 回车）、`SpannableBridge`（span 与光标几何）、
+`EditorTextArea`（视图级字号 / gravity / 回车拦截）。
+
+### 1. 六条规则怎么落的
+
+| # | 规则 | 落点（一句话） |
+| --- | --- | --- |
+| 1 | B/I/S/U **可同时应用** | 粗+斜合并成一个 `BOLD_ITALIC` StyleSpan（Google `SpanStyle(fontWeight, fontStyle)` 同义），删除线/下划线是独立 `CharacterStyle` —— 四种同时挂在一段文字上没有冲突 |
+| 2 | 六种段落格式**互斥**，先取消再应用 | 新增 `BlockFormat`（大标题/小标题/正文/引用/列表/待办）+ `applyBlockFormat`：先把本行格式清回正文（连标记一起清），再写目标 |
+| 3 | 作用域与取消规则 | 标题/正文/列表/引用/待办都作用于**本行**（选区 = 每一行）；空行上应用记为"待输入样式"；取消只作用于传入的行区间，不回头改别的行；**回车后新行继承同一格式**（`repairAfterEnter` 补上了原来只对标记生效的那一半，标题/引用/居中现在也延续） |
+| 4 | 居中（有内容整行 / 空行光标）与**空行不再换行** | 居中仍是 `AlignmentSpan`；**末尾空行**没有字符可挂 span，改用视图级 `gravity`。回车拦截 = `本行空 && (上一行空 ‖ 本行居中)` |
+| 5 | 居中与列表/待办/引用**互斥**（置灰、且不恢复） | `BlockFormat.cancelsCenter` 在应用时清 `align`；`centerEnabled` 按**整个选区**算；`setAlignment` 再 guard 一次；取消那三类时不写回 `align` |
+| 6 | **光标字号**跟着段落样式 | 光标高度 = 光标那一行的行高（`Editor.java:2449-2464`）。有字符的行靠 `BlockMetricsSpan`；末尾空行靠视图级 `textSize`（`tailDefaults`）。因此**每一段都显式挂 `AlignmentSpan`**，视图级 `gravity` 只影响末尾那一行 |
+
+### 2. 两处"看着像小改、其实是根因"的地方
+
+- **末尾空行挂不上 span**：`Spannable` 的段落 span 只能挂在字符上，而文档末尾的空行一个
+  字符都没有（它的终止换行算上一段的边界）。平台的 `Editor.updateCursorPosition` 取的是
+  `layout.getLineTop/Bottom(line)` 与 `getPrimaryHorizontal(offset)` —— 没有 span 就只剩
+  **视图级** `textSize` / `gravity` 可调（`TextView.getLayoutAlignment()` 把 gravity 翻成
+  `Layout.Alignment`）。所以：末尾空行的字号 = 它自己的 `effectiveBlockStyle`，对齐 = 它的
+  `align`；提示语则单独挂一个正文字号的 span，免得变成大标题时提示语跟着变巨。
+- **回车拦在两条路上**：软键盘回车多数走 `sendKeyEvent` → `dispatchKeyEvent`（这里吃掉），
+  少数输入法直接 `commitText("\n")` → 由 `EditorTextState.onUserText` 把这次换行退回去
+  （模型不动，只递增版本号让 EditText 按旧模型重写）。
+
+### 3. 验证
+
+- **JVM 单测 550 条全绿**（R30 是 505，本轮 **+45**）。新增：
+  `EditorModelTest` 的 `rule 1..6` 十条（六选一互斥 36 组组合、取消只动当前行、
+  回车空行判定、居中互斥与"不恢复"、行内样式叠加…）、
+  `EditorStateTest` 六条（回车两条输入路径、选区跨行时居中置灰、六种格式穿过 Spannable 往返）、
+  新的 **`EditorCursorLayoutTest`（6 条）** —— 它直接在 Robolectric 的**真实排版**上量
+  `getLineBottom-getLineTop` 与 `getPrimaryHorizontal`，也就是平台画光标用的那两个量；
+  另加 `DiaryFormatBarTest` 两条（显式 `centerEnabled` 覆盖逐行判据、整栏禁用时不漏网）、`EditorEnterKeyTest` 三条（真实 `EditText` 上的回车拦截）、`EditorFormatActionsTest` 十三条（九个按钮逐个驱动接线）、以及空行段落格式相关的四条。
+- **真机实测**（帧差定位光标；证据在 `docs/ui-audit/r31/`）：
+
+  | 场景 | 实测 |
+  | --- | --- |
+  | 规则 6 · 空行切成不同格式后的**光标高度** | 正文 **65px** → 大标题 **113px** → 小标题 **88px** → 引用 **56px**（与字号 16/28/22/14sp 严格成比例 4.0~4.06×）；提示语在四种格式下都保持正文字号 |
+  | 规则 4 · 空行点居中 | 光标从 `x=79.5`（左）跳到 `x=541.5`（行中央，输入区 `[77,1003]` 中心 540）；取消居中后回到左 |
+  | 规则 5 · 引用行上点居中 | 光标纹丝不动（`x=79.5`，仍是引用的 56px 高）—— 按钮已置灰 |
+  | 规则 5 · 居中的正文再点列表 | 文本变 `• jia-yi-bing`、回到左对齐，格式栏里**居中图标变暗**（`r31-list-on-centered.png`） |
+  | 规则 2/3 · 列表再切大标题 | 文本 `• jia-yi-bing` → `jia-yi-bing`（项目符号消失）、字号变大、光标 87 → 124px（`r31-list-to-title.png`） |
+  | 规则 1 · 先点 B/I/S/U 再输入 | `BISU` 四个字同时是粗体 + 斜体 + 删除线 + 下划线（`r31-inline-stack.png`） |
+
+- 测试期间的草稿只存在内存里（**没有点过保存**，数据库无写入），真机已 `force-stop`
+  并把临时截图从 `/sdcard` 清掉；证据截图留在 `docs/ui-audit/r31/`。
+- 验证工具留在 `tools/`：**`dev_format_rules.py`（六条规则的真机端到端回归，12 条断言全过，坐标取自语义树）**、
+  `dev_ui.py`（按 uiautomator 语义树驱动，坐标不写死；含 `wait-text` 轮询）、
+  `dev_format_check.sh` + `dev_caret.py`（真机那套：写死分辨率坐标 + 帧差定位光标）（格式栏按钮坐标由
+  `uiautomator dump` 的真实 bounds 得来；帧差找光标；设备 1080×2340 / 440dpi）。
+  ⚠️ uiautomator 的属性**没有命名空间前缀**（`text=` 而不是 `android:text=`），解析时两种都要试。
+
+### 4. 【同轮追加】回车拦截的 View 级回归 + 样式呈现的官方对照 + 两处一致性修补
+
+真机被取走之后，把"只能靠真机看"的那一条用**真实 `EditText`** 补到了 JVM 上，
+另外把用户那句"样式参考谷歌官方的 SDK 和示例"落成了文档与两处修补：
+
+- **`EditorEnterKeyTest`（新，3 条，Robolectric 真实 `EditText`）**：把 `DiaryEditText`
+  按 `EditorTextArea` 的真实接法接上 `TextWatcher` → 状态机 → 版本号回写，然后
+  ① 被拦的那一行 `dispatchKeyEvent(KEYCODE_ENTER)` 返回 true 且文本一个字符都不多；
+  ② 本行有内容时**真的换行**（文本变 `正文\n`、模型多一行）—— 证明"吃掉"是**有条件的**；
+  ③ 输入法 `commitText("\n")` 的那一路：模型不动 + 版本号 +1，回写之后那个换行消失。
+  剩下只有"真机 IME 到底走哪条路"需要设备确认（两条路都接了，见 §2）。
+- **`04-diary.md` 新增"样式呈现：与 Google 官方（Compose / Material 3）的逐项对照"**：
+  粗体+斜体 = 官方"一个 `SpanStyle` 同时带 fontWeight + fontStyle"（平台侧合并成一个
+  `BOLD_ITALIC` 的 `StyleSpan`）、删除线+下划线 = `TextDecoration.combine` 的等价物、
+  居中/行高 = `ParagraphStyle` 的等价物、字号取 M3 Typography 角色、禁用态 = 官方
+  `DisabledOpacity = 0.38f`。**图标按钮的激活色是唯一一处与官方 token 不逐字一致的地方**：
+  M3 标准型是"选中图标变 `primary`、无底"，tonal 型是"未选中就带 `secondaryContainer` 底"，
+  我们取的是两者的混合（未选中无底 + 选中 `secondaryContainer` 胶囊）—— 来自设计稿
+  `.formatbar`，与 iOS 的 `primary` 胶囊也不同。要严格对齐官方或 iOS 都是一处常量的事，
+  已在文档里写明并留给用户拍板（token 值是从 `material3-android-1.4.0-sources.jar` 里读的，不是记忆）。
+- **一致性修补 1（删空一行不掉格式）**：`EditorModel.keepStyleWhenLineEmptied` ——
+  把一行的文字删光时保留段落格式（规则 3 的"直到用户取消格式"；iOS 的 `typingAttributes`
+  删除后也不重置）。非末行本来就靠终止换行上的 span 成立，**末行**挂不住 span，原来会掉回正文，
+  只在最后一行出现的不一致最难查，所以补平（新增 1 条单测，含"行数变了不生效""已有样式不覆盖"）。
+- **一致性修补 2**：删掉 `EditorSelectionMap.targetLineRange`（死代码，注释还写着
+  "格式按钮只对当前行生效"，与规则 3 的"选中的每一整段"矛盾），把那条测试改成直接断言
+  `EditorSelection.lineRange`。
+
+### 5. 【同轮追加 2】把"空行的段落格式"补成一条独立的规则（D10）
+
+复核 iOS 参考（`docs/ios-reference/v3-diary.md` §3.2 的回车表）时发现两处对不上，
+都出在**空行**上 —— 根因还是同一个：段落 span 挂不到空行（末行连终止换行都没有）。
+
+| # | 现象 | 处理 |
+| --- | --- | --- |
+| 1 | **空引用行 / 空标题行回车，格式丢了** | 用户规则 3 是"列表、引用、待办……**回车之后也不取消格式，直到用户取消格式**"，没有给空行开例外；原来 `repairAfterEnter` 只在"上一行有内容"时才延续格式，空行上回车会把这一行悄悄打回正文。现在**非标记行的段落格式一律延续**（含对齐） |
+| 2 | **删空一行 / 空行上的待输入样式会被别处的编辑抹掉** | 新增 `EditorModel.keepStylesForBlankLines`，**每步文本变更**都跑一次：空行的段落格式从上一版接回来（只在解析结果是"正文 + 不居中"时生效，不覆盖敲进去的或粘贴进来的样式） |
+
+- 因为 (1)，"怎么退出引用"的答案变了：iOS 是"在空引用行上按回车"，本项目是
+  **"再点一次引用按钮"** —— 记作 **D10**（`04-diary.md` §7 差异表第 11 条）。
+  iOS 的空引用行回车是"消费按键 + 结束引用"（`RichTextEngine.swift:675-682`），
+  与用户规则 3 的原话直接冲突，按"以我说的为主"取用户口径。
+- 顺带把 R27 记的旧偏离 **D8**（居中空行回车：允许换行但不居中的"不吞按键"折中）
+  标为**已被用户规则 4 取代**：现在居中空行上的回车直接吃掉（`blocksNewline`），
+  与 iOS `shouldBlockNewline` 同。
+- 新增单测 3 条（`rule 3 a pending style on a blank line survives the enter` ·
+  `rule 3 deleting a line's text keeps its paragraph style` ·
+  `a paragraph style continues onto the next line however the line looks`），
+  并把两条按旧行为写的断言改写为按用户规则的新行为。
+
+### 6. 【同轮追加 3】把按钮接线抽成一层并逐个按钮驱动（`EditorFormatActions`）
+
+回看这一段时发现一个覆盖盲区：**语义**（`EditorModel`）和**状态机**（`EditorTextState`）
+都有密集单测，但"哪个按钮传哪一段区间、用不用光标行定方向"这段**接线**散在 `EditorScreen`
+的六个 lambda 里，只有真机能验 —— 而"语义对了、接线错了"恰恰是这类功能最常见的缺陷。
+
+- 新增 `EditorFormatActions`（`ui/diary/EditorFormatActions.kt`）：格式栏九个按钮 → 模型的**唯一**
+  接线点，`EditorScreen` 的六个 lambda 变成一行转发；
+- 新增 `EditorFormatActionsTest`（**13 条**，Robolectric + 真 `EditorTextState`）：九个按钮逐个按，
+  断言模型结果 —— 段落样式菜单的作用域与"只应用不切换"、空行上的待输入样式、居中的开/关/空行/被拒、
+  列表与待办互相替换并取消旧的、**标记方向只看光标行**（有选区时 = 选区起始行）、引用"全引用才取消"、
+  B/I/S/U 的两种作用域（无选区只改接下来输入的字，走真实的"插入 → watcher → 状态机"链路）。
+
+顺手修掉两处：
+
+| # | 问题 | 处理 |
+| --- | --- | --- |
+| 1 | `setAlignment` 对混合选区是**半吊子**：选区里有一行是列表时，"能居中的那几行照样被居中" —— 按钮灰着却改了东西 | 改成**整段生效或不生效**（先 `centerAllowed(range)` 判一次），与格式栏"任一行是那三类就置灰"完全对齐 |
+| 2 | 测试里对"光标行"的理解写反了 | 记进文档：`EditorSelection.lineIndex` 是选区的**起始行**（Android 不暴露焦点端，iOS 的 `selectedRange.location` 同样如此），"方向只看光标行"在多行选区上就是看起始行 |
+
+### 7. 【同轮追加 4】回车拦截在**真实 Android 运行时**上跑通了（模拟器补位）
+
+> ⚠️ **这一节记的是当时那版规则**（"本行空 && 上一行空 → 不换行"），
+> 已被用户 2026-09-28 晚的口径**推翻**（见 §8：只有**居中的**空行才拦）。
+> 保留在这里只为记录"验证方法"（帧差 + uiautomator 文本 + 模拟器补位），
+> 当时的证据截图 `r31-emulator-enter-blocked.png` 已删除（按旧规则的结论会误导）。
+> 现在这一条的自动化断言在 `tools/dev_format_rules.py` 里，12 条全过。
+
+用户把真机取走后，回车拦截这一条一直只有 JVM 证据。本轮用本机已有的 AVD
+（`Pixel_10_Pro`，android-37.0）补上了端到端验证 —— 同一份 APK、同一套输入链路
+（`input keyevent` → InputManager → 窗口 → `dispatchKeyEvent`），与真机软键盘回车走的是同一条路。
+
+驱动方式是新的 `tools/dev_ui.py`：**从 uiautomator 的语义树里取真实 bounds 再点**，
+坐标不写死（换设备/换分辨率都能用），另带 `wait-text`（模拟器的输入注入有延迟，
+脚本里硬 sleep 会读到旧值 —— 这一轮踩到过，dump 永远慢一步）。
+
+实测（`docs/ui-audit/r31/r31-emulator-enter-blocked.png`）：
+
+```
+输入文字后逐次回车，每次读 EditText 的真实文本：
+  回车 #1  → 无变化   ← 这一下**没送到**（模拟器输入注入有延迟，那次文字也还没落地；
+                          空文档的第一行按规则本来就是放行的，所以这不是拦截行为）
+  回车 #2（本行有内容 "AAA"）        → 'AAA\n'      ← 放行
+  回车 #3（本行空，上一行有内容）      → 'AAA\n\n'    ← 放行（留出一个空行）
+  回车 #4（本行空，上一行也空）        → 'AAA\n\n'    ← **被吃掉**
+```
+
+截图里就是"AAA + 一个空行 + 光标所在的那一行"——**两行内容之间最多一个空行**，
+与用户规则 4 的原话一致。另外顺手复测了规则 6：同一个空行切成大标题后，
+帧差量到的光标高度 `70px → 122/131px`（两种字号各测了一次），提示语仍是正文字号。
+
+> 教训记一笔：模拟器/真机的 `input keyevent` 与 `input text` 都可能**慢一步**落地，
+> 脚本必须用 `wait-text` 之类的轮询去**确认文本真的变了**再走下一步 ——
+> 这一轮用硬 sleep 时读到过三种互相矛盾的中间态，白查了一轮。
+
+⚠️ 记清楚这条证据的边界：**是模拟器（AOSP 键盘）而不是用户的 MEIZU 21**。
+按键那条路径已经端到端跑通；`commitText("\n")` 那条路只有 JVM 证据
+（`EditorEnterKeyTest`），真机上到底走哪条路仍待确认 —— 清单 §6 第 4 组留给用户勾。
+
+### 8. 用户三条口径到齐 + 两个真机缺陷（2026-09-28 晚，真机 MEIZU 21 在手）
+
+用户对三个悬而未决的问题给了明确答复，另外在看真机的过程中报了两个缺陷：
+
+| # | 用户口径 / 反馈 | 落地 |
+| --- | --- | --- |
+| 1 | "**对齐 iOS 版，居中的时候不让有空行。但是如果不是居中的时候，是不做限制的**" | `blocksNewline` 收敛成"**本行空 且 本行居中**"——不居中的空行想按几个按几个（早先那版"本行空 && 上一行空"**推翻**）。单测/清单/文档同步 |
+| 2 | "**按照 iOS 的结束引用**" | 空引用行上的回车 = 消费按键 + **结束引用**（`endQuoteOnBlockedNewline`），D10 撤回，差异表第 11 条改成"与 iOS 相同" |
+| 3 | "**你做吧**"（引用在编辑态的背景，原 F1） | 已实现：`QuoteBackgroundSpan`（官方 `LineBackgroundSpan`）+ `LeadingMarginSpan(10dp)`，参数与阅读态逐项相同。真机实测：底铺满整列（x 77..1002）、左侧内边距 **10.5dp**（规范 10dp）、纵向 6dp 对称 |
+| 4 | "**引用样式启用的时候会改变正文按钮的样式**" | `EditorBlockStyle.fromPartStyle(quote)` 改成 **Body**：引用有自己的按钮，不该顺手把段落样式按钮点亮、也不该让菜单里三项一个勾都没有（真机复测：引用行上 `T▾` 不高亮、菜单勾在「正文」） |
+| 5 | "**引用的作用范围现在也不对**" | 真因是**段后距被加了两次**：`BlockMetricsSpan` 在平台传进来的 `fm` 上就地累加，而平台对同一行的 `chooseHeight` 会调用不止一次 → 段后距翻倍（编辑器段落间距 16dp、引用底往下多出一大截，看起来像包住了下一行）。改成**按原始字体度量算绝对值**，幂等 ✓。真机复测：引用底高度 141px → **87px**，上下内边距对称 ✓ |
+
+真机实测（截图 `r31-quote-scope-fixed.png` / `r31-quote-background.png` / `r31-quote-empty.png`）：
+
+```
+引用底的行范围 566..652（87px），文字行 "BBB" 598..625
+  → 上内边距 17px、下内边距 17px（6dp = 16.5px）✓ 对称
+```
+
+另外这一轮把**空行上的引用底**也补上了：末尾空行没有字符可以挂 `QuoteBackgroundSpan`，
+由 `DiaryEditText.onDraw` 用同一套几何（`QuoteStyle.drawBox`）补画 ——
+否则"在空行上点引用"正是 F1 最典型的那一幕（用户第一次点就是在空行上）。
+
+### 9. 居中"取消不掉"的真因：段落 span 会**粘到下一行**（用户 2026-09-28 真机反馈）
+
+用户原话："居中的作用范围不对劲。很诡异，取消的时候没有真的取消，不知道是不是和换行有关系，
+你检查一下。" —— **确实和换行有关系**，而且不止一处。用真机逐步量每行文字中心 x 复现：
+
+| 步骤 | 实测 |
+| --- | --- |
+| `AAA` / `BBB` 都不居中 | 两行中心 ≈ 120（左对齐） |
+| 光标在 `BBB` 上点居中 | `BBB` → 540（居中）、`AAA` 仍 120 |
+| 回车 + 输入 `CCC` | `CCC` **也变成 540** ✗ |
+| 再点居中（取消） | `CCC` 回到 124，但 `BBB` 仍 540 ✗ |
+
+两处成因，一层一个：
+
+1. **模型层**：我给"回车"加的"段落属性随换行延续"把**居中**也带下去了。
+   用户规则 4 把居中的作用域写成"本行"，且那条延续只对**列表/引用/待办**说过 ——
+   于是 `repairAfterEnter` 改成**只延续块样式与标记，不延续 `align`**。
+2. **span 层（真凶）**：`CCC` 在**模型里**一直是正文（单测也是绿的），但**画出来**还是居中。
+   探针（`toSpannable` → 往 Spannable 里插 `"\nCCC"` → 看 span 范围）显示：
+
+   ```
+   初始   spans = [0..4:ALIGN_NORMAL, 4..7:ALIGN_CENTER]
+   插入后 spans = [0..4:ALIGN_NORMAL, 4..11:ALIGN_CENTER]   ← 居中的 span 把 CCC 吞了
+   解析回模型   = [AAA/null, BBB/center, CCC/null]          ← 模型是对的
+   ```
+
+   段落 span 的右端含终止换行、终点正好落在下一行行首；两头 `INCLUSIVE` 时，
+   下一行行首敲的字被上一段吞掉。改成统一的 **`SPAN_INCLUSIVE_EXCLUSIVE`**
+   （`SpannableBridge.ParagraphSpanFlags`，5 处 + 图片行的对齐 span）后：
+
+   ```
+   插入后 spans = [0..4:ALIGN_NORMAL, 4..7:ALIGN_CENTER]   ← 不再越界
+   ```
+
+   真机复测：`BBB` 居中、`CCC` **左对齐（中心 124）** ✓（截图 `r31-center-scope-fixed.png`）。
+
+新增回归 1 条（`a paragraph span never swallows the next line`：模型 + span 范围一起断言），
+并把两条按旧行为写的用例改成"居中不随换行延续"。**单测 561 条全绿**，
+`tools/dev_format_rules.py` 真机 **12/12 通过**。
+
+### 10. 仍未做
+
+- **回车拦截的真机（MEIZU 21）复测**：模拟器已跑通按键路径（见上），
+  但用户那台设备上的输入法（Gboard / 讯飞等）走哪条路仍待确认；
+- 引用在**编辑态**的背景（原 F1）—— 需要自绘圆角底，`BackgroundColorSpan` 画不出圆角；
+- 光标在**段落最后一行**会比行高多 8dp（段后距烘进了 `LineHeightSpan` 的 descent），
+  与 iOS"光标 = 行高"有这点小差异（随字号成比例，规则 6 不受影响）；
+- R30 留下的两条：编辑态图片宽度与阅读态不一致、iOS 备份里的图片 `w/h` 单位问题。

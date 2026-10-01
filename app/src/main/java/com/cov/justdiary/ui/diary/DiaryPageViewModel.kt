@@ -668,7 +668,14 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         beginLocate()
     }
 
-    /** 取一次当前位置。**只有新建片段**能走到这里。 */
+    /**
+     * 取一次当前位置。**只有新建片段**能走到这里。
+     *
+     * 未授权时**不在这里申请权限**（Android 的申请必须从一个 Activity 结果通道发起，
+     * 见 `DiaryPageScreen` 的 `requestLocation`）：只把 `locating` 落回 false，
+     * 于是地点胶囊停在「重新获取位置」，用户点它就走申请 + 复取的链路。
+     * 这与 iOS `beginLocate()` 的"申请 → 600ms 后复查"是同一件事的两种平台写法。
+     */
     fun beginLocate() {
         val current = _state.value
         if (current.isEditingExistingBlock) return
@@ -678,6 +685,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         }
         _state.value = current.copy(locating = true)
         viewModelScope.launch {
+            val settings = _state.value.settings
             val fix = container.locationService.currentLocation()
             if (fix == null) {
                 _state.value = _state.value.copy(locating = false)
@@ -685,11 +693,42 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             }
             val placemark = container.locationService.reverseGeocode(
                 LocationFix(fix.latitude, fix.longitude),
-                _state.value.settings.appLanguage,
+                settings.appLanguage,
             )
-            val snapshot = container.locationService.snapshotFor(fix, placemark, _state.value.settings.appLanguage)
+            val snapshot = container.locationService.snapshotFor(fix, placemark, settings.appLanguage)
             _state.value = _state.value.copy(location = snapshot, locating = false)
         }
+    }
+
+    /**
+     * 「重新获取位置」（地点菜单里的那一项，iOS `refreshLocation()`）：
+     * 丢掉当前这份快照再取一次 —— 例如刚才是靠缓存点落下的，用户想拿一个更准的。
+     */
+    fun refreshLocation() {
+        if (_state.value.isEditingExistingBlock) return
+        _state.value = _state.value.copy(location = null)
+        beginLocate()
+    }
+
+    /**
+     * 回到前台时补一次定位。
+     *
+     * 只在**新建片段 + `auto_loc` 开着 + 还没有位置 + 当前没有正在取的请求**时才补
+     * （判据是纯函数 [LocationRules.shouldRetryOnForeground]）：用户可能在第一次取点失败
+     * （刚下地铁 / 刚开定位开关）之后把应用切出去又切回来，这时界面上的「重新获取位置」
+     * 还在，但没有人会替他再点一次 —— 这正是"明明开了权限却经常拿不到位置"的来源之一。
+     */
+    fun retryLocateOnForeground() {
+        val current = _state.value
+        val shouldRetry = LocationRules.shouldRetryOnForeground(
+            isRead = current.isRead,
+            isEditingExistingBlock = current.isEditingExistingBlock,
+            autoLoc = current.settings.autoLoc,
+            hasLocation = current.location != null,
+            locating = current.locating,
+        )
+        if (!shouldRetry) return
+        beginLocate()
     }
 
     /** 调整显示精度：只改文案与档位，坐标与地区列不动。 */

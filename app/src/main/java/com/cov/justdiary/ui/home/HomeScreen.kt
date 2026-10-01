@@ -161,9 +161,10 @@ fun HomeScreen(
     dateFormats: DateFormats? = null,
     onOpenDay: (LocalDate) -> Unit = {},
     /**
-     * 「写日记 / 继续写日记」的去向：**直接进编辑器**（对应 iOS 的 `openEditor(dayKey)`）。
+     * 「写日记」（**空态**那一颗）的去向：直接进编辑器（对应 iOS 的 `openEditor(dayKey)`）。
      *
-     * 不传时退回 [onOpenDay]（阅读页），保证旧调用点行为不变。
+     * ⚠️「继续写日记」（这一天已经有内容）**不走这里**，它走 [onOpenDay] 进阅读态
+     * （2026-09-28 用户返工）。不传时退回 [onOpenDay]（阅读页），保证旧调用点行为不变。
      */
     onWrite: (LocalDate) -> Unit = onOpenDay,
     /** 当前选中日的片段（当日面板用；`null` = 这一天还没有日记）。 */
@@ -1739,20 +1740,28 @@ private fun monthTitleText(
  *
  * 与 iOS 相同的三条业务规则：
  *  1. 只有**今天**才有写入口；未来的日期显示"还没有到来"；
- *  2. 有内容时底部给「继续写日记」，空态给「写日记」；
+ *  2. 有内容时底部给「继续写日记」→ **阅读态**（[onOpenDay]），空态给「写日记」→ 编辑态（[onWrite]）；
  *  3. 标题行显示完整日期 + 农历。
+ *
+ * 可见性放宽到 `internal` 是为了让 `HomeDayPanelTest` 能直接钉住第 2 条 ——
+ * 从整个首页走一遍要先摆出周态才有当日面板，那样的用例测的是日历而不是这两个入口。
  */
 @Composable
-private fun DayPanel(
+internal fun DayPanel(
     blocks: List<EditBlock>?,
     selectedDate: LocalDate,
     todayKey: String,
     dateFormats: DateFormats?,
     showTime: Boolean,
     imageLoader: (String) -> ImageBitmap?,
-    /** 点日记卡片 → 进编辑器（iOS 的 `openEditor`）。 */
+    /** 点日记卡片 / 「继续写日记」→ 进**阅读态**（iOS 的 `openDiary`）。 */
     onOpenDay: () -> Unit,
-    /** 「写日记 / 继续写日记」按钮 → 进编辑器。 */
+    /**
+     * 「写日记」（空态那一颗）→ 进**编辑态**（iOS 的 `openEditor`）。
+     *
+     * ⚠️「继续写日记」走的是 [onOpenDay]，不是这里（2026-09-28 用户返工：
+     * 这一天已经有内容了，点「继续写日记」应该先让用户看到写过的东西，不该直接进编辑器）。
+     */
     onWrite: () -> Unit,
     onToday: (() -> Unit)?,
     showHeader: Boolean,
@@ -1840,7 +1849,11 @@ private fun DayPanel(
                         )
                     }
                     if (isToday) {
-                        Button(onClick = onWrite, modifier = Modifier.fillMaxWidth()) {
+                        // 「继续写日记」= **进阅读态**（2026-09-28 用户返工）。
+                        // 这一天已经有内容，先让用户看到写过的内容；要接着写就在阅读页点
+                        // 顶栏的「写点什么」，那才是「新建片段」的入口（与 iOS 的
+                        // `openDiary` / `openEditor` 两个入口的分工一致）。
+                        Button(onClick = onOpenDay, modifier = Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.index_continue_write))
                         }
                     }

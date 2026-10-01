@@ -104,6 +104,69 @@ data class InlineFlags(
     }
 }
 
+/**
+ * 编辑器里的**段落格式六选一**（用户 2026-09-28 规则 2）。
+ *
+ * ```
+ * 大标题 / 小标题 / 正文 / 引用 / 列表 / 待办     ← 任意时刻只有一个是"本行的格式"
+ * ```
+ *
+ * 与 [EditorBlockStyle]（格式栏第一个按钮的菜单项，只有四项）区分开：
+ * 这一层是**互斥规则本身**，菜单与三个按钮都落到它上面。
+ */
+enum class BlockFormat {
+    Title,
+    Heading,
+    Body,
+    Quote,
+    List,
+    Todo,
+    ;
+
+    /** 落库时写进 `content_json` 的 `style`。列表/待办有自己的名字（它们由 `marker` 表达）。 */
+    val partStyle: String
+        get() = when (this) {
+            Title -> ContentPartStyle.title
+            Heading -> ContentPartStyle.heading
+            Quote -> ContentPartStyle.quote
+            Body, List, Todo -> ContentPartStyle.body
+        }
+
+    /**
+     * 应用本格式时是否**连带取消居中**（规则 5）。
+     *
+     * 居中与列表 / 待办 / 引用互斥：启用这三类时自动取消居中，且之后再取消它们
+     * **不恢复**原来的居中（那是有意的 —— 见 [EditorModel.applyBlockFormat]）。
+     * 大标题 / 小标题 / 正文**不**动居中：居中的标题是合法组合（规则 4）。
+     */
+    val cancelsCenter: Boolean
+        get() = this == Quote || this == List || this == Todo
+
+    companion object {
+        /** 这一行当前是什么格式（互斥判定与"方向"判定都用它）。 */
+        fun ofLine(line: EditorLine): BlockFormat = when {
+            line.marker == EditorLine.MarkerKind.Bullet -> List
+            line.marker == EditorLine.MarkerKind.Todo -> Todo
+            line.blockStyle == ContentPartStyle.title -> Title
+            line.blockStyle == ContentPartStyle.heading -> Heading
+            line.blockStyle == ContentPartStyle.quote -> Quote
+            else -> Body
+        }
+
+        fun ofPartStyle(style: String): BlockFormat = when (style) {
+            ContentPartStyle.title -> Title
+            ContentPartStyle.heading -> Heading
+            ContentPartStyle.quote -> Quote
+            else -> Body
+        }
+
+        fun ofMarker(kind: EditorLine.MarkerKind): BlockFormat = when (kind) {
+            EditorLine.MarkerKind.Bullet -> List
+            EditorLine.MarkerKind.Todo -> Todo
+        }
+    }
+}
+
 /** 工具栏上"当前生效的段落样式"。 */
 enum class EditorBlockStyle(val partStyle: String) {
     Title(ContentPartStyle.title),
@@ -114,14 +177,21 @@ enum class EditorBlockStyle(val partStyle: String) {
 
     companion object {
         /**
-         * 段落样式 → 编辑样式。**列表、待办、图片与未知值都按正文渲染**
-         * （与 iOS `EditorBlockStyle(partStyle:)` 一致：它们有自己的持久化名字，
-         * 但绘制时用正文属性）。
+         * 段落样式 → **格式栏第一个按钮（`T▾`）上显示的那一项**。
+         *
+         * ⚠️ **列表、待办、引用、图片与未知值都按正文**：
+         * - 列表 / 待办 / 引用各自有**自己的按钮**，它们不该顺手把"段落样式"按钮点亮
+         *   （用户 2026-09-28 实测反馈：*"引用样式启用的时候会改变正文按钮的样式"* ——
+         *   引用一开，`T▾` 就变高亮、菜单里三项一个勾都没有，看起来像"正文丢了"）；
+         * - 这也与 iOS `EditorBlockStyle(partStyle:)` 的口径一致：它们有自己的持久化名字，
+         *   但绘制时用正文属性。
+         *
+         * 于是"引用行上段落样式菜单显示正文"是**有意**的：引用只改这一个按钮之外的东西
+         * （字号走 bodyMedium、底色由 `QuoteBackgroundSpan` 画）。
          */
         fun fromPartStyle(partStyle: String): EditorBlockStyle = when (partStyle) {
             ContentPartStyle.title -> Title
             ContentPartStyle.heading -> Heading
-            ContentPartStyle.quote -> Quote
             else -> Body
         }
     }
@@ -272,88 +342,89 @@ object EditorModel {
     // ------------------------------------------------------------------ 段落级操作
 
     /**
-     * 给 `[indices]` 覆盖的区间设置段落样式。
+     * 把 `[indices]` 上的段落格式**先取消、再应用**成 [format]。
      *
-     * ## 两个必须守住的点
+     * ## 用户 2026-09-28 规则 2 / 3 / 5 的落点
      *
-     * 1. **先把标记行"摊平"**：列表/待办行没有段落样式（它们由标记表达），
-     *    设为标题/引用时要把标记去掉；**一条含 N 个条目的列表会摊成 N 个段落**
-     *    （因为存储里每个条目本来就是独立的一行）。否则会出现"带项目符号的大标题"。
-     * 2. **按区间整体重建，而不是逐下标就地修改**：摊平会改变行数，
-     *    逐下标遍历时后面的下标会整体错位 —— iOS 为此在 `toggleQuote` 里显式
-     *    `ranges.reversed()`，但"倒序"只对**不改变行数**的操作成立。这里改成
-     *    先把区间切出来、映射完再拼回，从根上避免下标漂移。
-     *    `EditorModelTest` 有一条对照测试：按 iOS 那种逐下标正序改会得到错误结果。
+     * - **六选一互斥**（规则 2）：大标题 / 小标题 / 正文 / 引用 / 列表 / 待办 是同一格属性，
+     *   应用一个就自动取消另外的 —— 实现上就是"先把本行的段落格式清成正文，再写上目标"。
+     *   这与 iOS 的 `restyle(..., .body, cancelCenter: true)` 顺序一致（那边也是先重置再套）。
+     * - **本行已有内容也一样**（规则 3）：作用域是"本行"（有选区时是选中的每一行），
+     *   已有内容不会被跳过 —— 它会被重新排版成新格式。
+     * - **取消格式只取消当前行**（规则 3 后半）：本函数只动 [indices] 覆盖到的行，
+     *   绝不回头改"以前已经应用过的"行。
+     * - **居中的互斥方向**（规则 5）：引用 / 列表 / 待办会**顺手取消居中**
+     *   （[BlockFormat.cancelsCenter]）；反过来的"取消这三类"**不恢复**居中。
+     *
+     * ## 两条必须守住的实现细节
+     *
+     * 1. ⚠️ 一律用 `copy`：段落格式只决定"这一段是什么"，**行内样式（B/I/S/U）与它无关**，
+     *    必须原样跟着走（iOS `restyle`：*"preserving bold/italic traits"*）。真机缺陷
+     *    （2026-09-28）："待办 + 四种行内样式"的行切一次小标题，四种样式全丢。
+     * 2. ⚠️ 按区间整体重建，而不是逐下标就地修改：逐下标遍历时下标会整体错位
+     *    （iOS 为此在 `toggleQuote` 里写 `ranges.reversed()`）。
+     * 3. 图片行**不参与**段落格式：它没有文字，落库时是独立的 image 段
+     *    （`linesToParts` 提前 return），改写它的 blockStyle 只会在往返时凭空造出一个样式。
      */
-    fun setBlockStyle(lines: List<EditorLine>, indices: IntRange, style: String): List<EditorLine> {
+    fun applyBlockFormat(
+        lines: List<EditorLine>,
+        indices: IntRange,
+        format: BlockFormat,
+    ): List<EditorLine> {
         val range = normalize(indices, lines.size) ?: return lines
-        // 引用**永远左对齐**：切成引用时清掉居中（iOS `cancelCenter: true`，
-        // 规范 §2.5「引用对齐：切到 quote 时强制左对齐」）。居中按钮在引用行上也是禁用的。
-        val cancelCenter = style == ContentPartStyle.quote
-        val middle = lines.subList(range.first, range.last + 1).flatMap { line ->
-            when (line.marker) {
-                null -> listOf(
-                    line.copy(
-                        blockStyle = style,
-                        align = if (cancelCenter) null else line.align,
-                    ),
-                )
-
-                else -> lineItems(line).map { item ->
-                    EditorLine(text = item.text, blockStyle = style, align = if (cancelCenter) null else line.align)
-                }
-            }
+        val cancelCenter = format.cancelsCenter
+        val middle = lines.subList(range.first, range.last + 1).map { line ->
+            if (line.isImage) return@map line
+            // ① 先取消：把本行的六选一格式清干净（正文 + 无标记 + 不勾选；引用/列表/待办还要清居中）
+            // ② 再应用：写上目标格式
+            line.copy(
+                blockStyle = format.partStyle,
+                marker = when (format) {
+                    BlockFormat.List -> EditorLine.MarkerKind.Bullet
+                    BlockFormat.Todo -> EditorLine.MarkerKind.Todo
+                    else -> null
+                },
+                done = false,
+                align = if (cancelCenter) null else line.align,
+            )
         }
         return lines.take(range.first) + middle + lines.drop(range.last + 1)
     }
 
     /**
-     * 把区间内的所有段落/条目合并成**一条**列表或待办（对应"选中几行 → 点列表按钮"）。
+     * 切换 [format]：已经是它了 → 变回正文；否则 → 应用它（[applyBlockFormat]）。
      *
-     * 与 iOS 的差异：iOS 的列表按钮只作用于光标所在的那一行（`toggleMarker` 在行首
-     * 插入一个标记附件），因此没有"多行合并成一条列表"的路径。这里补上，
-     * 因为多行选区在 Android 上同样存在，而落库格式要求连续条目合并成一条。
+     * 方向（"已经是它了吗"）按 iOS 分两种取法：
+     * - **引用**：区间内**全部**已是引用才算"已经是"（iOS `toggleQuote`）；
+     * - **列表 / 待办**：只看**光标所在行**（iOS `toggleMarker`；选区只决定范围，不决定方向）。
+     *
+     * 大标题 / 小标题 / 正文**不做切换**：它们是段落样式菜单的项，选中即应用
+     * （菜单里当前项带勾，再点一次不该把它变成正文）。
      */
-    fun setMarkerOnRange(
+    fun toggleBlockFormat(
         lines: List<EditorLine>,
         indices: IntRange,
-        kind: EditorLine.MarkerKind,
-        /**
-         * 光标所在行。**toggle 方向只看这一行**（规范 §3.2：选区只决定范围，不决定方向）——
-         * 否则"光标在正文行、选了几行列表"时方向会被那几行里的标记带偏。
-         */
+        format: BlockFormat,
         cursorIndex: Int = indices.first,
     ): List<EditorLine> {
         val range = normalize(indices, lines.size) ?: return lines
-        val gathered = lines.subList(range.first, range.last + 1).flatMap { lineItems(it) }
-        if (gathered.isEmpty()) return lines
-        // 方向 = 光标那一行是否已经是同种标记
-        val allMarked = lines.getOrNull(cursorIndex)?.marker == kind
-        val middle = if (allMarked) {
-            // 取消标记 → 摊平回正文段落
-            gathered.map { EditorLine(text = it.text, blockStyle = ContentPartStyle.body) }
-        } else {
-            // 开启标记 → 每条一行（linesToParts 会把连续同种标记合并成一条 list/todo part）
-            gathered.map { item ->
-                EditorLine(
-                    text = item.text,
-                    marker = kind,
-                    done = if (kind == EditorLine.MarkerKind.Todo) item.done else false,
-                )
-            }
+        val already = when (format) {
+            BlockFormat.Quote -> range.all { lines.getOrNull(it)?.blockStyle == ContentPartStyle.quote }
+            BlockFormat.List -> lines.getOrNull(cursorIndex)?.marker == EditorLine.MarkerKind.Bullet
+            BlockFormat.Todo -> lines.getOrNull(cursorIndex)?.marker == EditorLine.MarkerKind.Todo
+            BlockFormat.Title, BlockFormat.Heading, BlockFormat.Body -> false
         }
-        return lines.take(range.first) + middle + lines.drop(range.last + 1)
+        return applyBlockFormat(lines, range, if (already) BlockFormat.Body else format)
     }
 
-    /** 一行承载的条目（普通段落 = 1 条；列表/待办 = N 条）。 */
-    private fun lineItems(line: EditorLine): List<EditorLine> = when (line.marker) {
-        null -> listOf(EditorLine(text = line.text, blockStyle = line.blockStyle, align = line.align, spans = line.spans))
-        else -> {
-            // 编辑器里列表/待办的每个条目本来就是独立的一行；
-            // 只有从 content_json 载入时才会出现"一行多条目"（这里按 text 兜底）
-            listOf(line)
-        }
-    }
+    /**
+     * 段落样式菜单（大标题 / 小标题 / 正文 / 引用）的入口 —— 只应用、不切换。
+     *
+     * 保留这个"按 partStyle 字符串"的签名，是因为落库契约里的样式名就是它
+     * （`ContentPartStyle`）；互斥规则的唯一实现是 [applyBlockFormat]。
+     */
+    fun setBlockStyle(lines: List<EditorLine>, indices: IntRange, style: String): List<EditorLine> =
+        applyBlockFormat(lines, indices, BlockFormat.ofPartStyle(style))
 
     private fun normalize(indices: IntRange, size: Int): IntRange? {
         if (size == 0) return null
@@ -362,65 +433,81 @@ object EditorModel {
         return if (first > last) last..first else first..last
     }
 
-    /** 设置/取消居中（段落级）。 */
-    fun setAlignment(lines: List<EditorLine>, indices: IntRange, center: Boolean): List<EditorLine> =
-        applyToLines(lines, indices) { line ->
+    /**
+     * 设置/取消居中（段落级）。
+     *
+     * 规则 4：本行**有内容** → 整行居中/取消居中；本行**没有内容** → 改的是"光标的位置"
+     * （空段落也带 `AlignmentSpan`，光标的 x 由 `Layout.getPrimaryHorizontal` 给出，
+     * 居中段落里就落在行中央）。
+     *
+     * 规则 5：列表 / 引用 / 待办行上**不允许**居中 —— 与格式栏"任一行是那三类就把按钮置灰"
+     * 完全对齐：**整段只要有**一行是那三类，这次居中就整体不生效（而不是"能居中的那几行先居中"，
+     * 那种半吊子结果既不好解释、也会让"按钮灰着却改了东西"）。取消居中（`center = false`）
+     * 永远允许。
+     */
+    fun setAlignment(lines: List<EditorLine>, indices: IntRange, center: Boolean): List<EditorLine> {
+        val range = normalize(indices, lines.size) ?: return lines
+        if (center && !centerAllowed(lines, range)) return lines
+        return applyToLines(lines, range) { line ->
             line.copy(align = if (center) ALIGN_CENTER else null)
         }
-
-    /**
-     * 切换 [indices] 区间上的引用样式。
-     *
-     * 与 iOS `toggleQuote` 一致：只有区间内**全部**已是引用时才取消，否则全部设为引用。
-     */
-    fun toggleQuote(lines: List<EditorLine>, indices: IntRange): List<EditorLine> {
-        val allQuote = indices.all { lines.getOrNull(it)?.blockStyle == ContentPartStyle.quote }
-        val target = if (allQuote) ContentPartStyle.body else ContentPartStyle.quote
-        return setBlockStyle(lines, indices, target)
     }
 
+    /** 居中与引用/列表/待办互斥（规则 5）。 */
+    fun centerAllowed(line: EditorLine): Boolean =
+        line.marker == null && line.blockStyle != ContentPartStyle.quote
+
+    /** 整段区间是否**每一行**都允许居中（格式栏据此置灰居中按钮）。 */
+    fun centerAllowed(lines: List<EditorLine>, indices: IntRange): Boolean =
+        normalize(indices, lines.size)?.all { centerAllowed(lines[it]) } ?: false
+
+    /** 切换 [indices] 区间上的引用样式（规则 2：先取消本行其它格式，再套引用）。 */
+    fun toggleQuote(lines: List<EditorLine>, indices: IntRange): List<EditorLine> =
+        toggleBlockFormat(lines, indices, BlockFormat.Quote)
+
     /**
-     * 切换列表 / 待办标记。对应 iOS `toggleMarker`：
-     *
-     * - **开启前先把该行重置为正文**（取消标题/引用/居中/另一种标记）；
-     * - 再次点击同一标记则取消，恢复为正文段落。
+     * 切换列表 / 待办标记（多行选区版）。对应 iOS `toggleMarker`：
+     * 开启前先把该行重置为正文（取消标题/引用/居中/另一种标记），再次点击则取消。
      */
-    fun toggleMarker(lines: List<EditorLine>, index: Int, kind: EditorLine.MarkerKind): List<EditorLine> {
-        val line = lines.getOrNull(index) ?: return lines
-        // iOS 的列表/待办按钮只作用于光标所在行（toggleMarker 在行首插入一个标记附件）
-        val toggledOff = line.marker == kind
-        val updated = if (toggledOff) {
-            line.copy(marker = null, done = false, blockStyle = ContentPartStyle.body)
-        } else {
-            line.copy(
-                marker = kind,
-                done = if (kind == EditorLine.MarkerKind.Todo) line.done else false,
-                // 开启标记前重置块样式与居中（与 iOS 的 restyle(to: .body, cancelCenter: true) 一致）
-                blockStyle = ContentPartStyle.body,
-                align = null,
-            )
-        }
-        return lines.toMutableList().also { it[index] = updated }
-    }
+    fun setMarkerOnRange(
+        lines: List<EditorLine>,
+        indices: IntRange,
+        kind: EditorLine.MarkerKind,
+        /** 光标所在行；**toggle 方向只看这一行**（选区只决定范围）。 */
+        cursorIndex: Int = indices.first,
+    ): List<EditorLine> = toggleBlockFormat(lines, indices, BlockFormat.ofMarker(kind), cursorIndex)
+
+    /** 切换光标所在那一行的列表 / 待办标记。 */
+    fun toggleMarker(lines: List<EditorLine>, index: Int, kind: EditorLine.MarkerKind): List<EditorLine> =
+        toggleBlockFormat(lines, index..index, BlockFormat.ofMarker(kind), index)
 
     /**
      * 回车之后的修补（规范 §3.4 的四种回车行为）。
      *
      * `EditText` 只会插入一个 `\n`，标记与段落样式都不会自己延续；这里按 iOS 的
-     * `shouldChangeTextIn` 规则把它补齐：
+     * `shouldChangeTextIn` 规则 + 用户 2026-09-28 规则 3 把它补齐：
      *
      * | 场景 | 结果 |
      * | --- | --- |
      * | 列表 / 待办项**有内容**时回车 | 新行继承同种标记（继续加一项），待办默认未勾选 |
-     * | 列表 / 待办项**空**时回车 | **结束列表**：上一行去掉标记，新行是普通空行 |
-     * | 空引用行回车 | 结束引用（新行按正文 —— 块样式不会自己延续，天然如此） |
-     * | 居中空行回车 | 不产生新的居中空行（新行不居中；居中落在段落的终止换行上，不越到下一行） |
+     * | 列表 / 待办项**空**时回车 | **结束列表**：上一行去掉标记，新行是普通空行（iOS 同） |
+     * | 大 / 小标题、引用回车 | **新行继承同一样式** —— 规则 3 的"回车之后也不取消格式，直到用户取消格式" |
+     * | 居中的正文回车 | 新行**不继承居中**（居中只作用于"本行"，见下面的 ⚠️） |
+     * | 正文回车 | 新行还是正文（= 没有样式要延续，行为与以前一致） |
      *
-     * 与 iOS 的一处**有意差异**（记作 D8）：iOS 在"空段落 + 居中"时直接**吞掉**这次回车
-     * （`shouldBlockNewline`），用户会觉得按键坏了。这里允许换行，只是不让居中扩散到新行 ——
-     * 规范那句"不产生新的居中空行"的**结果**一致，但按键始终有响应。
+     * 三种"新行"都只继承**上一行**的状态，因此只对"新出现、且内容为空"的行生效 ——
+     * 粘贴 / 删除 / 普通输入都不受影响。
      *
-     * 只对"新出现、且内容为空"的行生效，因此粘贴 / 删除 / 普通输入都不受影响。
+     * ## 与 iOS 的一处**有意差异**（D10）
+     *
+     * iOS 在**空引用行**上回车是"消费按键 + 结束引用"（`RichTextEngine.swift:675-682`：
+     * *"空引用行回车 → 结束引用"*）。用户规则 3 说得更直接：**"回车之后也不取消格式，
+     * 直到用户取消格式"** —— 引用只能由「引用」按钮取消，回车必须延续。这里按用户的口径实现；
+     * "怎么退出引用"的答案因此变成"再点一次引用按钮"（或选别的段落格式）。
+     *
+     * 居中空行的回车在**更早一步**就被 [blocksNewline] 吃掉了（规则 4），走不到这里；
+     * 万一走到（例如粘贴带进来的换行），也是"新行继承居中"，与 iOS 的
+     * "段落属性随换行延续"一致。
      */
     fun repairAfterEnter(
         lines: List<EditorLine>,
@@ -441,7 +528,21 @@ object EditorModel {
                 above.marker != null ->
                     result[index] = line.copy(marker = above.marker, done = false)
 
-                else -> Unit
+                // 非标记行 → **块样式跟着换行延续**（规则 3：标题 / 引用"回车之后也不取消格式"）。
+                //
+                // iOS 是靠"段落属性挂在终止换行上"天然延续的；Android 这边
+                // `Spannable` 的块 span 虽然也覆盖终止换行，但新插入的 `\n` 会让**旧 span**
+                // 向后长一格，新行的行首反而没有 span 起点 —— 解析回来就是正文。
+                // 所以这里在模型层显式补上（随后 [EditorTextState] 会按模型回写平台文本）。
+                // 上一行是正文时不改任何东西，因此不必特判。
+                //
+                // ⚠️ **居中不在这里延续**（`align` 不带下去）。iOS 的段落属性确实会随换行延续，
+                // 但用户 2026-09-28 的规则 4 把居中的作用域写成"本行"，且真机实测反馈
+                // （"居中的作用范围不对劲……取消的时候没有真的取消，不知道是不是和换行有关系"）——
+                // 就是这一条：居中一旦被换行继承，取消时只取消光标那一行，上面几行还留着居中，
+                // 看起来像"没取消掉"。所以居中的延续只在"用户显式点居中"时发生。
+                else ->
+                    result[index] = line.copy(blockStyle = above.blockStyle)
             }
         }
         return result
@@ -474,6 +575,77 @@ object EditorModel {
         } else {
             line
         }
+    }
+
+    /**
+     * **空行**（没有文字、没有标记）的段落格式，从上一版接过来 —— [carryOverStylesWhenTyping] 的另一半。
+     *
+     * ## 为什么必须有这一条
+     *
+     * 段落 span 只能挂在字符上。文档**末行**如果是空的，它一个字符都没有（终止换行算上一段的边界），
+     * 从 `EditText` 解析回来必然退化成正文 —— 于是两件本该成立的事会失效：
+     *
+     * 1. **把一行的文字删空**（规则 3 的"直到用户取消格式"；iOS 的 `typingAttributes`
+     *    在删除之后也不重置）：删光大标题再输入，应该还是大标题；
+     * 2. **空行本来就是"待输入样式"的载体**：在空行上选了大标题 / 引用之后再敲回车，
+     *    这一行还是大标题 / 引用（规则 3："回车之后也不取消格式"）—— 少了这一条，
+     *    回车会把这一行悄悄打回正文。
+     *
+     * 只在这一版解析出来是**正文且不居中**时生效，所以不会覆盖用户敲进去的或粘贴进来的样式；
+     * 非空行、标记行、图片行一律不碰。**每一步文本变更后都跑**（而不是只在行数变化时），
+     * 因为"样式丢了"这件事与行数变化无关。
+     */
+    fun keepStylesForBlankLines(
+        lines: List<EditorLine>,
+        previous: List<EditorLine>,
+    ): List<EditorLine> = lines.mapIndexed { index, line ->
+        val before = previous.getOrNull(index) ?: return@mapIndexed line
+        if (line.isImage || line.marker != null || line.text.isNotEmpty()) return@mapIndexed line
+        if (line.blockStyle == ContentPartStyle.body && line.align == null) {
+            line.copy(blockStyle = before.blockStyle, align = before.align)
+        } else {
+            line
+        }
+    }
+
+    // ------------------------------------------------------------------ 回车与空行（规则 4）
+
+    /**
+     * 是不是一行"什么内容都没有"的空行。
+     *
+     * **带标记的空条目（`• `）不算**：标记本身就是这一行的内容，用户还要在上面打字，
+     * 回车在那里的含义是"结束列表"（[repairAfterEnter]，iOS 同）。
+     */
+    fun isBlankLine(line: EditorLine?): Boolean =
+        line != null && line.text.isEmpty() && line.marker == null && line.imageSrc == null
+
+    /**
+     * 这一次回车要不要**吃掉**（用户 2026-09-28 定稿，与 iOS 逐条对齐）。
+     *
+     * | 条件 | 出处 |
+     * | --- | --- |
+     * | 本行是空行，且**本行居中** | iOS `shouldBlockNewline`（`RichTextView.swift:191-196`、`RichTextEngine.swift:567-571`）：*"居中的空行回车 → 直接忽略，防止空居中行无限堆叠"* —— 用户原话"**居中的时候不让有空行**" |
+     * | 本行是空行，且**本行是引用** | iOS：*"空引用行回车 → 消费按键，结束引用"* —— 用户原话"**按照 iOS 的结束引用**"（见 [endQuoteOnBlockedNewline]） |
+     *
+     * ⚠️ **不居中的空行不受任何限制**（用户原话："但是如果不是居中的时候，是不做限制的"）：
+     * 想按几个空行就按几个空行。早先按"本行空 && 上一行也空"实现过一版，已按这句推翻。
+     */
+    fun blocksNewline(lines: List<EditorLine>, index: Int): Boolean {
+        val line = lines.getOrNull(index) ?: return false
+        if (!isBlankLine(line)) return false
+        return line.align == ALIGN_CENTER || line.blockStyle == ContentPartStyle.quote
+    }
+
+    /**
+     * 被吃掉的那次回车**顺手要做的事**：空引用行上的回车 = iOS 的"结束引用"
+     * （只重置这一行的段落样式，不动已输入的内容 —— 这一行本来就是空的）。
+     *
+     * 返回**同一个列表实例**表示不用回写平台文本；返回新列表表示模型变了。
+     */
+    fun endQuoteOnBlockedNewline(lines: List<EditorLine>, index: Int): List<EditorLine> {
+        val line = lines.getOrNull(index) ?: return lines
+        if (!isBlankLine(line) || line.blockStyle != ContentPartStyle.quote) return lines
+        return lines.toMutableList().also { it[index] = line.copy(blockStyle = ContentPartStyle.body) }
     }
 
     /**
@@ -700,6 +872,15 @@ object EditorModel {
      *
      * Android 侧把图片作为**独立一行**的附件渲染（iOS 是正文里的文本附件）。
      * 落库时由 [linesToParts] 转成 `ContentPartStyle.image` —— 注意图片行不参与列表分组。
+     *
+     * ## 一行一张图
+     *
+     * 图片**永远独占一行**（这就是"每一行只允许放一张图片"的落点）：
+     * - 光标所在行是**空行**（没有文字、没有标记）→ 图片就落在这张空行上，
+     *   不额外留一行空白（iOS 是在光标处原地插入附件，语义相同）；
+     * - 其它情况 → 图片插在光标行**下面**新开的一行，正文一个字都不动。
+     *
+     * 返回值里图片行的下标由 [EditorModel.imageLineIndexAfterInsert] 给出（插图后要把光标放到它下面）。
      */
     fun insertImageLine(
         lines: List<EditorLine>,
@@ -707,12 +888,34 @@ object EditorModel {
         src: String,
         width: Double? = null,
         height: Double? = null,
-    ): List<EditorLine> = lines.toMutableList().also {
-        it.add(
-            (index + 1).coerceIn(0, lines.size),
-            EditorLine(imageSrc = src, imageWidth = width, imageHeight = height),
-        )
+    ): List<EditorLine> {
+        val image = EditorLine(imageSrc = src, imageWidth = width, imageHeight = height)
+        val target = index.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+        val current = lines.getOrNull(target)
+        return lines.toMutableList().also { result ->
+            if (current != null && isBlankEditableLine(current)) {
+                result[target] = image
+            } else {
+                result.add((target + 1).coerceIn(0, lines.size), image)
+            }
+        }
     }
+
+    /** 插图之后，图片行落在第几行（光标要去它下面那一行）。 */
+    fun imageLineIndexAfterInsert(lines: List<EditorLine>, caretIndex: Int): Int {
+        if (lines.isEmpty()) return 0
+        val target = caretIndex.coerceIn(0, lines.size - 1)
+        val current = lines.getOrNull(target)
+        return if (current != null && isBlankEditableLine(current)) target else target + 1
+    }
+
+    /**
+     * 是不是一张"什么内容都没有"的可编辑行。
+     *
+     * 图片行不算（不能在图片行上再压一张图）、带标记的空条目不替换（用户可能正要输入条目）。
+     */
+    private fun isBlankEditableLine(line: EditorLine): Boolean =
+        line.imageSrc == null && line.marker == null && line.text.isEmpty()
 
     // ------------------------------------------------------------------ 倒序应用（T3）
 

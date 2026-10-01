@@ -219,7 +219,7 @@ class ImageShareRenderer(
     }
 
     private fun drawImage(canvas: Canvas, op: ShareLayout.Op.Image) {
-        val bitmap = mediaStore.image(op.src)
+        val bitmap = mediaStore.image(op.src)?.softwareCopy()
         val rect = op.rect.toRectF()
         val path = Path().apply {
             addRoundRect(rect, op.radius.toFloat(), op.radius.toFloat(), Path.Direction.CW)
@@ -322,6 +322,22 @@ class ImageShareRenderer(
         val a = (alpha.coerceIn(0.0, 1.0) * 255).toInt()
         return ((color and 0x00FFFFFFL).toInt()) or (a shl 24)
     }
+
+    /**
+     * 分享长图是**软件画布**（`Bitmap` + `Canvas`），而 `MediaStore.image()` 交给界面的是
+     * `ImageDecoder` 解码出来的 **HARDWARE bitmap** —— 直接 `drawBitmap` 会抛
+     * `IllegalArgumentException: Software rendering doesn't support hardware bitmaps`。
+     *
+     * 真机实测（2026-09-28）：**只要这一天里有图片**，点分享就是「分享失败：日记图片生成失败」
+     * （`JustDiary.backup: 渲染分享图失败：Software rendering doesn't support hardware bitmaps`）。
+     * 这里按需拷一份 `ARGB_8888` 的软件位图；`HARDWARE` 之外的位图原样返回，不多花一次拷贝。
+     */
+    private fun Bitmap.softwareCopy(): Bitmap =
+        if (config == Bitmap.Config.HARDWARE) {
+            copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            this
+        }
 
     private fun ShareLayout.Rect.toRectF(): RectF =
         RectF(x.toFloat(), y.toFloat(), right.toFloat(), bottom.toFloat())

@@ -116,9 +116,10 @@ class EditorSelectionTest {
     }
 
     @Test
-    fun `toolbar targets the current line only`() {
-        assertEquals(1..1, EditorSelectionMap.targetLineRange(EditorSelection(1, 0, 3), plain))
-        assertEquals(2..2, EditorSelectionMap.targetLineRange(EditorSelection(99, 0, 3), plain))
-        assertEquals(0..0, EditorSelectionMap.targetLineRange(EditorSelection(0, 0, 0), emptyList()))
+    fun `toolbar operations cover every paragraph the selection touches`() {
+        // 段落级按钮（标题 / 列表 / 引用 / 待办 / 居中）作用在选区覆盖到的**每一整段**上；
+        // 光标（无选区）时就是它所在的那一行（用户 2026-09-28 规则 3）
+        assertEquals(0..0, EditorSelection(0, 0, 0).lineRange)
+        assertEquals(0..2, EditorSelection(0, 0, 3, endLineIndex = 2).lineRange)
     }
 }

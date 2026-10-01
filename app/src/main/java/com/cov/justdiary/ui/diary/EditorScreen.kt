@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,11 +41,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -111,6 +115,8 @@ fun EditorScreen(
     loadToken: Int,
     isNewBlock: Boolean,
     locationState: LocationRules.EditorLocationState,
+    /** 新片段（还没落库）才允许"重新获取位置"（iOS 的 `vm.canRelocate`）。 */
+    canRelocate: Boolean,
     startTimeUtc: Long,
     actions: EditorActions,
     contentPadding: PaddingValues = PaddingValues(),
@@ -119,6 +125,8 @@ fun EditorScreen(
     /** 时间胶囊的文案（由宿主用 `DateFormats` 备好，跟随语言与 12/24 小时制）。 */
     startTimeLabel: String = "",
     onRequestLocation: () -> Unit = {},
+    /** 菜单里的「重新获取位置」（丢掉当前快照再取一次，iOS `refreshLocation()`）。 */
+    onRefreshLocation: () -> Unit = {},
     onPrecisionChange: (String) -> Unit = {},
     onSave: (EditorSavePayload) -> Unit = {},
     onImportImage: suspend (Uri) -> ImportedImage? = { null },
@@ -179,6 +187,7 @@ fun EditorScreen(
     val flags = state.activeFlags
     val fontScale = LocalDensity.current.fontScale
     val metricsFor = rememberBlockMetrics()
+    val quoteStyle = rememberQuoteStyle()
     // 正文列宽与阅读态同一条公式（规范 §2.6：阅读 = 编辑）
     val columnWidth: Dp = LocalAdaptiveLayout.current
         .contentColumn(EditorLayout.CONTENT_MAX_WIDTH).dp
@@ -213,7 +222,6 @@ fun EditorScreen(
                     }
                     LocationRow(
                         state = locationState,
-                        isNewBlock = isNewBlock,
                         onRequestLocation = onRequestLocation,
                         onPrecisionClick = { precisionMenuOpen = true },
                     )
@@ -224,6 +232,7 @@ fun EditorScreen(
                         onViewReady = { editText = it },
                         imageProvider = loadImage,
                         metricsFor = metricsFor,
+                        quoteStyle = quoteStyle,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
@@ -251,48 +260,27 @@ fun EditorScreen(
                 isList = currentLine.isListItem,
                 isTodo = currentLine.isTodoItem,
                 isCentered = currentLine.align == EditorModel.ALIGN_CENTER,
-                // IME 组合期间禁用整栏（[FormatGate]：组合区里改 span 会被输入法覆盖）
+                // IME 组合期间禁用整栏（[FormatGate]：组合区里改 span 会被输入法覆盖）；
+                // 居中还要额外过一道"与列表/引用/待办互斥"（规则 5）——判据是**整个选区**，
+                // 只要选中的行里有一行是那三类，就置灰（不再是只看光标那一行）。
                 enabled = !state.composing,
+                centerEnabled = state.centerEnabled,
                 styleMenuOpen = styleMenuOpen,
                 onStyleMenuChange = { styleMenuOpen = it },
+                // 段落样式菜单：**只应用、不切换**（大标题/小标题/正文是六选一里的三项）。
+                // 六种段落格式与四种行内样式的接线统一在 `EditorFormatActions` 里
+                // （那一层有单测逐个按钮驱动；这里只负责菜单开关与界面状态）
                 onBlockStyle = { style ->
                     styleMenuOpen = false
-                    state.apply { EditorModel.setBlockStyle(it, state.lineRange, style.partStyle) }
+                    EditorFormatActions.applyBlockStyle(state, style)
                 },
-                onToggleCenter = {
-                    state.apply { lines ->
-                        val index = state.selection.lineIndex
-                        EditorModel.setAlignment(
-                            lines,
-                            state.lineRange,
-                            center = lines.getOrNull(index)?.align != EditorModel.ALIGN_CENTER,
-                        )
-                    }
-                },
-                onToggleList = {
-                    state.apply {
-                        EditorModel.setMarkerOnRange(
-                            it,
-                            state.lineRange,
-                            EditorLine.MarkerKind.Bullet,
-                            cursorIndex = state.selection.lineIndex,
-                        )
-                    }
-                },
-                onToggleQuote = { state.apply { EditorModel.toggleQuote(it, state.lineRange) } },
-                onToggleTodo = {
-                    state.apply {
-                        EditorModel.setMarkerOnRange(
-                            it,
-                            state.lineRange,
-                            EditorLine.MarkerKind.Todo,
-                            cursorIndex = state.selection.lineIndex,
-                        )
-                    }
-                },
-                    onToggleInline = { flag -> state.toggleInline(flag) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                onToggleCenter = { EditorFormatActions.toggleCenter(state) },
+                onToggleList = { EditorFormatActions.toggleList(state) },
+                onToggleQuote = { EditorFormatActions.toggleQuote(state) },
+                onToggleTodo = { EditorFormatActions.toggleTodo(state) },
+                onToggleInline = { flag -> EditorFormatActions.toggleInline(state, flag) },
+                modifier = Modifier.fillMaxWidth(),
+            )
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -336,6 +324,19 @@ fun EditorScreen(
                         },
                     )
                 }
+            }
+            // iOS `locationMenu` 的最后一项：还没落库的片段（`canRelocate`）可以从菜单里
+            // 「重新获取位置」（`DiaryPageView.swift:472-480`）。已保存的片段没有这一项。
+            if (canRelocate) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                AnchoredMenuItem(
+                    label = stringResource(R.string.editor_location_retry_action),
+                    selected = false,
+                    onClick = {
+                        precisionMenuOpen = false
+                        onRefreshLocation()
+                    },
+                )
             }
         }
     }
@@ -394,86 +395,106 @@ private fun TimeCapsule(label: String) {
 }
 
 /**
- * 地点行（规范 §3.2 / iOS §3.5）：**左边只显示状态、右边只放动作，两者不重复**。
+ * 地点行（iOS `DiaryPageView.swift:610-682` 的 `locationRow` / `locationChipLabel`）。
  *
- * | 情形 | 左（状态） | 右（动作） |
- * | --- | --- | --- |
- * | 新建 + 定位中 | `位置获取中…`（primary） | — |
- * | 新建 + 无位置/失败 | `未记录地点` | `重新获取位置` |
- * | 有位置 | 该位置文本 | `显示精度`（菜单） |
- * | 编辑已有片段且无位置 | `未记录地点`（只读） | — （保存后不能再补位置） |
- * | `auto_loc` 关且无位置 | 整行不显示 | — |
+ * **一个状态一枚胶囊**，没有"左边状态 + 右边按钮"那种两块拼起来的排版：iOS 侧从头到尾
+ * 只有 `locationChipLabel(text:tint:)` 一个视图，处在"新建 + 还没拿到位置"时它本身就是
+ * 那个「重新获取位置」按钮（`Button { vm.beginLocate() } label: { locationChipLabel(…) }`）。
+ *
+ * | 情形 | 胶囊文字 | 颜色 | 点击 |
+ * | --- | --- | --- | --- |
+ * | 新建 + 定位中 | `位置获取中…` | `primary` | — |
+ * | 新建 + 还没拿到位置 | `重新获取位置` | `primary` | [onRequestLocation] |
+ * | 已有位置 | 该位置文本 | `primary` | [onPrecisionClick]（精度菜单） |
+ * | 编辑已有片段且无位置 | `未记录地点` | `onSurfaceVariant` | — |
+ * | `auto_loc` 关且无位置 | 整行不显示 | — | — |
+ *
+ * 胶囊的样子照 iOS 的 `locationChipLabel`：`location.fill` 12pt + 文本 13pt、间距 4、
+ * 内边距 10×5、整个胶囊刷 `primaryContainer`。
  */
 @Composable
 private fun LocationRow(
     state: LocationRules.EditorLocationState,
-    isNewBlock: Boolean,
     onRequestLocation: () -> Unit,
     /** 「显示精度」被点击 —— 菜单本身画在 [EditorScreen] 的浮层里（见那里的注释）。 */
     onPrecisionClick: () -> Unit,
 ) {
-    if (state is LocationRules.EditorLocationState.Hidden) return
+    val fontScale = LocalDensity.current.fontScale
+    when (state) {
+        is LocationRules.EditorLocationState.Hidden -> Unit
 
-    val locating = state is LocationRules.EditorLocationState.Locating
-    val status = when (state) {
-        is LocationRules.EditorLocationState.Locating -> stringResource(R.string.editor_location_fetching)
-        is LocationRules.EditorLocationState.Recorded -> state.snapshot.locText
-        else -> stringResource(R.string.search_loc_no_loc)
-    }
-    val statusColor = if (locating) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val canRefetch = LocationRules.canRefetchLocation(isNewBlock, state)
-    val recorded = state as? LocationRules.EditorLocationState.Recorded
+        is LocationRules.EditorLocationState.Locating -> LocationChip(
+            text = stringResource(R.string.editor_location_fetching),
+            tint = MaterialTheme.colorScheme.primary,
+            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
+        )
 
+        is LocationRules.EditorLocationState.LocateFailed -> LocationChip(
+            text = stringResource(R.string.editor_location_retry_action),
+            tint = MaterialTheme.colorScheme.primary,
+            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
+            onClickLabel = stringResource(R.string.editor_location_retry_action),
+            onClick = onRequestLocation,
+        )
+
+        is LocationRules.EditorLocationState.Recorded -> LocationChip(
+            text = state.snapshot.locText,
+            tint = MaterialTheme.colorScheme.primary,
+            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
+            // iOS：`accessibilityLabel(search_loc_title)` + `value = 地址`
+            onClickLabel = stringResource(R.string.search_loc_title),
+            onClick = onPrecisionClick,
+        )
+
+        is LocationRules.EditorLocationState.NotRecorded -> LocationChip(
+            text = stringResource(R.string.search_loc_no_loc),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.meta, fontScale),
+        )
+    }
+}
+
+/**
+ * 地点胶囊（iOS `locationChipLabel`）。[onClick] 为 null 时是**静态**胶囊（不给点击语义，
+ * 免得读屏报一个点不动的按钮）。
+ */
+@Composable
+private fun LocationChip(
+    text: String,
+    tint: Color,
+    fontSize: TextUnit,
+    modifier: Modifier = Modifier,
+    onClickLabel: String? = null,
+    onClick: (() -> Unit)? = null,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
+        modifier = modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClickLabel = onClickLabel, onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(
             imageVector = AppIcons.Place,
             contentDescription = null,
-            modifier = Modifier.size(14.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(12.dp),
+            tint = tint,
         )
         Text(
-            text = status,
-            modifier = Modifier.weight(1f),
-            fontSize = DynamicTypeMetrics.effectiveSp(TypeSize.rowSub, LocalDensity.current.fontScale),
-            color = statusColor,
+            text = text,
+            fontSize = fontSize,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        // 右动作：定位中不给"重新获取"（避免重复请求）；已有位置的片段只允许调精度
-        if (canRefetch && !locating) {
-            Text(
-                text = stringResource(R.string.editor_location_retry_action),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClickLabel = stringResource(R.string.editor_location_retry_action)) {
-                        onRequestLocation()
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-        }
-        if (recorded != null) {
-            Text(
-                text = stringResource(R.string.editor_location_precision),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClickLabel = stringResource(R.string.editor_location_precision)) {
-                        onPrecisionClick()
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-        }
     }
 }
 
@@ -501,7 +522,7 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
         ContentPartStyle.quote to EditorTypography.textStyleFor(ContentPartStyle.quote),
         ContentPartStyle.body to EditorTypography.textStyleFor(ContentPartStyle.body),
     )
-    val paragraphSpacingPx = with(density) { 8.dp.toPx() }.toInt()
+    val paragraphSpacingPx = with(density) { QuoteParagraphSpacing.toPx() }.toInt()
     return remember(density, styles) {
         { style ->
             val textStyle = styles[style] ?: styles.getValue(ContentPartStyle.body)
@@ -517,6 +538,33 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
                 paragraphSpacingPx = paragraphSpacingPx,
             )
         }
+    }
+}
+
+/**
+ * 引用段的外观（编辑态）。**参数与阅读态逐项相同**（规范 §2.5 / `DiaryReadScreen` 的引用分支）：
+ * `surfaceContainerHigh` 底 + 4dp 圆角 + 6dp 纵向内边距 + 10dp 横向内边距。
+ *
+ * 编辑态以前只挂了块样式 span，点「引用」时正文外观**逐像素不变**（R30 记的 F1）——
+ * 而阅读态与 iOS 编辑态都是有底的。这里用平台的 `LineBackgroundSpan` 补上（官方做法，
+ * 见 [SpannableBridge.QuoteStyle]）。
+ */
+/** 段后距：段落排版（`rememberBlockMetrics`）与引用底（`rememberQuoteStyle`）共用同一个值。 */
+private val QuoteParagraphSpacing = 8.dp
+
+@Composable
+private fun rememberQuoteStyle(): SpannableBridge.QuoteStyle {
+    val density = LocalDensity.current
+    val background = MaterialTheme.colorScheme.surfaceContainerHigh
+    return remember(density, background) {
+        SpannableBridge.QuoteStyle(
+            backgroundColor = background.toArgb(),
+            cornerRadiusPx = with(density) { 4.dp.toPx() },
+            paddingHorizontalPx = with(density) { 10.dp.toPx() }.toInt(),
+            paddingVerticalPx = with(density) { 6.dp.toPx() }.toInt(),
+            // ⚠️ 必须与段落排版里的段后距是同一个值（引用底的末行要把它减掉）
+            paragraphSpacingPx = with(density) { QuoteParagraphSpacing.toPx() }.toInt(),
+        )
     }
 }
 

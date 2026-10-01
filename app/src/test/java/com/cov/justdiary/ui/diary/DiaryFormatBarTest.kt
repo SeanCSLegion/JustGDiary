@@ -106,6 +106,41 @@ class DiaryFormatBarTest {
             .assertIsSelected()
     }
 
+    /**
+     * 规则 5：编辑器按**整个选区**算出来的 `centerEnabled` 有最终话语权 ——
+     * "选中一段引用 + 一行正文"时光看光标那一行是不够的。
+     */
+    @Test
+    fun `an explicit centerEnabled false wins over the per line flags`() {
+        rule.setContent {
+            DiaryFormatBar(
+                activeBlock = EditorBlockStyle.Body,
+                flags = InlineFlags(),
+                // 光标停在正文行上（逐行判据是"可用"），但选区里还有一行引用
+                isList = false,
+                isQuote = false,
+                isTodo = false,
+                centerEnabled = false,
+            )
+        }
+        rule.onNodeWithContentDescription(str(R.string.editor_align_center)).assertIsNotEnabled()
+        rule.onNodeWithContentDescription(str(R.string.editor_tool_list)).assertIsEnabled()
+    }
+
+    /** IME 组合中整栏禁用时，居中不能因为 centerEnabled 而漏网。 */
+    @Test
+    fun `the bar level disable also switches the center button off`() {
+        rule.setContent {
+            DiaryFormatBar(
+                activeBlock = EditorBlockStyle.Body,
+                flags = InlineFlags(),
+                enabled = false,
+                centerEnabled = true,
+            )
+        }
+        rule.onNodeWithContentDescription(str(R.string.editor_align_center)).assertIsNotEnabled()
+    }
+
     @Test
     fun `inline buttons reflect the whole selection state`() {
         rule.setContent {

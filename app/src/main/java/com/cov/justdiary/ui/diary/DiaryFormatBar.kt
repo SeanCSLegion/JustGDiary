@@ -84,6 +84,13 @@ fun DiaryFormatBar(
     isTodo: Boolean = false,
     isCentered: Boolean = false,
     enabled: Boolean = true,
+    /**
+     * 居中按钮能不能点（规则 5）。
+     *
+     * 默认按"光标那一行是列表/引用/待办就置灰"推导；编辑器会显式传一个**按整个选区**算出来的值
+     * （选中一段引用 + 一行正文时，居中同样必须置灰 —— 只看光标那一行不够）。
+     */
+    centerEnabled: Boolean = enabled && !isList && !isQuote && !isTodo,
     onBlockStyle: (EditorBlockStyle) -> Unit = {},
     onToggleCenter: () -> Unit = {},
     onToggleList: () -> Unit = {},
@@ -130,8 +137,10 @@ fun DiaryFormatBar(
                     icon = AppIcons.AlignCenter,
                     label = stringResource(R.string.editor_align_center),
                     active = isCentered,
-                    // 居中与列表 / 引用 / 待办互斥：那三类行上置灰（控制器里再 guard 一次）
-                    enabled = enabled && !isQuote && !isList && !isTodo,
+                    // 居中与列表 / 引用 / 待办互斥（规则 5）：那三类行上置灰，不允许点按。
+                    // `enabled`（IME 组合中整栏禁用）是**与**关系：centerEnabled 只能再收紧。
+                    // 控制器（`EditorModel.setAlignment`）里还会 guard 一次。
+                    enabled = enabled && centerEnabled,
                     onClick = onToggleCenter,
                 )
                 Separator()

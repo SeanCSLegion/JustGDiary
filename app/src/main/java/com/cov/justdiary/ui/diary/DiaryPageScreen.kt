@@ -87,6 +87,34 @@ fun DiaryPageScreen(
     // 编辑器有没有未保存内容 —— 由编辑器上报，返回键据此决定是否二次确认
     var editorDirty by remember { mutableStateOf(false) }
 
+    // 定位权限：编辑器里的「重新获取位置」在未授权时**先申请权限再取点**
+    // （iOS `beginLocate()` 未授权时会 `requestPermission()` 并在 600ms 后复查；
+    //  Android 的申请必须走 Activity 的结果通道，于是落在这一层）。
+    // 少了这条链路，真机上"权限还没给"时点那颗胶囊什么都不会发生。
+    val locationPermissions = remember(container) { container.locationService.requiredPermissions() }
+    // 授权通过之后要接着做的那件事：false = 取一次位置；true = 丢掉旧的再取（菜单项）
+    var pendingRefresh by remember { mutableStateOf(false) }
+    val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val granted = result.values.any { it }
+        val refresh = pendingRefresh
+        pendingRefresh = false
+        if (granted) {
+            if (refresh) viewModel.refreshLocation() else viewModel.beginLocate()
+        }
+    }
+    val askForLocation: (Boolean) -> Unit = { refresh ->
+        if (container.locationService.isAuthorized()) {
+            if (refresh) viewModel.refreshLocation() else viewModel.beginLocate()
+        } else {
+            pendingRefresh = refresh
+            locationPermissionLauncher.launch(locationPermissions)
+        }
+    }
+    val requestLocation: () -> Unit = { askForLocation(false) }
+    val refreshLocation: () -> Unit = { askForLocation(true) }
+
     LaunchedEffect(dayKey) { viewModel.open(dayKey, startInWrite) }
     // 设置变过（尤其是"新一天的开始时间"）：重算 todayKey 与位置/时间等显示设置。
     // 编辑态与待确认的保存**一律不动** —— 只换设置，不碰内容。
@@ -105,6 +133,16 @@ fun DiaryPageScreen(
         if (foregroundTick == lastForegroundTick.intValue) return@LaunchedEffect
         lastForegroundTick.intValue = foregroundTick
         viewModel.refreshSettings()
+        // 顺手补一次定位：上一次可能是在地铁里 / 刚开定位开关时失败的
+        viewModel.retryLocateOnForeground()
+    }
+    // 新建片段 + 自动定位开着，但权限还没给：进编辑器就把权限要出来
+    // （iOS `beginLocate()` 未授权时的 `requestPermission()` 同义）。
+    LaunchedEffect(state.isRead, state.loadToken, state.settings.autoLoc) {
+        if (state.isRead || state.isEditingExistingBlock || !state.settings.autoLoc) return@LaunchedEffect
+        if (!container.locationService.isAuthorized()) {
+            locationPermissionLauncher.launch(locationPermissions)
+        }
     }
     LaunchedEffect(state.requestDismiss) {
         if (state.requestDismiss) {
@@ -308,12 +346,14 @@ fun DiaryPageScreen(
                     loadToken = state.loadToken,
                     isNewBlock = !state.isEditingExistingBlock,
                     locationState = editorLocationState(state),
+                    canRelocate = state.canRelocate,
                     startTimeUtc = state.startTimeUtc,
                     actions = editorActions,
                     contentPadding = innerPadding,
                     autoTime = state.settings.autoTime,
                     startTimeLabel = formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),
-                    onRequestLocation = viewModel::beginLocate,
+                    onRequestLocation = requestLocation,
+                    onRefreshLocation = refreshLocation,
                     onPrecisionChange = viewModel::applyPrecision,
                     onSave = viewModel::save,
                     onImportImage = { uri ->

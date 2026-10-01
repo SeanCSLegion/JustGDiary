@@ -100,6 +100,50 @@ object LocationRules {
      */
     fun canAddLocationAfterSave(): Boolean = false
 
+    // ------------------------------------------------------------------ 缓存点的可用性
+
+    /**
+     * "新鲜"缓存点的年龄上限：2 分钟。
+     *
+     * iOS 的 `CLLocationUpdate.liveUpdates()` 首帧给的就是系统缓存点，这是它"总是立刻有
+     * 位置"的原因。取点频率很低（写日记时才取一次），2 分钟内的点足以代表"此刻在哪"。
+     */
+    const val FRESH_FIX_MAX_AGE_MS: Long = 2 * 60 * 1000
+
+    /**
+     * 兜底缓存点的年龄上限：30 分钟。
+     *
+     * 实时定位拿不到时（室内没有卫星信号）宁可用半小时内的点，也不要让整条日记没有位置；
+     * 但**绝不用更旧的点** —— 那已经不是"我写这条日记时在哪"，而是另一个地方了
+     * （真机上见过系统里存着好几天前、甚至另一个城市的缓存点）。
+     */
+    const val STALE_FIX_MAX_AGE_MS: Long = 30 * 60 * 1000
+
+    /** 缓存点年龄（毫秒）。`elapsedRealtimeNanos` 是开机后的单调时钟，正好用来算年龄。 */
+    fun ageMillisOf(elapsedRealtimeNanos: Long, nowNanos: Long): Long =
+        ((nowNanos - elapsedRealtimeNanos) / 1_000_000L).coerceAtLeast(0L)
+
+    /** 这个年龄的缓存点能不能直接当作"当前位置"。 */
+    fun isFreshFix(ageMillis: Long): Boolean = ageMillis in 0..FRESH_FIX_MAX_AGE_MS
+
+    /** 实时定位失败时，这个年龄的缓存点还能不能兜底。 */
+    fun isUsableStaleFix(ageMillis: Long): Boolean = ageMillis in 0..STALE_FIX_MAX_AGE_MS
+
+    /**
+     * 回到前台时要不要补一次定位。
+     *
+     * 判据全部来自编辑器当下的状态：**正在新建片段**、`auto_loc` 开着、**还没有位置**、
+     * 而且此刻没有正在跑的请求。任一不满足都不补 —— 尤其是"已经有位置"这条：
+     * 补一次会把用户刚看到的地点悄悄换掉。
+     */
+    fun shouldRetryOnForeground(
+        isRead: Boolean,
+        isEditingExistingBlock: Boolean,
+        autoLoc: Boolean,
+        hasLocation: Boolean,
+        locating: Boolean,
+    ): Boolean = !isRead && !isEditingExistingBlock && autoLoc && !hasLocation && !locating
+
     /**
      * 坐标拿到了但反地理编码为空：**按没有位置处理**。
      *
