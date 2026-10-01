@@ -60,12 +60,10 @@ import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.AnchoredMenu
 import com.cov.justdiary.ui.components.AnchoredMenuItem
-import com.cov.justdiary.ui.components.MenuDefaults
 import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.locPrecisionLabel
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
-import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
 import com.cov.justdiary.ui.theme.TypeSize
 import kotlinx.coroutines.launch

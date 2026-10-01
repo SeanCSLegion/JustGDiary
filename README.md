@@ -5,7 +5,7 @@
 > **当前状态：M0–M9 的代码工作已完成，并已在模拟器上实测通过一轮界面返工**
 > （详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)，
 > 界面规范见 [`docs/design-spec.md`](docs/design-spec.md)）。
-> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**561 个 JVM 单测**全绿，
+> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**580 个 JVM 单测**全绿，
 > 另有 2 个脚本做跨端与 SQL 的独立校验。首页已按 Material 3 重新设计并在
 > Pixel 10 Pro AVD 上验证（竖屏 / 横屏分栏 / 深色 / TalkBack 语义，
 > 证据见 `docs/design-spec.md` §8）。
@@ -19,6 +19,15 @@
 > ✅ **R2 已把 v2 的 P0–P5 落地**（见 [`docs/migration-progress.md`](docs/migration-progress.md) 的 R2 一节）：
 > 首页恢复 iOS 的整屏三态 morph、月历只画当月日期、年历恢复 12 个迷你月历、
 > 顶栏去掉自造的月/周按钮、上下滑翻月重新接线，并修掉 9 条缺陷（含 2 条严重）。
+>
+> ✍️ **2026-10-01：Android ← iOS 同步（R32）** —— 按 iOS 最近五轮更新同步：
+> **编辑 / 阅读 / 首页预览三处显示统一**（一份 `BlockGeometry`：列表与待办有了悬挂缩进与
+> M3 勾选框、引用块补上左侧竖条、段距三处一致、图片铺满列宽）、**分享位置精度**设置
+> （分享图的地点只从地区列重建，精确地点与街道进不去）、记录精度按**权限 × 本次定位精度**
+> 取上限并记住上一次手动选的档位、格式栏「段落样式」按钮不再被引用点亮、图片行禁用
+> 「居中」、搜索页地点胶囊去掉装饰。清单见 [`docs/ios-sync-2026-10-01.md`](docs/ios-sync-2026-10-01.md)，
+> 逐项记录见 [`docs/migration-progress.md`](docs/migration-progress.md) **R32**，
+> 三处一致的截图在 `docs/ui-audit/r32/`。
 >
 > ✍️ **2026-09-28：日记页第三轮返工（R30，真机 MEIZU 21 / Android 16）** ——
 > 首页「继续写日记」改为**先进阅读态**；定位可靠性重做（**新鲜缓存点 → 两条来源赛跑 →
@@ -80,7 +89,7 @@
 ```bash
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"   # 本机无系统 JDK
 
-./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 561 个 JVM 单测（含 14 个 Robolectric 类 / 121 条运行时用例）
+./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 580 个 JVM 单测（含 15 个 Robolectric 类 / 133 条运行时用例）
 
 # 两个独立校验脚本
 python3 tools/verify_sqlite_schema.py    # 从 Kotlin 源码抽出 DDL，用宿主 sqlite3 真跑一遍（18 条断言）

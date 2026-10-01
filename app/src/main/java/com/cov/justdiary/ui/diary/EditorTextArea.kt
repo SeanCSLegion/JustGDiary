@@ -140,7 +140,7 @@ fun EditorTextArea(
                     // 上下各留出引用底的纵向内边距：引用段的圆角底要画到行框外 6dp
                     // （`QuoteBackgroundSpan`），视图不留这点地方的话，**第一行**的引用底
                     // 会被视图上沿裁掉一条平边。左右仍是 0 —— 正文与光标贴边（真机实测 x=77）。
-                    val quotePadV = with(density) { 6.dp.toPx() }.toInt()
+                    val quotePadV = with(density) { BlockGeometry.TextInset.toPx() }.toInt()
                     setPadding(0, quotePadV, 0, quotePadV)
                     // 编辑器自己滚（外层不再套 verticalScroll）：Android 会在视口变化
                     // （键盘弹起 / 换行）时把光标滚进可见区，这正是"光标不被挡"的平台做法。

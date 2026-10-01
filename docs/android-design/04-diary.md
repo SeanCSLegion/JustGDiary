@@ -107,24 +107,29 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
 | `title` | `headlineMedium` | 28 / 36 | 普通 |
 | `heading` | `titleLarge` | 22 / 28 | 普通 |
 | `body` | `bodyLarge` | 16 / 24 | 普通 |
-| `quote` | `bodyMedium` | 14 / 20 | 底 `surfaceContainerHigh`，圆角 4dp，内边距 6×10dp |
-| 列表 | 同 `body` | 16 / 24 | 前导 `•`（`onSurfaceVariant`），缩进 18dp |
-| 待办（未完成） | 同 `body` | 16 / 24 | 18dp 空心方框 + 文字 |
-| 待办（已完成） | 同 `body` | 16 / 24 | 18dp 实心方框（`tertiaryContainer`... 见下）+ 文字删除线 + `onSurfaceVariant` |
+| `quote` | `bodyMedium` | 14 / 20 | 底 `surfaceContainerHigh`、圆角 4dp（M3 `extraSmall`）；文字内缩 **16dp**、纵向内边距 6dp；**左侧 4dp 竖条**（`outlineVariant`，距列左 6dp、上下各让 5dp、圆角 2dp）；右边再留 10dp（`QuoteTrailingPadding`，编辑态挂不上） |
+| 列表 | 同 `body` | 16 / 24 | 18dp 标记槽 + 10dp 间距 → 正文起点 **28dp**；圆点 `onSurfaceVariant`、直径 **8dp**（平台 `BulletSpan` 的直径），图形在**首行行盒里垂直居中** |
+| 待办（未完成） | 同 `body` | 16 / 24 | **18dp 空心勾选框**（圆角 2dp、描边 2dp `onSurfaceVariant`）+ 文字 |
+| 待办（已完成） | 同 `body` | 16 / 24 | 18dp `primary` 实底 + `onPrimary` 对勾 + 文字删除线 + `onSurfaceVariant` |
 | 居中 | 继承段落样式 | — | `textAlign = Center` |
 
 - 行内样式：`bold` 700 / `italic` / `strikethrough` / `underline` 可叠加。
-- **待办勾选框**：未选中 = 2dp `onSurfaceVariant` 描边方形；选中 = `primary` 底 + `onPrimary` 对勾。
-  选择/未选择都**只用形状 + 颜色**，不靠颜色单独承载。
-- **段落间距**由 `Arrangement.spacedBy(8.dp)` 统一给，行高用 M3 角色的官方值（见 `01-design-system.md` §2.4）。
+- **待办勾选框按 M3 `CheckboxTokens`**：容器 18dp、圆角 **2dp**、未选中 2dp `onSurfaceVariant` 描边、
+  选中 `primary` 底 + `onPrimary` 对勾、图标 18dp。选中与未选都**只用形状 + 颜色**，不靠颜色单独承载。
+- **列表 / 待办是悬挂缩进**：换行后的第二行也从 28dp 起（编辑态 = `MarkerSpan` +
+  `LeadingMarginSpan(0, 28dp)`，阅读态与预览 = 共享的 `MarkerRow`）。
+- **段落间距 8dp**（`BlockGeometry.ParagraphGap`）：编辑态 / 阅读态 / 首页日面板预览**三处共用**，
+  列表项间距也是 8dp（原先阅读态是 4dp）；行高用 M3 角色的官方值（见 `01-design-system.md` §2.4）。
+- **三处共用同一份几何**（`ui/diary/BlockGeometry.kt`）—— 上面这张表就是"编辑时看到的"，
+  编辑态与阅读态不再各画各的。
 
 ### 2.6 图片
 
 | 项 | 规则 |
 | --- | --- |
-| 宽度 | **= 正文列宽**（不设最大高度） |
+| 宽度 | **= 正文列宽**（`fillMaxWidth` + `aspectRatio`，不设最大高度）；**编辑态同样铺满**，库里存的 `w/h` **只当比例用**（`ImageDisplaySize` 不再按"自然宽度"封顶） |
 | 圆角 | 12dp（`medium`） |
-| 最小尺寸 | 宽 ≥ 60dp、高 ≥ 40dp |
+| 最小尺寸 | 高 ≥ 40dp（`ReadLayout.IMAGE_MIN_HEIGHT`）；宽恒为列宽 |
 | 段距 | 上下各 10dp |
 | 插入位置 | 光标处，作为独立段落（前后自动换行），居中 |
 | 旋转屏幕 | **只按新列宽重新适配图片**，文本与光标位置不动 |
@@ -233,6 +238,10 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
   「重新获取位置」（iOS `canRelocate`，`DiaryPageView.swift:472-480`），已保存的片段没有这一条。
 - **位置只在新建片段时获取一次**。保存之后该片段不再支持"重新获取"，只能调显示精度。
 - 无地址视为无地点（`locText` 为空即无地点）。
+- **各档精度的地址文案**：新取到的位置走 `LocationResolver.textFromPlacemark`，已有片段从地区列重建
+  走 `textFromRegion`。其中「区县」一级**优先取 `subLocality`**（中国的「南山区」在这一栏），
+  **没有才退到** `subAdministrativeArea`（美国是 county）—— 此前只看后者，中国常常只显示到市，
+  与"按地区列重建"的文案对不上（iOS 同处已修）。
 - 保存时若 `auto_loc` 打开且仍无位置 → **先弹「未获取到位置」**（标题 `editor_location_retry`、
   正文 `editor_location_missing_msg`、确认键「仍然保存」`editor_save_anyway`），确认后
   **延迟 0.3s** 再走跨日判定（iOS `DiaryViewModel.swift:251-264`）；保存后这个片段再也补不上位置。
@@ -261,8 +270,8 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
 
 | # | 图标（Material Symbols） | 动作 | active 判定 | 禁用条件 |
 | --- | --- | --- | --- | --- |
-| 1 | `format_size` + 下拉箭头（宽 46dp） | 段落样式菜单：**大标题 / 小标题 / 正文** | 当前段落样式 ≠ `body` | — |
-| 2 | `format_align_center` | 居中开关 | 段落居中 | 列表 / 引用 / 待办任一激活时禁用 |
+| 1 | `format_size` + 下拉箭头（宽 46dp） | 段落样式菜单：**大标题 / 小标题 / 正文** | **只认大标题 / 小标题**（`EditorBlockStyle.lightsStyleMenu`）——引用、列表、待办、图片与正文都不点亮 | — |
+| 2 | `format_align_center` | 居中开关 | 段落居中 | 列表 / 引用 / 待办 / **图片行**任一激活时禁用 |
 | — | 分隔线（20dp 高） | — | — | — |
 | 3 | `format_list_bulleted` | 列表开关 | 是列表 | — |
 | 4 | `format_quote` | 引用开关 | 是引用 | — |
@@ -341,16 +350,19 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
   *"空引用行回车 → 消费按键，结束引用"*，用户拍板"按照 iOS 的结束引用"）。
   带标记的空条目（`• `）**不是空行**：回车在那里的含义是"结束列表"（iOS 同）。
 - **引用在编辑态的外观**（原 F1，**已实现**）：`QuoteBackgroundSpan`（平台的 `LineBackgroundSpan`，
-  官方做法）画一块圆角底 + `LeadingMarginSpan` 做左侧缩进，参数与阅读态逐项相同
-  （`surfaceContainerHigh` / 4dp 圆角 / 6dp 纵向 / 10dp 横向）。两个坑记在这里：
+  官方做法）画一块圆角底 + **左侧竖条** + `LeadingMarginSpan` 做文字内缩，参数与阅读态、首页预览
+  逐项相同（`BlockGeometry`：`surfaceContainerHigh` / 4dp 圆角 / 6dp 纵向 / **文字内缩 16dp** /
+  竖条 4dp 宽 + 距列左 6dp + 上下各让 5dp + 圆角 2dp / `outlineVariant`）。两个坑记在这里：
   ① **末尾空行没有字符可挂 span**，它的底由 `DiaryEditText.onDraw` 自己补（几何与 span 共用
   `QuoteStyle.drawBox`），否则"在空行上点引用"看不到任何反馈；
   ② **段后距不能算进底**（它是烘进 `LineHeightSpan` descent 里的），必须在末行减掉，
   否则底会往下多出一大截、看起来像把下一行也包进来了（用户实测："引用的作用范围现在也不对"）。
-  唯一的差异：`Spannable` 没有右边距 span，所以 10dp 只能缩进左侧。
-- **光标含段后距**：段落最后一行的光标高度 = 行高 + 8dp 段后距（段后距是烘进
-  `LineHeightSpan` 的 descent 里的）。它随字号成比例变化，因此规则 6 成立；
-  与 iOS"光标 = 行高"的差异记在这里，属已知的小偏差。
+  唯一的差异：`Spannable` 没有右边距 span，阅读态与预览右边还有 10dp
+  （`QuoteTrailingPadding`），编辑态挂不上 —— 这是三处唯一对不齐的地方。
+- **光标高度**：光标高度 = 光标那一行的**行盒高度**。行盒不再少 1px（`ascent` 取整、余数给
+  `descent`），因此与 M3 角色的行高逐行对齐。R31 记的"段落最后一行的光标比行高多 8dp"
+  **不再是遗留偏差**：段距现在只落在段与段之间那一行（文末最后一段不加），那一行多出来的一截
+  就是它下面真正要画的段距本身；它随字号成比例变化，因此规则 6 成立。
 
 ### 3.3b 段落 span 的粘性（真机缺陷，2026-09-28）
 
@@ -394,7 +406,7 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
 | **字号反解** | `content_json` 只存语义样式；反解必须**精确匹配**，否则正文会被写成小标题 |
 | **一行一张图** | 图片**永远独占一行**：光标行是空行 → 图片落在这一行（不再多留一张空行）；否则插在光标行**下面**新开的一行。插图后光标落到图片**下面**那一行（没有就补一个空行） |
 | **图片居中** | 图片段一律居中（`AlignmentSpan.ALIGN_CENTER`，对应 iOS `PartsCodec.imageParagraphStyle()`：*"centred … never hangs off the left edge of a wide column"*）。这是**渲染规则**，`content_json` 里图片段**不写** `align`（iOS 也不写） |
-| **图片宽度** | 编辑器按"自然宽度但不超可用宽度"（`ImageDisplaySize`，与阅读态的 `DiaryImageView` 同源）；宽度小于列宽时靠居中而不是拉伸 |
+| **图片宽度** | 编辑器也**铺满正文列宽**：`ImageDisplaySize.fit` 只按 `w/h` 推高度，不再按"自然宽度"封顶 —— 与阅读态的 `fillMaxWidth + aspectRatio` 同一条规则（图片段仍一律居中） |
 | **自动时间** | 新建片段的时间戳 = **点「写日记」的那一刻**（iOS 是打开页面的时刻 —— 不要照抄） |
 | **无 undo 栈** | 「放弃修改」不可恢复。插入图片后放弃会留下孤儿文件 → Android 要顺手清理 |
 
@@ -555,6 +567,11 @@ y = 56
    右 dayKey（2026-09-08）右对齐                             y += 30 + 48
 ```
 
+**分享图上的地点文案**（`LocationResolver.shareText`）：**只从地区列（`country` / `region1..3`）重建**，
+`loc_text` 不参与；实际级别 = `min(记录精度, 设置里的「分享位置精度」上限)`，**只能更粗**；
+上限只有 隐藏 / 区县 / 城市 / 省份 —— **精确地点与街道在任何设置下都进不了分享图**，
+重建为空就不画地点行（不退回原文）。见 `05-search-footprint-settings.md` §3.4。
+
 **每种段落的绘制**：
 
 | style | 画法 |
@@ -599,7 +616,10 @@ y = 56
 | Hero 元信息 | 13sp `onSurfaceVariant` | |
 | 条目卡时间 | 13sp bold `primary` | |
 | 条目卡地点 | 12sp `onSurfaceVariant` | |
-| 图片 | 宽 = 列宽，圆角 12dp，最小 60 × 40dp，段距 10dp | |
+| 图片 | 宽 = 列宽（编辑态同），圆角 12dp，高 ≥ 40dp，段距 10dp | 存的 `w/h` 只当比例 |
+| 段距 | 8dp（`BlockGeometry.ParagraphGap`） | 编辑 / 阅读 / 首页预览三处共用；文末最后一段不加 |
+| 列表 / 待办缩进 | 标记槽 18dp + 间距 10dp = **正文起点 28dp** | 悬挂缩进；圆点 8dp，勾选框 18dp / 圆角 2dp（M3） |
+| 引用 | 文字内缩 16dp、圆角 4dp、竖条 4dp、纵向 6dp | 右边距 10dp 只有阅读态与预览挂得上 |
 | 格式栏 | 高 56dp，圆角 28dp，按钮 40 × 40dp（触控 48dp） | |
 | 格式栏图标 | 20dp | |
 | 输入区最小高 | `160dp × body 系数` | AX5 ≈ 240dp |
@@ -617,7 +637,7 @@ y = 56
 | --- | --- | --- | --- | --- |
 | 1 | 顶栏 | 悬浮玻璃圆按钮（44pt 视觉 + 4pt 外扩） | `TopAppBar` 64dp + 标准 IconButton | Material 没有玻璃层 |
 | 2 | 正文 / 引用字号 | 17 / 15（Apple HIG） | 16 / 14（M3 `bodyLarge` / `bodyMedium`） | 各按平台规范；字号不落库，互通不受影响 |
-| 3 | 待办勾选框 | `checkmark.square.fill` | 18dp 方形 + 对勾，选中 `primary` 底 | Material Symbols 的 `check_box` 形态 |
+| 3 | 待办勾选框 | `checkmark.square.fill` | 18dp 方形 + 对勾，**圆角 2dp / 描边 2dp**（M3 `CheckboxTokens`），选中 `primary` 底 + `onPrimary` 勾 | Material Symbols 的 `check_box` 形态 |
 | 4 | 分享面板下半部 | 内嵌 `UIActivityViewController` | 两个动作按钮 → 系统 Sharesheet | Android 的 Sharesheet 是独立系统 UI，不能内嵌 |
 | 5 | 分享面板的关闭 | 靠 96 × 96 透明热区盖住系统那个"点不动"的叉 | M3 ModalBottomSheet 自带下滑 / scrim 关闭 | 结构上不需要 workaround |
 | 5b | 段落样式 / 精度菜单的宿主 | SwiftUI `Menu`（系统 popover，不抢焦点） | **同窗口浮层**（`AnchoredMenu`），不是 `DropdownMenu` | Android 上任何"另起窗口"的做法都会让系统收掉输入法：`DropdownMenu`（可聚焦弹窗）**键盘闪一下**；`Popup(focusable=false)` 收不到触摸；`Dialog` 能点但照样收键盘。同窗口浮层三条都躲开了 |
@@ -631,6 +651,8 @@ y = 56
 | 10 | 插入图片后放弃 | 留下孤儿文件 | 顺手清理 | 数据卫生 |
 | 11b | **居中随换行延续** | iOS 的段落属性会随换行延续（`PartsCodec` 把块属性挂在终止换行上），居中也一样 | 居中**只作用于本行**，回车后的新行左对齐 | 用户规则 4 把居中的作用域写成"本行"，且真机实测反馈"居中的作用范围不对劲……取消的时候没有真的取消，不知道是不是和换行有关系"——正是延续造成的（取消只取消光标那一行，上面几行还留着居中） |
 | 11 | **空引用行上回车** | 消费按键 + **结束引用**（`RichTextEngine.swift:675-682`） | **与 iOS 相同**（早先按"规则 3 字面"实现成"延续引用"，用户 2026-09-28 拍板改为"按照 iOS 的结束引用"，D10 撤回） | — |
+| 12 | **段落几何的依据** | 按 Apple 的比例：行高 1.25 / 1.32 / 1.50 / 1.60、段前距 0.55 / 0.50 / 0.60 × 字号 | 一份 `BlockGeometry`：行高用 **M3 角色的官方值**（36 / 28 / 24 / 20），段距落在 4dp 栅格上取 **8dp**，标记槽 18 + 间距 10 = 正文起点 28dp —— 编辑 / 阅读 / 首页预览三处共用 | 照 Google / Material 的规范；M3 不定义富文本段距，只能自定一档并在三处共用 |
+| 13 | **标记图形的垂直位置** | 基线之上 0.32em（只有 TextKit 表达得准） | **首行行盒里垂直居中**（编辑态 `(top + bottom) / 2`，Compose 侧 `(行高 − 图形高) / 2`） | 一条与平台无关、三个渲染面都能落地的规则 |
 
 ---
 

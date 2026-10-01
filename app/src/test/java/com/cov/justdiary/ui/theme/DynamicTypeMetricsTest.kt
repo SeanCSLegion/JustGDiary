@@ -172,6 +172,37 @@ class DynamicTypeMetricsTest {
         assertEquals(listOf(28f, 22f, 16f, 14f), TypeSize.editorLadder.map { it.value })
     }
 
+    /**
+     * 放大字号时，M3 角色的**行高比例**必须保持不变。
+     *
+     * 早先 `fontSize` 与 `lineHeight` 各按自己的档位取上限（正文 1.55 / 行高 1.45），
+     * fontScale = 2 时 `bodyLarge` 的实际比例被压成 1.403 —— 角色的定义就丢了。
+     */
+    @Test
+    fun `the m3 line height ratio survives large font scales`() {
+        listOf(1f, 1.3f, 2f).forEach { scale ->
+            val typography = justDiaryTypography(scale)
+            listOf(
+                "bodyLarge" to typography.bodyLarge,
+                "bodyMedium" to typography.bodyMedium,
+                "titleLarge" to typography.titleLarge,
+                "headlineMedium" to typography.headlineMedium,
+            ).forEach { (name, style) ->
+                val expected = officialRatio(name)
+                val actual = style.lineHeight.value / style.fontSize.value
+                assertEquals("$name 的行高比例在 fontScale=$scale 变了", expected, actual, 0.01f)
+            }
+        }
+    }
+
+    /** M3 官方字号梯级里的行高比例（`TypeScaleTokens`）。 */
+    private fun officialRatio(role: String): Float = when (role) {
+        "bodyLarge" -> 24f / 16f
+        "bodyMedium" -> 20f / 14f
+        "titleLarge" -> 28f / 22f
+        else -> 36f / 28f
+    }
+
     @Test
     fun `m3 component roles keep the official type scale at fontScale 1`() {
         // 官方基线（material3 1.4.0 的 Typography() 默认值）。

@@ -228,7 +228,8 @@
 - 页头 `PageHeader`：标题 + `state.total < 0` 时不显示计数（`:140-144`）。
 - 搜索框：`OutlinedTextField` + 前置放大镜 + 有词时清除按钮；`imeAction = Search`；`semantics { contentDescription = placeholder }`（`:147-176`，注释说明 Compose 1.12 无 search 档 `Role`）。
 - 关键词芯片行：已提交词 → `InputChip`（点整枚 = 删除）+ 右侧「清除全部条件」（`:179-198`）。
-- 时间/地点两组 `FilterChip`：宽屏（`filtersSideBySide`）左右并排，否则上下堆叠（`:201-237`）。时间四档 = 全部 / 本周 / 本月 / 今年（`timeRangeOptions:653-658`）；地点 = 全部地点 / 未记录地点 / 选择地点… / 已选（`:486-534`）。
+- 时间/地点两组 `FilterChip`：宽屏（`filtersSideBySide`）左右并排，否则上下堆叠（`:201-237`）。时间四档 = 全部 / 本周 / 本月 / 今年（`timeRangeOptions:653-658`）；地点 = 全部地点 / 未记录地点 / 选择地点 / 已选（R32 起「选择地点」胶囊**不带装饰图钉、
+   文案也不带省略号**，只有「已选中」带对勾）。
 - 生效条件摘要：`filterItems` 渲染成**静态**小圆角块（`surfaceContainerHighest` + `labelSmall`），**没有 ✕、没有逐条移除、末尾没有「清除全部条件」**（`:240-263`）。
 - 结果区四态（`:265-321`）：① `indexNotReady` → 转圈 + 「正在准备搜索索引…」；② 无条件 → 「搜索你的日记」+ 提示；③ 有条件无结果 → 「没有找到相关日记」+ 清除全部按钮；④ 结果 `LazyColumn` + 「加载更多」。
 - 结果行：日期胶囊（`primaryContainer`/`onPrimaryContainer`，显示的是 `result.dayKey` 原文而不是本地化日期）+ 摘要 2 行 + 高亮片段 2 行 + 右 chevron；整行 `heightIn(48dp)` + `clickable(role = Button)` + `clearAndSetSemantics` 描述「日期 · 摘要 · 时刻」（`:537-623`）。

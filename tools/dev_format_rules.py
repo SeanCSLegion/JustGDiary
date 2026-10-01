@@ -19,6 +19,8 @@ import dev_ui  # noqa: E402
 
 ADB = dev_ui.ADB
 ROOT = "/Users/cov/JustGDiary"
+# 设备当天（`写日记` 只在今天出现）；`--day` 可覆盖。
+DAY = subprocess.run([ADB, "shell", "date", "+%Y-%m-%d"], capture_output=True, text=True).stdout.strip()
 OUT = f"{ROOT}/docs/ui-audit/r31"
 results = []
 
@@ -77,8 +79,14 @@ def wait_text(want, timeout=12.0):
     return False
 
 
-def tap(label):
-    assert dev_ui.tap(label) == 0, f"找不到按钮 {label}"
+def tap(label, tries=6, gap=0.8):
+    """点一个语义节点；**带重试** —— 冷启动 / 页面切换在模拟器上比真机慢，
+    一次找不到就断言失败会把"还没画出来"误判成"没有这个按钮"。"""
+    for i in range(tries):
+        if dev_ui.tap(label) == 0:
+            return
+        time.sleep(gap)
+    raise AssertionError(f"找不到按钮 {label}")
 
 
 def shot(name):
@@ -107,10 +115,14 @@ def check(rule, what, expect, actual, ok):
 
 
 def reset():
+    # 深链只用来"进到某一天的日记页"；**必须是今天** ——
+    # 「写日记」只在今天出现（历史日记只能在设置里打开"允许修改"、且仍然不可新增），
+    # 所以日期默认取设备当天，可以用 `--day` 覆盖（跑历史那天的验收时用）。
     sh("shell", "am", "force-stop", "com.cov.justdiary")
-    time.sleep(1)
-    sh("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "justdiary://editor/2026-09-28")
-    time.sleep(3.5)
+    time.sleep(2)
+    sh("shell", "am", "start", "-a", "android.intent.action.VIEW",
+       "-d", f"justdiary://editor?dayKey={DAY}")
+    time.sleep(6)
     tap("写日记")
     time.sleep(3)
 
@@ -118,9 +130,12 @@ def reset():
 def main():
     global OUT
     p = argparse.ArgumentParser()
+    global DAY
     p.add_argument("--out", default=OUT)
+    p.add_argument("--day", default=DAY, help="目标日期（默认设备当天）")
     a = p.parse_args()
     OUT = a.out
+    DAY = a.day
 
     # ---------------- 规则 6：光标字号跟着段落样式 ----------------
     print("\n规则 6 · 光标字号")

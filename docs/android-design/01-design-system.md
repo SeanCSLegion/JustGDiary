@@ -23,12 +23,12 @@
 
 | 角色 | 用在哪 | 不要用在哪 |
 | --- | --- | --- |
-| `primary` | 主按钮底、选中日实心圆、今天圆环、柱状图柱体、Switch 轨道（开）、链接式文字按钮、`checkmark` 保存图标 | 大面积背景 |
+| `primary` | 主按钮底、选中日实心圆、今天圆环、柱状图柱体、Switch 轨道（开）、链接式文字按钮、`checkmark` 保存图标、**待办勾选框（选中）** | 大面积背景 |
 | `onPrimary` | 主按钮文字、选中日格内的日号与农历 | — |
 | `primaryContainer` | 时间胶囊、计数徽标、搜索命中高亮、`今日` 徽标、（深色下的）主按钮 | 正文背景 |
 | `onPrimaryContainer` | 以上容器内的文字 | — |
 | `secondaryContainer` | **导航选中指示器**、设置行图标徽标、格式栏 active 按钮底 | 主行动 |
-| `tertiaryContainer` | 待办勾选框（选中）、次要强调 | — |
+| `tertiaryContainer` | 次要强调 | — |
 | `error` | 破坏性动作（删除 / 覆盖 / 放弃）、错误文案 | 普通强调 |
 | `surface` | 窗口底色（`Scaffold` 的 containerColor） | 卡片 |
 | `surfaceContainerLowest` | Dialog、BottomSheet 内容底、输入框底 | 页面底 |
@@ -116,16 +116,25 @@ effectiveSp(designSize, fontScale)         = (designSize × effectiveMultiplier 
   Body 1.50 / Callout 1.55 / Subheadline 1.60 / Footnote 1.65 / Caption1 1.70 / Caption2 1.75。
 - **先除掉 `fontScale` 再交给 Compose** —— 因为 Compose 会对 `sp` 自动乘一次。
 - `fontScale = 1` 时结果与设计值**逐字一致**（默认外观不变）。
+- **M3 角色的行高跟着字号的倍数走**（`Type.kt` 的 `scaledRole()`：`fontSize` 与 `lineHeight` 共用同一个
+  multiplier）。两个值各按自己的档位取上限会让比例走样 —— `bodyLarge` 在 `fontScale = 2` 时实际变成
+  **1.403**（不是 1.500）、`headlineMedium` 1.240（不是 1.286）。共用倍数之后，角色的行高比例在任何字号下
+  都成立。
 - **日历专用半速**：`calendarMultiplier = 1 + (bodyLike − 1) × 0.5`。格子尺寸由屏幕决定，日号不能跟满曲线。
 - 单测守住：`DynamicTypeMetricsTest`（14 条）断言"任何 `fontScale` 下梯级不倒挂"。
 
 ### 2.4 段落间距 / 行距
 
-- 编辑器段落**行高直接用 M3 角色的官方值**（36 / 28 / 24 / 20）。
+- **段落几何的唯一来源是 `ui/diary/BlockGeometry.kt`**：编辑态（`EditText` + `Spannable`）、阅读态
+  （`DiaryReadScreen`）、首页日面板预览（`HomeScreen.DayPanelPart`）三个渲染面都从它取值，没有第二套数。
+- 编辑器段落**行高直接用 M3 角色的官方值**（36 / 28 / 24 / 20），编辑态的行盒高度也**正好**等于这个值
+  （`ascent` 取整、余数给 `descent`，逐行不再少 1px）。
   **不要**照搬 iOS 的 `lineSpacing = 0.13 × 字号` —— Apple 的 `lineSpacing` 是"额外行距"，不是行高，
   在 Compose 里被近似成 `fontSize × 1.13`，既不是 Apple 的语义也不是 Material 的。
-- 段后距 M3 **没有规范**（M3 不定义富文本段距）。由阅读区的 `Arrangement.spacedBy(8.dp)` 统一给节奏，
-  不在排版层编造数值。
+- 段后距 M3 **没有规范**（M3 不定义富文本段距）→ 取 4dp 栅格上的一档 `ParagraphGap = 8dp`，**三处共用**；
+  阅读态与预览的**列表项间距**也是同一个 8dp（原先阅读态是 4dp）。
+  编辑态**真的生效**：只落在段与段之间那一行，文末最后一段不加（早先 `chooseHeight` 的判据写成
+  `text[end]`、而平台给的 `end` 含终止换行，段距从来没生效过）。
 - 阅读态与编辑态共用同一套 `PartsCodec` 生成器 → **同一段文字在两种模式下逐像素一致**。
 
 ---
@@ -137,11 +146,17 @@ effectiveSp(designSize, fontScale)         = (designSize × effectiveMultiplier 
 | 令牌 | 值 | 用在 |
 | --- | --- | --- |
 | `extraSmall` | 4dp | Snackbar、引用块底、柱状图柱顶 |
-| `small` | 8dp | FilterChip、待办勾选框 |
+| `small` | 8dp | FilterChip |
 | `medium` | 12dp | 输入框、卡片内联图片、次级面、Dialog 内的列表 |
 | `large` | **16dp** | **内容卡片**（日记卡、设置卡、Hero 卡、统计卡、年历迷你月卡） |
 | `extraLarge` | 28dp | ModalBottomSheet、AlertDialog、悬浮格式栏、FAB、搜索栏 |
 | `full` | 999dp | 日期胶囊、chip、Switch、导航指示器、Badge |
+
+> **两处不吃梯级的例外**，都按 Google 自己的令牌取值（`ui/diary/BlockGeometry.kt`）：
+> ① **待办勾选框**是 M3 组件 → 取 `CheckboxTokens` 的**圆角 2dp**（容器 18dp、未选描边 2dp /
+> `onSurfaceVariant`、选中 `primary` + `onPrimary`、图标 18dp）。此前文档写"small 8dp"、稿上写 4dp，
+> 一律作废，**以 2dp 为准**；
+> ② **引用的左侧竖条**（宽 4dp、距列左 6dp、上下各让 5dp）**圆角 2dp**，引用底仍是 `extraSmall` 4dp。
 
 ### 3.1 嵌套圆角
 

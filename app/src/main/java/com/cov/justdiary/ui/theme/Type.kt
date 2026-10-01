@@ -8,6 +8,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Material 3 排版。
@@ -33,15 +34,26 @@ import androidx.compose.ui.unit.dp
 fun justDiaryTypography(fontScale: Float): Typography {
     val base = Typography()
 
-    /** 保留 M3 官方的字号与字重，只把**字号**按本项目的逐档上限重算。 */
-    fun TextStyle.scaledRole(): TextStyle = copy(
-        fontSize = DynamicTypeMetrics.effectiveSpForSize(fontSize.value, fontScale),
-        lineHeight = if (lineHeight == TextUnit.Unspecified) {
-            TextUnit.Unspecified
-        } else {
-            DynamicTypeMetrics.effectiveSpForSize(lineHeight.value, fontScale)
-        },
-    )
+    /**
+     * 保留 M3 官方的字号与字重，只把**字号**按本项目的逐档上限重算。
+     *
+     * 行高跟着**字号的倍数**走，而不是各自按自己的档位取上限：后者的上限不一样
+     * （正文 1.55 / 行高 1.45），放大字号时比例会被压掉 —— `bodyLarge` 在
+     * fontScale = 2 时实际变成 1.403 而不是 1.500，M3 的行高比例就丢了。
+     * 两个值共用同一个倍数，角色的比例在任何字号下都成立。
+     */
+    fun TextStyle.scaledRole(): TextStyle {
+        val multiplier = DynamicTypeMetrics.effectiveMultiplier(fontSize.value, fontScale)
+        val scale = if (fontScale.isFinite() && fontScale > 0f) fontScale else 1f
+        return copy(
+            fontSize = (fontSize.value * multiplier / scale).sp,
+            lineHeight = if (lineHeight == TextUnit.Unspecified) {
+                TextUnit.Unspecified
+            } else {
+                (lineHeight.value * multiplier / scale).sp
+            },
+        )
+    }
 
     return Typography(
         displayLarge = base.displayLarge.scaledRole(),
