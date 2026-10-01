@@ -82,15 +82,19 @@ fun DiaryFormatBar(
     isQuote: Boolean = false,
     isList: Boolean = false,
     isTodo: Boolean = false,
+    isImage: Boolean = false,
     isCentered: Boolean = false,
     enabled: Boolean = true,
     /**
      * 居中按钮能不能点（规则 5）。
      *
-     * 默认按"光标那一行是列表/引用/待办就置灰"推导；编辑器会显式传一个**按整个选区**算出来的值
-     * （选中一段引用 + 一行正文时，居中同样必须置灰 —— 只看光标那一行不够）。
+     * 默认按"光标那一行是列表 / 引用 / 待办 / 图片就置灰"推导；编辑器会显式传一个**按整个
+     * 选区**算出来的值（选中一段引用 + 一行正文时，居中同样必须置灰 —— 只看光标那一行不够）。
+     *
+     * 图片行也要置灰：图片段的对齐由编解码固定，`align` 根本不落库，按钮在那里点了没用
+     * （iOS `centerIsAllowed` 同样排除 image）。
      */
-    centerEnabled: Boolean = enabled && !isList && !isQuote && !isTodo,
+    centerEnabled: Boolean = enabled && !isList && !isQuote && !isTodo && !isImage,
     onBlockStyle: (EditorBlockStyle) -> Unit = {},
     onToggleCenter: () -> Unit = {},
     onToggleList: () -> Unit = {},
@@ -218,7 +222,7 @@ private fun BlockStyleMenuButton(
             .width(FormatBarMetrics.MenuWidth)
             .height(FormatBarMetrics.TouchHeight)
             .clip(CircleShape)
-            .background(if (activeBlock != EditorBlockStyle.Body) menuBackground else Color.Transparent)
+            .background(if (activeBlock.lightsStyleMenu) menuBackground else Color.Transparent)
             .alpha(if (enabled) 1f else FormatBarMetrics.DisabledAlpha)
             .clickable(enabled = enabled, onClickLabel = label) { onOpenChange(!open) }
             .semantics {
@@ -226,7 +230,7 @@ private fun BlockStyleMenuButton(
                 contentDescription = label
                 // 当前段落样式作为 value 读出来（TalkBack：「段落样式，大标题」）
                 stateDescription = currentStyleLabel
-                selected = activeBlock != EditorBlockStyle.Body
+                selected = activeBlock.lightsStyleMenu
             },
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -235,7 +239,7 @@ private fun BlockStyleMenuButton(
             imageVector = AppIcons.FormatSize,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
-            tint = if (activeBlock != EditorBlockStyle.Body) {
+            tint = if (activeBlock.lightsStyleMenu) {
                 MaterialTheme.colorScheme.onSecondaryContainer
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -245,7 +249,7 @@ private fun BlockStyleMenuButton(
             imageVector = AppIcons.ExpandMore,
             contentDescription = null,
             modifier = Modifier.size(14.dp),
-            tint = if (activeBlock != EditorBlockStyle.Body) {
+            tint = if (activeBlock.lightsStyleMenu) {
                 MaterialTheme.colorScheme.onSecondaryContainer
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -253,6 +257,20 @@ private fun BlockStyleMenuButton(
         )
     }
 }
+
+/**
+ * 段落样式按钮**点亮**的判据：只认大标题 / 小标题。
+ *
+ * 引用虽然也"不是正文"，但它**不在**这个菜单里（有自己的按钮）。早先用
+ * `activeBlock != Body` 判定，于是点「引用」会把段落样式按钮一起点亮 ——
+ * iOS B21 的同一处 bug（那边改成"只认 Title / Heading"并把点亮挂到无障碍的
+ * `isSelected` 上）。
+ *
+ * ⚠️ 注意只影响**按钮自己**：菜单面板里哪一项打勾仍按 `style == activeBlock` 算，
+ * 引用行因此"一项都不打勾"，这是对的。
+ */
+private val EditorBlockStyle.lightsStyleMenu: Boolean
+    get() = this == EditorBlockStyle.Title || this == EditorBlockStyle.Heading
 
 /** 单个格式按钮：40dp 圆 + 48dp 高触控区；active 用 `secondaryContainer` 胶囊底。 */
 @Composable

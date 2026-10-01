@@ -259,6 +259,7 @@ fun EditorScreen(
                 isQuote = currentLine.blockStyle == ContentPartStyle.quote,
                 isList = currentLine.isListItem,
                 isTodo = currentLine.isTodoItem,
+                isImage = currentLine.isImage,
                 isCentered = currentLine.align == EditorModel.ALIGN_CENTER,
                 // IME 组合期间禁用整栏（[FormatGate]：组合区里改 span 会被输入法覆盖）；
                 // 居中还要额外过一道"与列表/引用/待办互斥"（规则 5）——判据是**整个选区**，

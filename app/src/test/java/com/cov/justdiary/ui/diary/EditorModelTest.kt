@@ -1053,6 +1053,28 @@ class EditorModelTest {
         assertEquals(null, EditorModel.setAlignment(list, 0..0, center = false).single().align)
     }
 
+    /**
+     * 规则 5 补丁（2026-10-01）：**图片行**同样不给居中。
+     *
+     * 图片段的对齐由编解码固定（`linesToParts` 不写 `align`），按钮在那里只会在
+     * "亮 / 灭"之间切换而画面逐像素不变 —— iOS `centerIsAllowed` 同样排除 image（B24）。
+     */
+    @Test
+    fun `rule 5 centering is refused on image lines too`() {
+        val image = listOf(EditorLine(imageSrc = "images/a.jpg", imageWidth = 300.0, imageHeight = 150.0))
+        assertFalse(EditorModel.centerAllowed(image, 0..0))
+        assertEquals(
+            "图片行上点居中不能改模型",
+            null,
+            EditorModel.setAlignment(image, 0..0, center = true).single().align,
+        )
+
+        // 光标在正文、选区跨到图片行上：整段都不给居中（与列表行同一条口径）
+        val mixed = listOf(EditorLine(text = "正文"), image.single())
+        assertFalse(EditorModel.centerAllowed(mixed, 0..1))
+        assertTrue(EditorModel.centerAllowed(mixed, 0..0))
+    }
+
     /** 规则 6：列表/待办的**绘制**样式一律按正文（字号跟着正文走，光标高度才对）。 */
     @Test
     fun `rule 6 marker lines draw with the body style`() {

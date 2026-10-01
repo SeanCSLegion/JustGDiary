@@ -26,7 +26,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -524,13 +523,12 @@ private fun LocationFilterRow(
                 selected = state.locFilter.noLoc,
                 onClick = { if (state.locFilter.noLoc) onNoLocationChange(false) else onOpenLocPicker() },
                 label = { Text(if (state.locFilter.noLoc) NO_LOCATION_LABEL_ else PICK_LOC_LABEL) },
-                leadingIcon = when {
-                    state.locFilter.noLoc -> {
-                        { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    }
-                    else -> {
-                        { Icon(Icons.Filled.Place, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    }
+                // 只有"已选中"才带对勾（M3 FilterChip 的选中指示）；未选中时**不挂图标**——
+                // 这枚胶囊是"去挑一个地点"的入口，图钉只是装饰（2026-10-01 用户口径）。
+                leadingIcon = if (state.locFilter.noLoc) {
+                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
                 },
             )
         }

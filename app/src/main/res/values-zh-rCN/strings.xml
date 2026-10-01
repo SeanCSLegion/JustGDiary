@@ -217,7 +217,7 @@
     <string name="a11y_prev_year">上一年</string>
     <string name="a11y_next_year">下一年</string>
     <string name="search_all_loc">全部地点</string>
-    <string name="search_loc_picker">选择地点…</string>
+    <string name="search_loc_picker">选择地点</string>
     <string name="search_loc_title">选择地点</string>
     <string name="search_loc_search">搜索地点…</string>
     <string name="search_loc_sort_hint">按日记数量排序</string>

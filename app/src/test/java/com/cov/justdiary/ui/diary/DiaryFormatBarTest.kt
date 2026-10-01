@@ -68,8 +68,10 @@ class DiaryFormatBarTest {
     }
 
     @Test
-    fun `center is disabled on list quote and todo lines`() {
-        // 三类"块级标记"行上，居中都必须置灰（互斥：规范 §3.3）
+    fun `center is disabled on list quote todo and image lines`() {
+        // 四类"块级元素"行上，居中都必须置灰（互斥：规范 §3.3）。
+        // 图片行是 2026-10-01 补的：图片段的对齐由编解码固定、`align` 不落库，
+        // 按钮在那里点了只会亮一下、画面不变（iOS centerIsAllowed 同样排除 image）。
         var kind by mutableStateOf("plain")
         rule.setContent {
             DiaryFormatBar(
@@ -78,18 +80,44 @@ class DiaryFormatBarTest {
                 isList = kind == "list",
                 isQuote = kind == "quote",
                 isTodo = kind == "todo",
+                isImage = kind == "image",
             )
         }
 
         // 正文行：居中可用
         rule.onNodeWithContentDescription(str(R.string.editor_align_center)).assertIsEnabled()
 
-        listOf("list", "quote", "todo").forEach { current ->
+        listOf("list", "quote", "todo", "image").forEach { current ->
             kind = current
             rule.waitForIdle()
             rule.onNodeWithContentDescription(str(R.string.editor_align_center)).assertIsNotEnabled()
             rule.onNodeWithContentDescription(str(R.string.editor_tool_list)).assertIsEnabled()
         }
+    }
+
+    /**
+     * 段落样式按钮的点亮**只认大标题 / 小标题**（iOS B21）。
+     *
+     * 引用也是"非正文"，但它不在这个菜单里（有自己的按钮）—— 早先用
+     * `activeBlock != Body` 判定，点一次「引用」会把段落样式按钮一起点亮。
+     */
+    @Test
+    fun `the style menu button lights up for headings but not for quotes`() {
+        var block by mutableStateOf(EditorBlockStyle.Body)
+        rule.setContent { DiaryFormatBar(activeBlock = block, flags = InlineFlags()) }
+
+        val style = rule.onNodeWithContentDescription(str(R.string.editor_tool_style))
+
+        style.assertIsNotSelected()
+        block = EditorBlockStyle.Heading
+        rule.waitForIdle()
+        style.assertIsSelected()
+        block = EditorBlockStyle.Title
+        rule.waitForIdle()
+        style.assertIsSelected()
+        block = EditorBlockStyle.Quote
+        rule.waitForIdle()
+        style.assertIsNotSelected()
     }
 
     @Test

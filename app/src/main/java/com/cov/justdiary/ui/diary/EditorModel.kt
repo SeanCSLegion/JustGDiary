@@ -453,9 +453,15 @@ object EditorModel {
         }
     }
 
-    /** 居中与引用/列表/待办互斥（规则 5）。 */
+    /**
+     * 居中与引用 / 列表 / 待办 / **图片**互斥（规则 5）。
+     *
+     * 图片行也要排除：图片段的对齐由编解码固定（`linesToParts` 对图片段**不写** `align`），
+     * 于是它上面点「居中」只会让按钮亮一下、画面逐像素不变 —— 一个会说谎的死按钮。
+     * iOS `centerIsAllowed` 同样把 `image` 附件与 bullet / todo 一起排除（B24）。
+     */
     fun centerAllowed(line: EditorLine): Boolean =
-        line.marker == null && line.blockStyle != ContentPartStyle.quote
+        line.marker == null && !line.isImage && line.blockStyle != ContentPartStyle.quote
 
     /** 整段区间是否**每一行**都允许居中（格式栏据此置灰居中按钮）。 */
     fun centerAllowed(lines: List<EditorLine>, indices: IntRange): Boolean =

@@ -228,7 +228,7 @@
     <string name="a11y_prev_year">Previous year</string>
     <string name="a11y_next_year">Next year</string>
     <string name="search_all_loc">All places</string>
-    <string name="search_loc_picker">Pick a place…</string>
+    <string name="search_loc_picker">Pick a place</string>
     <string name="search_loc_title">Choose a location</string>
     <string name="search_loc_search">Search places…</string>
     <string name="search_loc_sort_hint">Sorted by entries count</string>

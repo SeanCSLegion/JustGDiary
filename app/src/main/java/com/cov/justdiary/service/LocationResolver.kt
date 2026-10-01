@@ -48,7 +48,11 @@ object LocationResolver {
             )
 
             LocPrecision.district -> join(
-                placemark.subAdministrativeArea,
+                // 区县名在 `subLocality`（中国的「南山区」就在这里），`subAdministrativeArea`
+                // 是县级（美国是 county）—— 两者都没有时才退到城市。此前**只**看
+                // `subAdministrativeArea`，于是「区县」级在中国常常只显示到市，
+                // 与地区列重建的文案（region3 · region2 · …）对不上（iOS 同处已修）。
+                placemark.subLocality.ifEmpty { placemark.subAdministrativeArea },
                 placemark.locality,
                 placemark.administrativeArea,
                 placemark.country,

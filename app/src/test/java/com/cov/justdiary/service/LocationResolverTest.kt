@@ -154,4 +154,37 @@ class LocationResolverTest {
         val pm = PlacemarkText(subLocality = "南山区", locality = "深圳市", country = "中国")
         assertEquals("南山区 · 深圳市 · 中国", LocationResolver.textFromPlacemark(pm, LocPrecision.street))
     }
+
+    /**
+     * 「区县」级优先 `subLocality`（中国的「南山区」就在这里），没有才退到
+     * `subAdministrativeArea`（美国是 county）。
+     *
+     * 此前**只**看 `subAdministrativeArea`，而中国的反地理编码常常把市级填进那一栏，
+     * 于是「区县」级只显示到市，与地区列重建出来的文案（region3 · region2 · …）对不上。
+     */
+    @Test
+    fun `district prefers sub locality and falls back to the sub administrative area`() {
+        val china = PlacemarkText(
+            subLocality = "南山区",
+            locality = "深圳市",
+            subAdministrativeArea = "深圳市",
+            administrativeArea = "广东省",
+            country = "中国",
+        )
+        assertEquals(
+            "南山区 · 深圳市 · 广东省 · 中国",
+            LocationResolver.textFromPlacemark(china, LocPrecision.district),
+        )
+
+        val us = PlacemarkText(
+            subAdministrativeArea = "Santa Clara County",
+            locality = "Cupertino",
+            administrativeArea = "California",
+            country = "United States",
+        )
+        assertEquals(
+            "Santa Clara County · Cupertino · California · United States",
+            LocationResolver.textFromPlacemark(us, LocPrecision.district),
+        )
+    }
 }
