@@ -245,4 +245,7 @@
     <string name="editor_tool_strike">Strikethrough</string>
     <string name="editor_tool_underline">Underline</string>
     <string name="editor_placeholder_existing">Edit this entry…</string>
+    <string name="settings_share_loc">Location in shared image</string>
+    <string name="settings_share_loc_sub">No exact place or street</string>
+    <string name="settings_share_loc_hidden">Hide</string>
 </resources>

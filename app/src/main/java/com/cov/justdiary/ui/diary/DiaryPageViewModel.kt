@@ -695,7 +695,13 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
                 LocationFix(fix.latitude, fix.longitude),
                 settings.appLanguage,
             )
-            val snapshot = container.locationService.snapshotFor(fix, placemark, settings.appLanguage)
+            val snapshot = container.locationService.snapshotFor(
+                fix = fix,
+                placemark = placemark,
+                appLanguage = settings.appLanguage,
+                // 上一次手动选的精度在这里生效：只会让这条记录更粗，不会顶穿权限上限
+                preferred = settings.defaultLocPrecision,
+            )
             _state.value = _state.value.copy(location = snapshot, locating = false)
         }
     }
@@ -731,14 +737,23 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         beginLocate()
     }
 
-    /** 调整显示精度：只改文案与档位，坐标与地区列不动。 */
+    /**
+     * 调整显示精度：只改文案与档位，坐标与地区列不动。
+     *
+     * 顺手把这次的选择记进 `default_loc_precision`（iOS §七）：下一条新日记按
+     * `min(记住的, 权限上限)` 记录，用户不必每次重选。与 iOS 一样**只改这一个字段**
+     * 再落盘 —— 整份写回会把别处刚改过的设置项一起顶掉。
+     */
     fun applyPrecision(precision: String) {
         val snapshot = _state.value.location ?: return
+        val remembered = container.settings.load().copy(defaultLocPrecision = precision)
+        container.settings.save(remembered)
         _state.value = _state.value.copy(
             location = snapshot.copy(
                 locPrecision = precision,
                 locText = LocationRules.textForPrecision(snapshot, precision),
             ),
+            settings = remembered,
         )
     }
 
@@ -787,10 +802,15 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         timeLabel: (Long) -> String,
     ) {
         val dayKey = _state.value.actualDayKey
+        // 分享图上的地点**只从记录的地区列重建**，并按设置里的上限（`share_loc_precision`）
+        // 降级：精确地点与街道永远进不了分享图，与记录时的精度无关。
+        // 上限直接读当前设置，而不是这份 VM 手里的快照 —— 分享精度不影响任何常驻界面，
+        // 改它时没必要广播刷新，那一份快照可能是旧的（iOS 同此）。
+        val cap = container.settings.load().shareLocPrecision
         val blocks = _state.value.blocks.map { block ->
             com.cov.justdiary.data.ShareLayout.ShareBlock(
                 time = block.startTimeUtc,
-                location = block.locText,
+                location = LocationResolver.shareText(block.locPrecision, regionOf(block), cap),
                 parts = ContentFlatten.parseContent(block.contentJson),
             )
         }
@@ -859,23 +879,28 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     suspend fun importImage(uri: android.net.Uri): String? =
         container.mediaStore.importImage(uri)
 
+    /** 片段自己的地区列（编辑态重建快照、分享重建地址都用它）。 */
+    private fun regionOf(block: EditBlock): LocRegion = LocRegion(
+        country = block.country,
+        countryCode = block.countryCode,
+        region1 = block.region1,
+        region2 = block.region2,
+        region3 = block.region3,
+        locQuality = block.locQuality,
+    )
+
     private fun locationSnapshotOf(block: EditBlock): LocationRules.LocationSnapshot? {
         val precision = block.locPrecision.ifEmpty { LocPrecision.none }
         if (block.locText.isEmpty() && precision == LocPrecision.none) return null
-        val region = LocRegion(
-            country = block.country,
-            countryCode = block.countryCode,
-            region1 = block.region1,
-            region2 = block.region2,
-            region3 = block.region3,
-            locQuality = block.locQuality,
-        )
         return LocationRules.LocationSnapshot(
             latitude = block.latitude,
             longitude = block.longitude,
             locText = block.locText,
             locPrecision = precision,
-            region = region,
+            region = regionOf(block),
+            // 从库里重建的快照：没有地理编码结果（`placemark == null`），因此菜单由
+            // 地区列决定、也不受当前权限约束；上限这一格用不到，给最保守的省份。
+            maxPrecision = LocPrecision.province,
             // 记录时的档位与原文都取库里的值：回到记录档位时原样恢复
             recordedPrecision = precision,
             recordedText = block.locText,

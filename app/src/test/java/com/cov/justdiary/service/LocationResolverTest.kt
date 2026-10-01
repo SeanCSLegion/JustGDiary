@@ -1,6 +1,7 @@
 package com.cov.justdiary.service
 
 import com.cov.justdiary.model.LocPrecision
+import com.cov.justdiary.model.LocQuality
 import com.cov.justdiary.model.LocRegion
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -78,20 +79,70 @@ class LocationResolverTest {
         )
     }
 
+    /**
+     * 权限 × 精度 → 这次定位能支撑的**最细**级别（iOS `maxPrecision`）。
+     *
+     * 模糊授权一律城市：坐标被吸附到"所在区域"的代表点，区县不再可信。
+     * 精确授权按这次的 `horizontalAccuracy` 分档；精度未知（Android 用 0）按城市算。
+     */
     @Test
-    fun `new location offers all levels only when the permission is precise`() {
-        assertEquals(
-            LocPrecision.all,
-            LocationResolver.availablePrecisionsForNewLocation(authorized = true, precise = true),
-        )
-        assertEquals(
-            listOf(LocPrecision.province, LocPrecision.city, LocPrecision.district),
-            LocationResolver.availablePrecisionsForNewLocation(authorized = true, precise = false),
-        )
-        assertEquals(
-            listOf(LocPrecision.province, LocPrecision.city, LocPrecision.district),
-            LocationResolver.availablePrecisionsForNewLocation(authorized = false, precise = true),
-        )
+    fun `the permission and the fix accuracy set the finest level`() {
+        // 模糊授权：无论精度报多少，最多到城市
+        assertEquals(LocPrecision.city, LocationResolver.maxPrecision(precise = false, horizontalAccuracy = 5f))
+        assertEquals(LocPrecision.city, LocationResolver.maxPrecision(precise = false, horizontalAccuracy = 0f))
+
+        // 精确授权：按水平精度分档
+        assertEquals(LocPrecision.exact, LocationResolver.maxPrecision(precise = true, horizontalAccuracy = 8f))
+        assertEquals(LocPrecision.street, LocationResolver.maxPrecision(precise = true, horizontalAccuracy = 80f))
+        assertEquals(LocPrecision.district, LocationResolver.maxPrecision(precise = true, horizontalAccuracy = 900f))
+        assertEquals(LocPrecision.city, LocationResolver.maxPrecision(precise = true, horizontalAccuracy = 4_000f))
+        assertEquals(LocPrecision.province, LocationResolver.maxPrecision(precise = true, horizontalAccuracy = 9_000f))
+        // 精度未知（0）不冒进：按城市算
+        assertEquals(LocPrecision.city, LocationResolver.maxPrecision(precise = true, horizontalAccuracy = 0f))
+    }
+
+    @Test
+    fun `a manually picked precision can only make the record coarser`() {
+        assertEquals(LocPrecision.exact, LocationResolver.effective(LocPrecision.auto, LocPrecision.exact))
+        assertEquals(LocPrecision.city, LocationResolver.effective(LocPrecision.city, LocPrecision.exact))
+        assertEquals("记住的比上限更细时按上限", LocPrecision.district, LocationResolver.effective(LocPrecision.exact, LocPrecision.district))
+        assertEquals("不在梯子上的值按上限", LocPrecision.province, LocationResolver.effective("坏值", LocPrecision.province))
+    }
+
+    @Test
+    fun `new location offers exactly the levels the cap allows`() {
+        assertEquals(LocPrecision.all, LocationResolver.availablePrecisions(LocPrecision.exact))
+        assertEquals(listOf(LocPrecision.district, LocPrecision.city, LocPrecision.province), LocationResolver.availablePrecisions(LocPrecision.district))
+        assertEquals(listOf(LocPrecision.city, LocPrecision.province), LocationResolver.availablePrecisions(LocPrecision.city))
+        assertEquals(listOf(LocPrecision.province), LocationResolver.availablePrecisions(LocPrecision.province))
+        // 坏上限 → 只剩省份，不会凭空多出更细的级别
+        assertEquals(listOf(LocPrecision.province), LocationResolver.availablePrecisions(LocPrecision.none))
+    }
+
+    /**
+     * 分享文案：**只用地区列重建**，`loc_text` 不是它的输入。
+     *
+     * 这条是"分享不会泄露地点名与街道"的硬保证 —— 早期记录会把地点名写在 `loc_text` 里，
+     * 而 `loc_precision` 只标到省份，只看标签迟早会漏。
+     */
+    @Test
+    fun `share text is rebuilt from the region columns and never leaks the place name`() {
+        val region = LocRegion("中国", "CN", "广东省", "深圳市", "南山区", LocQuality.precise)
+
+        // 记录在 exact（loc_text 里有地点名与街道）→ 分享按上限降到区县
+        assertEquals("南山区 · 深圳市 · 广东省 · 中国", LocationResolver.shareText(LocPrecision.exact, region, LocPrecision.district))
+        // 上限更粗 → 只能更粗
+        assertEquals("深圳市 · 广东省 · 中国", LocationResolver.shareText(LocPrecision.exact, region, LocPrecision.city))
+        assertEquals("广东省 · 中国", LocationResolver.shareText(LocPrecision.exact, region, LocPrecision.province))
+        // 记录本来就更粗 → 按记录的来，不会凭空更细
+        assertEquals("广东省 · 中国", LocationResolver.shareText(LocPrecision.province, region, LocPrecision.district))
+        // 隐藏
+        assertEquals("", LocationResolver.shareText(LocPrecision.exact, region, LocPrecision.none))
+        // 上限被误写成 exact / street（坏备份）→ 收到最细的可分享级别，而不是原样放行
+        assertEquals("南山区 · 深圳市 · 广东省 · 中国", LocationResolver.shareText(LocPrecision.exact, region, LocPrecision.exact))
+        assertEquals("南山区 · 深圳市 · 广东省 · 中国", LocationResolver.shareText(LocPrecision.exact, region, "坏值"))
+        // 没有地点的记录 → 空（不退回原文）
+        assertEquals("", LocationResolver.shareText(LocPrecision.none, LocRegion("", "", "", "", "", LocQuality.none), LocPrecision.district))
     }
 
     @Test

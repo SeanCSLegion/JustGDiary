@@ -32,6 +32,7 @@ class LocationRulesTest {
         locText = "深圳湾公园, 滨海大道 · 深圳市 · 广东省 · 中国",
         locPrecision = LocPrecision.exact,
         region = shenzhen,
+        maxPrecision = LocPrecision.province,
         recordedPrecision = LocPrecision.exact,
         recordedText = "深圳湾公园, 滨海大道 · 深圳市 · 广东省 · 中国",
     )
@@ -155,15 +156,39 @@ class LocationRulesTest {
     // ------------------------------------------------------------------ 精度与质量档位
 
     @Test
-    fun `precise authorization yields exact and precise quality`() {
-        assertEquals(LocPrecision.exact, LocationRules.defaultPrecisionForNewLocation(precise = true))
+    fun `precise authorization yields precise quality`() {
         assertEquals(LocQuality.precise, LocationRules.defaultQualityForNewLocation(precise = true))
     }
 
     @Test
-    fun `coarse authorization yields province and coarse quality`() {
-        assertEquals(LocPrecision.province, LocationRules.defaultPrecisionForNewLocation(precise = false))
+    fun `coarse authorization yields coarse quality`() {
         assertEquals(LocQuality.coarse, LocationRules.defaultQualityForNewLocation(precise = false))
+    }
+
+    /**
+     * 新片段（手里还有地理编码结果）：菜单只受**这次定位的上限**约束 ——
+     * 系统给不出更细的位置，菜单里就不该有更细的级别。
+     */
+    @Test
+    fun `a new block offers only the levels its fix can support`() {
+        val live = recorded.copy(
+            maxPrecision = LocPrecision.city,
+            placemark = PlacemarkText(
+                name = "深圳湾公园",
+                thoroughfare = "滨海大道",
+                subLocality = "南山区",
+                locality = "深圳市",
+                administrativeArea = "广东省",
+                country = "中国",
+            ),
+        )
+        assertEquals(listOf(LocPrecision.city, LocPrecision.province), LocationRules.precisionOptions(live))
+        // 上限之内可以按任意档位重新拼 —— exact 真的拿得到地点名与街道
+        assertEquals(
+            "深圳湾公园, 滨海大道 · 深圳市 · 广东省 · 中国",
+            LocationRules.textForPrecision(live, LocPrecision.exact),
+        )
+        assertEquals("滨海大道 · 深圳市 · 广东省 · 中国", LocationRules.textForPrecision(live, LocPrecision.street))
     }
 
     @Test
@@ -174,6 +199,7 @@ class LocationRulesTest {
             locText = "",
             locPrecision = LocPrecision.none,
             region = LocRegion("", "", "", "", "", LocQuality.none),
+            maxPrecision = LocPrecision.province,
         )
         assertFalse(empty.hasLocation)
         assertTrue(recorded.hasLocation)

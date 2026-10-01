@@ -43,7 +43,7 @@ class SettingsStore(context: Context) : SettingsRaw {
         return loaded
     }
 
-    /** 写回 10 个业务设置项（不影响三个内部状态 key）。 */
+    /** 写回 12 个业务设置项（不影响三个内部状态 key）。 */
     fun save(settings: AppSettings) {
         prefs.edit()
             .putInt(SettingsKeys.DAY_START_HOUR, settings.dayStartHour)
@@ -56,6 +56,8 @@ class SettingsStore(context: Context) : SettingsRaw {
             .putBoolean(SettingsKeys.REMIND_ENABLED, settings.remindEnabled)
             .putInt(SettingsKeys.REMIND_HOUR, settings.remindHour)
             .putInt(SettingsKeys.REMIND_MINUTE, settings.remindMinute)
+            .putString(SettingsKeys.SHARE_LOC_PRECISION, settings.shareLocPrecision)
+            .putString(SettingsKeys.DEFAULT_LOC_PRECISION, settings.defaultLocPrecision)
             // Android 专有：动态取色
             .putBoolean(SettingsKeys.DYNAMIC_COLOR, settings.dynamicColor)
             .apply()

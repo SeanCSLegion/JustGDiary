@@ -167,6 +167,14 @@ class SettingsViewModel(
     fun setAllowHistoryEdit(value: Boolean) = update(transform = { it.copy(allowHistoryEdit = value) })
 
     /**
+     * 分享长图里的地点上限（`share_loc_precision`）。
+     *
+     * **不需要**新的 [com.cov.justdiary.service.SettingsEffect]：这个值只在生成分享图时读一次，
+     * 不改变任何常驻界面的外观，因此不值得广播一次刷新。
+     */
+    fun setShareLocPrecision(value: String) = update(transform = { it.copy(shareLocPrecision = value) })
+
+    /**
      * `auto_loc`。由关变开的副作用（申请权限 + 回填历史地区）由
      * `SettingsEffects` 决定，其中"申请权限"会以 [SettingsUiEvent.RequestLocationPermission] 冒出来。
      */

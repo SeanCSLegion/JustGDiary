@@ -49,6 +49,7 @@ class EditorLocationChipTest {
         locText = "徐汇区 · 上海市 · 中国",
         locPrecision = LocPrecision.district,
         region = LocRegion("中国", "CN", "上海市", "上海市", "徐汇区", LocQuality.precise),
+        maxPrecision = LocPrecision.province,
     )
 
     private fun editor(

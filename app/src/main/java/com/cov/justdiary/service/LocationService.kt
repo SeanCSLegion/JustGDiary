@@ -15,6 +15,7 @@ import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.cov.justdiary.model.LocPrecision
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -27,8 +28,18 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
 
-/** 一次定位结果。 */
-data class LocationFix(val latitude: Double, val longitude: Double)
+/**
+ * 一次定位结果。
+ *
+ * [accuracy] 是这次定位的水平精度（米），对应 iOS 的 `horizontalAccuracy` ——
+ * "这次定位能标到多细"由它和授权档一起算（见 [LocationResolver.maxPrecision]）。
+ * 未知时是 `0`（`Location.getAccuracy()` 的平台约定）。
+ */
+data class LocationFix(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracy: Float = 0f,
+)
 
 /** 带"什么时候测到的"的定位结果（缓存点要按年龄判断能不能用）。 */
 data class AgedLocationFix(val fix: LocationFix, val ageMillis: Long)
@@ -343,14 +354,25 @@ class LocationService(context: Context) {
         }
 
     /**
-     * 由一次定位结果构造位置快照（把"精度 → 档位/质量"的规则集中在这里）。
+     * 由一次定位结果构造位置快照（把"权限上限 × 记忆偏好 → 档位/质量"的规则集中在这里）。
      *
-     * 规则与 iOS 一致：精确授权 → `exact`/`precise`，模糊授权 → `province`/`coarse`；
-     * **地址为空时按没有位置处理**（`LocationRules.acceptsGeocodeResult`）。
+     * 规则与 iOS 一致（`docs/location-recording.md` §六 / §七）：
+     *  - 上限 [LocationResolver.maxPrecision]：模糊授权最多到城市，精确授权按这次的
+     *    `horizontalAccuracy` 分档；
+     *  - 实际档位 = `min(用户上次手动选的, 上限)` —— 手动选的只会让结果更粗；
+     *  - **地址为空时按没有位置处理**（`LocationRules.acceptsGeocodeResult`）。
+     *
+     * `preferred` 由调用方从设置里读（与 `appLanguage` 同一条约定：这个类不读设置）。
      */
-    fun snapshotFor(fix: LocationFix, placemark: PlacemarkText?, appLanguage: String): LocationRules.LocationSnapshot? {
+    fun snapshotFor(
+        fix: LocationFix,
+        placemark: PlacemarkText?,
+        appLanguage: String,
+        preferred: String = LocPrecision.auto,
+    ): LocationRules.LocationSnapshot? {
         val precise = isPrecise()
-        val precision = LocationRules.defaultPrecisionForNewLocation(precise)
+        val cap = LocationResolver.maxPrecision(precise, fix.accuracy)
+        val precision = LocationResolver.effective(preferred, cap)
         val quality = LocationRules.defaultQualityForNewLocation(precise)
         val locText = LocationResolver.textFromPlacemark(placemark, precision)
         val region = LocationRules.regionFromLivePlacemark(placemark, quality)
@@ -361,15 +383,17 @@ class LocationService(context: Context) {
             locText = locText,
             locPrecision = precision,
             region = region,
+            maxPrecision = cap,
+            placemark = placemark,
             recordedPrecision = precision,
             recordedText = locText,
-        ).also { Log.location.i("已记录位置：$locText（$precision）") }
+        ).also { Log.location.i("已记录位置：$locText（$precision，上限 $cap，精度 ${fix.accuracy}m）") }
     }
 
     private fun granted(permission: String): Boolean =
         ContextCompat.checkSelfPermission(appContext, permission) == PackageManager.PERMISSION_GRANTED
 
-    private fun Location.toFix() = LocationFix(latitude = latitude, longitude = longitude)
+    private fun Location.toFix() = LocationFix(latitude = latitude, longitude = longitude, accuracy = accuracy)
 
     /** 平台给的 `Location` 自带时间戳（`elapsedRealtimeNanos`），年龄由它算。 */
     private fun Location.toAgedFix(): AgedLocationFix = AgedLocationFix(

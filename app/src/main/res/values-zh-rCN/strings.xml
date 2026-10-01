@@ -234,4 +234,7 @@
     <string name="editor_tool_strike">删除线</string>
     <string name="editor_tool_underline">下划线</string>
     <string name="editor_placeholder_existing">修改这段内容…</string>
+    <string name="settings_share_loc">分享位置精度</string>
+    <string name="settings_share_loc_sub">精确地点与街道不分享</string>
+    <string name="settings_share_loc_hidden">隐藏</string>
 </resources>

@@ -55,7 +55,6 @@ import androidx.compose.ui.unit.dp
 import com.cov.justdiary.R
 import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.model.ContentPartStyle
-import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
@@ -63,6 +62,7 @@ import com.cov.justdiary.ui.components.AnchoredMenu
 import com.cov.justdiary.ui.components.AnchoredMenuItem
 import com.cov.justdiary.ui.components.MenuDefaults
 import com.cov.justdiary.ui.components.DiaryCard
+import com.cov.justdiary.ui.components.locPrecisionLabel
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
 import com.cov.justdiary.ui.theme.Radius
@@ -316,7 +316,7 @@ fun EditorScreen(
             if (recorded != null) {
                 LocationRules.precisionOptions(recorded.snapshot).forEach { option ->
                     AnchoredMenuItem(
-                        label = precisionLabel(option),
+                        label = locPrecisionLabel(option),
                         selected = option == recorded.snapshot.locPrecision,
                         trailingIcon = Icons.Filled.LocationOn,
                         onClick = {
@@ -497,16 +497,6 @@ private fun LocationChip(
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-@Composable
-private fun precisionLabel(precision: String): String = when (precision) {
-    LocPrecision.exact -> stringResource(R.string.loc_precision_exact)
-    LocPrecision.street -> stringResource(R.string.loc_precision_street)
-    LocPrecision.district -> stringResource(R.string.loc_precision_district)
-    LocPrecision.city -> stringResource(R.string.loc_precision_city)
-    LocPrecision.province -> stringResource(R.string.loc_precision_province)
-    else -> stringResource(R.string.loc_precision_none)
 }
 
 /**

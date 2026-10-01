@@ -21,13 +21,33 @@ import com.cov.justdiary.model.LocRegion
  */
 object LocationRules {
 
-    /** 一个片段已记录的位置快照（含"记录时的档位与原文"，用于回到记录档位时原样恢复）。 */
+    /**
+     * 一个片段已记录的位置快照（含"记录时的档位与原文"，用于回到记录档位时原样恢复）。
+     */
     data class LocationSnapshot(
         val latitude: Double,
         val longitude: Double,
         val locText: String,
         val locPrecision: String,
         val region: LocRegion,
+        /**
+         * 这次定位能支撑的最细级别（[LocationResolver.maxPrecision]）。
+         *
+         * **故意没有默认值**：iOS 那边第一次写出来时漏传了这个字段，于是"已经给了精确位置，
+         * 菜单里却只剩省份"。没有默认值 = 漏传编译不过。
+         *
+         * 只有**新片段**（[placemark] 非空）会用它：已有片段的地点早就存在库里，
+         * 菜单只决定按哪一级显示，不受当前权限影响。
+         */
+        val maxPrecision: String,
+        /**
+         * 反向地理编码的原始结果；**只有"刚刚取到的"位置才有**。
+         *
+         * 它让新片段能在菜单里选到 `exact` / `street` 并真的拼出对应文案
+         * （`textForPrecision`）；已有片段从库里重建，没有它，只能靠地区列，
+         * 于是也**只有它**能区分"新取到的位置"与"从库里读出来的位置"。
+         */
+        val placemark: PlacemarkText? = null,
         /** 记录时的档位；`exact`/`street` 的完整文本只存在于 [locText] 里。 */
         val recordedPrecision: String = locPrecision,
         /** 记录时的原文；回到记录档位时原样恢复，避免一次来回丢掉地点名。 */
@@ -152,31 +172,40 @@ object LocationRules {
     fun acceptsGeocodeResult(locText: String, region: LocRegion): Boolean =
         locText.isNotEmpty() || region.hasAnyRegion()
 
-    /** 编辑态可选的位置精度档（记录档 + 地区列能表达的级别）。 */
+    /**
+     * 编辑态可选的位置精度档。
+     *
+     * - **新片段**（手里还有地理编码结果）：不粗于这次定位的上限 —— 系统给不出更细的
+     *   位置，菜单里就不该有更细的级别（iOS `availablePrecisions(maxPrecision:)`）；
+     * - **已有片段**：由它自己的地区列 + 记录时那一档决定，**不看当前权限** ——
+     *   地点是这条日记写下时的事实，阅读页本来就会显示记录时的原文。
+     */
     fun precisionOptions(snapshot: LocationSnapshot): List<String> =
-        LocationResolver.availablePrecisionsForRecorded(snapshot.region, snapshot.recordedPrecision)
+        if (snapshot.placemark != null) {
+            LocationResolver.availablePrecisions(snapshot.maxPrecision)
+        } else {
+            LocationResolver.availablePrecisionsForRecorded(snapshot.region, snapshot.recordedPrecision)
+        }
 
     /**
      * 给定精度档下位置胶囊应显示的文本。
      *
-     * 回到**记录时的档位**时原样恢复原文（`recordedText`），其余档位由地区列重建 ——
-     * 这样一次来回不会丢掉地点名。
+     * 回到**记录时的档位**时原样恢复原文（`recordedText`）；其余档位：新片段还有
+     * 地理编码结果，能按任意档位重新拼（`exact` / `street` 才真的拿得到地点名与街道）；
+     * 已有片段只能由地区列重建 —— 因此那边 `exact` / `street` 会退化成区县文案。
      */
-    fun textForPrecision(snapshot: LocationSnapshot, precision: String): String =
-        if (precision == snapshot.recordedPrecision) {
-            snapshot.recordedText
-        } else {
-            LocationResolver.textFromRegion(snapshot.region, precision)
-        }
+    fun textForPrecision(snapshot: LocationSnapshot, precision: String): String = when {
+        precision == snapshot.recordedPrecision -> snapshot.recordedText
+        snapshot.placemark != null -> LocationResolver.textFromPlacemark(snapshot.placemark, precision)
+        else -> LocationResolver.textFromRegion(snapshot.region, precision)
+    }
 
     /**
-     * 新建片段时的默认精度：**精确授权 → `exact`，模糊授权 → `province`**
-     * （`LocationService.swift:104-105`）。
+     * 新建片段时的位置质量档：精确授权 → `precise`，否则 `coarse`。
+     *
+     * （档位由"权限上限 × 记忆偏好"算，见 [LocationResolver.maxPrecision] / `effective`，
+     * 不再有"精确授权就写 `exact`"这条老规则 —— 一个误差 3km 的坐标不该被标成精确地点。）
      */
-    fun defaultPrecisionForNewLocation(precise: Boolean): String =
-        if (precise) LocPrecision.exact else LocPrecision.province
-
-    /** 新建片段时的位置质量档：精确授权 → `precise`，否则 `coarse`。 */
     fun defaultQualityForNewLocation(precise: Boolean): String =
         if (precise) LocQuality.precise else LocQuality.coarse
 

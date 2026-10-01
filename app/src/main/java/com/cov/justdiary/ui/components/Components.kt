@@ -36,10 +36,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.cov.justdiary.R
+import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.ui.theme.LocalIncreasedContrast
 import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
@@ -453,6 +456,22 @@ fun EmptyState(
             Button(onClick = onAction) { Text(actionLabel) }
         }
     }
+}
+
+/**
+ * 位置精度档位 → 文案。**唯一映射点**：编辑器的地点菜单与设置页的「分享位置精度」都用它。
+ *
+ * 隐藏（`none`）不在梯子上，单独一条文案（设置页那一档叫「隐藏」而不是「未设置」）。
+ */
+@Composable
+fun locPrecisionLabel(precision: String): String = when (precision) {
+    LocPrecision.exact -> stringResource(R.string.loc_precision_exact)
+    LocPrecision.street -> stringResource(R.string.loc_precision_street)
+    LocPrecision.district -> stringResource(R.string.loc_precision_district)
+    LocPrecision.city -> stringResource(R.string.loc_precision_city)
+    LocPrecision.province -> stringResource(R.string.loc_precision_province)
+    LocPrecision.none -> stringResource(R.string.settings_share_loc_hidden)
+    else -> stringResource(R.string.loc_precision_none)
 }
 
 /**

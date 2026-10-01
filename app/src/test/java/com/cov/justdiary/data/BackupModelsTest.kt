@@ -2,6 +2,7 @@ package com.cov.justdiary.data
 
 import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.AppSettingsJson
+import com.cov.justdiary.model.LocPrecision
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -88,7 +89,7 @@ class BackupModelsTest {
     }
 
     @Test
-    fun `settings json carries exactly the ten business keys`() {
+    fun `settings json carries exactly the twelve business keys`() {
         val settings = AppSettings(
             dayStartHour = 5,
             autoTime = false,
@@ -100,6 +101,8 @@ class BackupModelsTest {
             remindEnabled = false,
             remindHour = 8,
             remindMinute = 30,
+            shareLocPrecision = "province",
+            defaultLocPrecision = "city",
             // 这两个是数据版本，不是偏好 —— 绝不能进入 settingsJson
             searchIndexVersion = 3,
             contentFormatVersion = 2,
@@ -113,6 +116,8 @@ class BackupModelsTest {
                 "day_start_hour", "auto_time", "auto_loc", "allow_history_edit",
                 "theme_mode", "app_language", "week_start",
                 "remind_enabled", "remind_hour", "remind_minute",
+                // 与 iOS 同名同义的两个位置精度偏好（两端备份互认）
+                "share_loc_precision", "default_loc_precision",
             ),
             keys,
         )
@@ -156,6 +161,32 @@ class BackupModelsTest {
         assertEquals(AppSettings.LANGUAGE_SYSTEM, fallback.appLanguage)
         assertEquals(AppSettings.WEEK_START_MONDAY, fallback.weekStart)
         assertEquals(23, fallback.dayStartHour)
+    }
+
+    /**
+     * 导入备份时，位置精度这两个偏好也要**只往安全一侧**收：
+     * 上限比区县更细（或不是梯子上的值）→ 收到区县；`none`（隐藏）原样保留；
+     * 记忆精度不认识 → 收回 `auto`。
+     */
+    @Test
+    fun `an imported share precision can only be clamped coarser`() {
+        fun imported(raw: String) = json.decodeFromString(
+            AppSettingsJson.serializer(),
+            """{"share_loc_precision":"$raw","default_loc_precision":"$raw"}""",
+        ).toSettings(AppSettings())
+
+        assertEquals(LocPrecision.district, imported("exact").shareLocPrecision)
+        assertEquals(LocPrecision.district, imported("street").shareLocPrecision)
+        assertEquals(LocPrecision.district, imported("坏值").shareLocPrecision)
+        assertEquals(LocPrecision.none, imported("none").shareLocPrecision)
+        assertEquals(LocPrecision.province, imported("province").shareLocPrecision)
+
+        // 记忆精度是"梯子 + auto"，所以 exact 是合法值，只有不在梯子上的才收回 auto
+        assertEquals(LocPrecision.exact, imported("exact").defaultLocPrecision)
+        assertEquals(LocPrecision.auto, imported("坏值").defaultLocPrecision)
+        assertEquals(LocPrecision.city, imported("city").defaultLocPrecision)
+        // `none` 不是梯子上的级别（编辑器的菜单也从不提供它）→ 收回 auto
+        assertEquals(LocPrecision.auto, imported("none").defaultLocPrecision)
     }
 
     @Test

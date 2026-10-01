@@ -70,7 +70,7 @@ class BackupServiceRobolectricTest {
     // ------------------------------------------------------------------ 导出
 
     @Test
-    fun `export writes the cross-end layout and a settings payload with ten keys only`(): Unit = runBlocking {
+    fun `export writes the cross-end layout and a settings payload with the business keys only`(): Unit = runBlocking {
         repository.prepare()
         writeDay("2026-09-14", "今天去了海边")
         settings.save(
@@ -102,7 +102,7 @@ class BackupServiceRobolectricTest {
 
             val settingsJson = json.parseToJsonElement(manifest.settingsJson)
             val keys = (settingsJson as kotlinx.serialization.json.JsonObject).keys
-            assertEquals("settingsJson 只含 10 个业务设置项", 10, keys.size)
+            assertEquals("settingsJson 只含 12 个业务设置项", 12, keys.size)
             assertFalse("search_index_version 不是偏好", keys.contains("search_index_version"))
             assertFalse("content_format_version 不是偏好", keys.contains("content_format_version"))
             assertTrue(keys.contains("day_start_hour"))

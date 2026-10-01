@@ -71,6 +71,7 @@ import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.R
 import com.cov.justdiary.data.ImportMode
 import com.cov.justdiary.model.AppSettings
+import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
@@ -78,6 +79,7 @@ import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.IconBadge
 import com.cov.justdiary.ui.components.PageHeader
 import com.cov.justdiary.ui.components.SectionTitle
+import com.cov.justdiary.ui.components.locPrecisionLabel
 import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
 
@@ -345,6 +347,32 @@ private fun SettingsBody(
                         onClick = viewModel::onLocationPermissionRowClick,
                     )
                 }
+                RowDivider()
+                // 分享长图里的地点上限。选项**只有**隐藏 / 区县 / 城市 / 省份：
+                // 精确地点与街道不在 `LocPrecision.shareable` 里，用户选不到（iOS 同此）。
+                // 选项由 `shareable` 派生，加一级就自动出现，不必手写四遍。
+                MenuRow(
+                    icon = SettingsIcons.shareLoc,
+                    title = stringResource(R.string.settings_share_loc),
+                    sub = stringResource(R.string.settings_share_loc_sub),
+                    value = locPrecisionLabel(settings.shareLocPrecision),
+                    options = buildList {
+                        add(
+                            MenuOption(
+                                label = stringResource(R.string.settings_share_loc_hidden),
+                                selected = settings.shareLocPrecision == LocPrecision.none,
+                            ) { viewModel.setShareLocPrecision(LocPrecision.none) },
+                        )
+                        LocPrecision.shareable.forEach { level ->
+                            add(
+                                MenuOption(
+                                    label = locPrecisionLabel(level),
+                                    selected = settings.shareLocPrecision == level,
+                                ) { viewModel.setShareLocPrecision(level) },
+                            )
+                        }
+                    },
+                )
                 RowDivider()
                 SwitchRow(
                     icon = SettingsIcons.historyEdit,
@@ -958,6 +986,7 @@ private object SettingsIcons {
     val autoTime: ImageVector = AppIcons.Schedule
     val autoLoc: ImageVector = AppIcons.Place
     val locationPermission: ImageVector = AppIcons.MyLocation
+    val shareLoc: ImageVector = AppIcons.ShareLocation
     val historyEdit: ImageVector = AppIcons.Edit
     val reminder: ImageVector = AppIcons.Notifications
     val remindTime: ImageVector = AppIcons.Schedule

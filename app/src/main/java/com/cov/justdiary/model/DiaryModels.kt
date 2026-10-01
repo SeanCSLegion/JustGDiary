@@ -98,8 +98,42 @@ object LocPrecision {
     const val street = "street"
     const val exact = "exact"
 
-    /** 可选顺序（与 iOS `LocPrecision.all` 一致）。 */
+    /**
+     * 梯子上唯一一个**不是级别**的成员：它只用于「上一次手动选的精度」这个偏好，
+     * 意思是"跟随定位权限算出来的上限"（iOS `LocPrecision.auto`）。
+     */
+    const val auto = "auto"
+
+    /** 可选顺序（与 iOS `LocPrecision.all` 一致）：由细到粗，**索引越大越粗**。 */
     val all: List<String> = listOf(exact, street, district, city, province)
+
+    /**
+     * 分享长图允许出现的级别：**精确地点与街道不在其中**。
+     *
+     * 这不是"默认值"而是硬约束：`LocationResolver.shareText` 只按这三档重建地址，
+     * 用户在任何设置下都无法把地点名 / 街道分享出去（`docs/location-recording.md` §五）。
+     */
+    val shareable: List<String> = listOf(district, city, province)
+
+    /** 在梯子上的位置：0 = 最细。`none` 与任何未知值按"最粗"处理，坏数据因此往安全一侧倒。 */
+    fun rank(precision: String): Int {
+        val index = all.indexOf(precision)
+        return if (index >= 0) index else all.size
+    }
+
+    /** 两个级别里**更粗**的那个。 */
+    fun coarser(a: String, b: String): String = if (rank(a) >= rank(b)) a else b
+
+    /**
+     * 梯子上**不细于** `cap` 的级别（由细到粗）。
+     *
+     * 上限只砍掉更细的那几级：`levels(cappedAt = city)` = [city, province] ——
+     * 于是"系统只给了模糊位置"时，菜单里不会出现区县、街道与精确地点。
+     */
+    fun levels(cappedAt: String): List<String> {
+        val levels = all.filter { rank(it) >= rank(cappedAt) }
+        return levels.ifEmpty { listOf(province) }
+    }
 }
 
 /** 位置质量档位。对应 iOS `LocQuality`。 */

@@ -22,6 +22,15 @@ object SettingsKeys {
     const val REMIND_MINUTE = "remind_minute"
 
     /**
+     * 分享长图里的地点上限：`none`（隐藏）/ 区县 / 城市 / 省份，默认**区县**。
+     * 精确地点与街道不在取值域里 —— 那是硬约束，不是默认值。
+     */
+    const val SHARE_LOC_PRECISION = "share_loc_precision"
+
+    /** 上一次手动选的记录精度；`auto` = 跟随定位权限算出来的上限。 */
+    const val DEFAULT_LOC_PRECISION = "default_loc_precision"
+
+    /**
      * **Android 专有**（iOS 没有对应项）：是否跟随壁纸取色（Material You）。
      * 刻意**不进入** `settingsJson`（见 `AppSettingsJson`），因此不影响跨端设置互导。
      */
@@ -59,6 +68,10 @@ data class AppSettings(
     val remindEnabled: Boolean = true,
     val remindHour: Int = DEFAULT_REMIND_HOUR,
     val remindMinute: Int = DEFAULT_REMIND_MINUTE,
+    /** 分享长图里的地点精度上限（`none` = 不显示地点）。 */
+    val shareLocPrecision: String = LocPrecision.district,
+    /** 上一次手动选的记录精度（`auto` = 跟随权限上限）。 */
+    val defaultLocPrecision: String = LocPrecision.auto,
     /** Android 专有：动态取色（Material You），默认开启（Q4 已确认）。 */
     val dynamicColor: Boolean = true,
     /** FTS 索引格式版本；与 [SEARCH_INDEX_VERSION_REQUIRED] 比较决定是否重建。 */
@@ -89,6 +102,18 @@ data class AppSettings(
         val LANGUAGES: Set<String> = setOf(LANGUAGE_SYSTEM, LANGUAGE_ZH, LANGUAGE_EN)
         val WEEK_STARTS: Set<String> = setOf(WEEK_START_MONDAY, WEEK_START_SUNDAY)
 
+        /**
+         * 分享精度的取值域：隐藏 + 可分享的三档。
+         *
+         * 刻意**不含** `exact` / `street`：导入一份把上限写成 `exact` 的备份时，
+         * 这里会把它收回默认的区县，`LocationResolver.shareText` 里还有第二道。
+         */
+        val SHARE_LOC_PRECISIONS: Set<String> =
+            setOf(LocPrecision.none) + LocPrecision.shareable.toSet()
+
+        /** 记忆精度的取值域：梯子 + `auto`（未知值一律收回 `auto`）。 */
+        val DEFAULT_LOC_PRECISIONS: Set<String> = LocPrecision.all.toSet() + LocPrecision.auto
+
         /** 逐 key 读取并校验；非法值记录一条警告后回退默认值（与 iOS 行为一致）。 */
         fun from(raw: SettingsRaw): AppSettings {
             val defaults = AppSettings()
@@ -107,6 +132,10 @@ data class AppSettings(
                 remindEnabled = raw.bool(SettingsKeys.REMIND_ENABLED, defaults.remindEnabled),
                 remindHour = raw.int(SettingsKeys.REMIND_HOUR, defaults.remindHour).coerceIn(0, 23),
                 remindMinute = raw.int(SettingsKeys.REMIND_MINUTE, defaults.remindMinute).coerceIn(0, 59),
+                shareLocPrecision = raw.string(SettingsKeys.SHARE_LOC_PRECISION, defaults.shareLocPrecision)
+                    .validated(SHARE_LOC_PRECISIONS, defaults.shareLocPrecision, SettingsKeys.SHARE_LOC_PRECISION),
+                defaultLocPrecision = raw.string(SettingsKeys.DEFAULT_LOC_PRECISION, defaults.defaultLocPrecision)
+                    .validated(DEFAULT_LOC_PRECISIONS, defaults.defaultLocPrecision, SettingsKeys.DEFAULT_LOC_PRECISION),
                 dynamicColor = raw.bool(SettingsKeys.DYNAMIC_COLOR, defaults.dynamicColor),
                 searchIndexVersion = raw.int(SettingsKeys.SEARCH_INDEX_VERSION, 0),
                 contentFormatVersion = raw.int(SettingsKeys.CONTENT_FORMAT_VERSION, 0),

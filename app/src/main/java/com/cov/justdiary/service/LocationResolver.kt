@@ -95,15 +95,70 @@ object LocationResolver {
     }
 
     /**
-     * 新建片段时可选的全部精度档：授权且精确 → 全部 5 档；
-     * 否则只有省 / 市 / 区（`LocationService.swift:193-198`）。
+     * 这次定位能支撑的**最细**级别（对应 iOS `LocationResolver.maxPrecision`）。
+     *
+     * | 系统给的 | 上限 | 依据 |
+     * | --- | --- | --- |
+     * | 只有模糊授权（`ACCESS_COARSE_LOCATION`） | 城市 | 坐标被吸附到"所在区域"的代表点，区县不再可信 |
+     * | 精确授权 + 精度 ≤ 10m | 精确地点 | 十米级才指得到某一栋楼 |
+     * | ≤ 100m | 街道 | |
+     * | ≤ 1000m | 区县 | |
+     * | ≤ 5000m | 城市 | |
+     * | 更粗 | 省份 | 只有省界还站得住 |
+     *
+     * 精度未知（Android 用 `0` 表示"没有这个信息"）时按**城市**算：既不冒进到
+     * "精确地点"，也不像 iOS 的负值那样一路退到省份 —— iOS 的负值意思是"坐标无效"，
+     * 那种点在本项目的 `currentLocation` 里已经被直接丢掉，不会走到这里。
      */
-    fun availablePrecisionsForNewLocation(authorized: Boolean, precise: Boolean): List<String> =
-        if (authorized && precise) {
-            LocPrecision.all
-        } else {
-            listOf(LocPrecision.province, LocPrecision.city, LocPrecision.district)
+    fun maxPrecision(precise: Boolean, horizontalAccuracy: Float): String = when {
+        !precise -> LocPrecision.city
+        horizontalAccuracy <= 0f -> LocPrecision.city
+        horizontalAccuracy <= 10f -> LocPrecision.exact
+        horizontalAccuracy <= 100f -> LocPrecision.street
+        horizontalAccuracy <= 1000f -> LocPrecision.district
+        horizontalAccuracy <= 5000f -> LocPrecision.city
+        else -> LocPrecision.province
+    }
+
+    /**
+     * 这次记录实际用的级别。
+     *
+     * `preferred` 是用户上一次手动选过的级别（`AppSettings.defaultLocPrecision`，
+     * `auto` = 跟随权限）。手动选的级别只会让结果**更粗**：权限算出来的上限永远是
+     * 天花板，用户的选择不能把它顶穿。
+     */
+    fun effective(preferred: String, cap: String): String =
+        if (!LocPrecision.all.contains(preferred)) cap else LocPrecision.coarser(preferred, cap)
+
+    /**
+     * 新建片段时菜单能给的级别：不粗于 [maxPrecision] —— 系统给不出更细的位置，
+     * 菜单里就不该有更细的级别（iOS `availablePrecisions(maxPrecision:)`）。
+     */
+    fun availablePrecisions(maxPrecision: String): List<String> = LocPrecision.levels(cappedAt = maxPrecision)
+
+    /**
+     * 分享长图上的地点文案：**只用地区列重建**，`locText` 根本不是它的输入。
+     *
+     * 这是"分享不会泄露地点名与街道"的硬保证。此前分享直接把库里的 `loc_text` 抄进长图，
+     * 而早期版本（以及地区列还没回填的记录）会把地点名 / 街道写在 `loc_text` 里、
+     * `loc_precision` 却只标到 `province` —— 只要分享走原文，就总有一条路径会漏。
+     * 改成重建之后：
+     *  - 上限只取到区县（[LocPrecision.shareable]），精确地点与街道不在其中；
+     *  - 记录精度比上限更细时按上限降级，比上限更粗时按记录的来 —— **只能更粗**；
+     *  - 重建为空（地区列缺失、或这行本来就没有地点）时**不显示地点**，而不是退回原文。
+     */
+    fun shareText(recorded: String, region: LocRegion, cap: String): String {
+        // 上限先夹到"可分享"的范围：比区县更细、或不在梯子上的值，一律按最细的可分享
+        // 级别（区县）处理。设置层 `AppSettings.from` 已经挡过一次，这里是最后一道。
+        val capLevel = when {
+            LocPrecision.shareable.contains(cap) -> cap
+            cap == LocPrecision.none -> LocPrecision.none
+            else -> LocPrecision.district
         }
+        if (capLevel == LocPrecision.none || !LocPrecision.all.contains(recorded)) return ""
+        val level = LocPrecision.coarser(recorded, capLevel)
+        return if (LocPrecision.all.contains(level)) textFromRegion(region, level) else ""
+    }
 
     private fun join(vararg parts: String): String =
         parts.filter { it.isNotEmpty() }.joinToString(SEPARATOR)
