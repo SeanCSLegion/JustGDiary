@@ -2,14 +2,16 @@
 """日记编辑态「格式栏六条规则」的真机/模拟器**端到端**回归。
 
 坐标全部来自 uiautomator 的语义树（`tools/dev_ui.py`），因此换设备/换分辨率都能跑；
-光标用**帧差**定位（两次截图里闪烁的那条竖线）。
+光标按**颜色**定位（强调色的竖直细条，见 `tools/dev_caret.py --probe`；帧差只作兜底）。
 
-用法：python3 tools/dev_format_rules.py [--device 序列号]
+用法：python3 tools/dev_format_rules.py [--device 序列号] [--day YYYY-MM-DD] [--out 目录]
 
-跑完打印一张表：每一步的期望值 / 实测值 / 判定，并把证据截图存到
-`docs/ui-audit/r31/`（`--out` 可改目录）。
+跑完打印一张表：每一步的期望值 / 实测值 / 判定，并把证据截图存到 `--out`
+（默认 `docs/ui-audit/r31`，文件名自动带上目录名前缀）。
 """
 import argparse
+import os
+import re
 import subprocess
 import sys
 import time
@@ -33,27 +35,50 @@ def editor_bounds():
     n = next((x for x in dev_ui.nodes() if x["cls"].endswith("EditText")), None)
     if not n:
         return None
-    import re
     m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", n["bounds"])
     return tuple(int(v) for v in m.groups())
 
 
-def caret():
-    """帧差找光标：连拍 4 张，取相邻差分的并集。返回 (x0, x1, y0, y1) 或 None。"""
+def caret(shots=6, gap=0.3):
+    """找光标：**先按颜色单张找**（`dev_caret.py --probe`），找不到再退回帧差。
+
+    ⚠️ 为什么不再只靠帧差：Android 的光标约 500ms 亮 / 500ms 灭，而真机上单张
+    `screencap` 就要几百毫秒 —— 采样没跨过闪烁周期时差分全空，会被误判成"找不到光标"
+    （R32 在 MEIZU 21 上跑这 12 条时，4 条"失败"全是这个原因：实测光标高度
+    正文 65 / 大标题 113 / 引用 56px、居中后 x=539，都是对的）。
+    颜色判据与主题无关：饱和色（`max-min > 60`）的竖直细条（宽 ≤ 10px、高 20..220px）。
+    """
     b = editor_bounds()
     if not b:
         return None
     region = (b[0], b[1], b[2], b[3] + 200)
-    for i in range(4):
+    for i in range(shots):
         sh("shell", "screencap", "-p", f"/sdcard/c{i}.png")
         sh("pull", f"/sdcard/c{i}.png", f"/tmp/c{i}.png")
-        time.sleep(0.22)
+        out = subprocess.run(
+            [sys.executable, f"{ROOT}/tools/dev_caret.py", "--probe", f"/tmp/c{i}.png",
+             f"--region={region[0]},{region[1]},{region[2]},{region[3]}"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+        if out.startswith("caret"):
+            return _caret_tuple(out)
+        time.sleep(gap)
+
+    # 兜底：帧差（跨一个闪烁周期）
+    for i in range(shots, shots * 2):
+        sh("shell", "screencap", "-p", f"/sdcard/c{i}.png")
+        sh("pull", f"/sdcard/c{i}.png", f"/tmp/c{i}.png")
+        time.sleep(gap)
     out = subprocess.run(
         [sys.executable, f"{ROOT}/tools/dev_caret.py",
-         "/tmp/c0.png", "/tmp/c1.png", "/tmp/c2.png", "/tmp/c3.png",
+         *[f"/tmp/c{i}.png" for i in range(shots, shots * 2)],
          f"--region={region[0]},{region[1]},{region[2]},{region[3]}"],
         capture_output=True, text=True,
     ).stdout.strip()
+    return _caret_tuple(out)
+
+
+def _caret_tuple(out):
     if not out.startswith("caret"):
         return None
     import re
@@ -79,24 +104,44 @@ def wait_text(want, timeout=12.0):
     return False
 
 
-def tap(label, tries=6, gap=0.8):
-    """点一个语义节点；**带重试** —— 冷启动 / 页面切换在模拟器上比真机慢，
-    一次找不到就断言失败会把"还没画出来"误判成"没有这个按钮"。"""
+def tap(label, tries=10, gap=0.6):
+    """点一个语义节点：**等它位置稳定**再点，找不到就重试。
+
+    ⚠️ 为什么要等稳定：菜单 / 面板出现时有一小段位移动画，按"刚 dump 到的坐标"立刻点
+    会**点空**。R32 在真机上就是这样：`段落样式` 打开菜单后隔 1.0s 点 `大标题`，
+    菜单还在滑入 → 点空 → 后面量到的光标高度仍是正文的 65px（看起来像"切样式没生效"）。
+    等两次 dump 的 bounds 一致再点，同时把"还没画出来"（找不到）也一起解决。
+    """
+    last = None
     for i in range(tries):
-        if dev_ui.tap(label) == 0:
-            return
+        n = dev_ui.find(label)
+        if n:
+            bounds = n["bounds"]
+            if last == bounds and dev_ui.tap(label) == 0:
+                return
+            last = bounds
         time.sleep(gap)
-    raise AssertionError(f"找不到按钮 {label}")
+    raise AssertionError(f"找不到 / 点不中按钮 {label}")
 
 
 def shot(name):
+    """存一张证据截图到 `--out` 目录：文件名自动带上那一轮的前缀（目录名）。
+
+    早先名字里写死了 "r31-"，换一轮就变成"r32 目录里躺着 r31-xxx.png"，两套混着没法看。
+    """
     sh("shell", "screencap", "-p", "/sdcard/e.png")
-    sh("pull", "/sdcard/e.png", f"{OUT}/{name}.png")
+    sh("pull", "/sdcard/e.png", f"{OUT}/{os.path.basename(OUT)}-{name}.png")
 
 
 def quote_box_rows():
-    """编辑区内引用底色（surfaceContainerHigh）的像素行数 —— 用来判断"引用底在不在"。"""
-    import re as _re
+    """编辑区内**引用底色**的像素行数 —— 用来判断"引用底在不在"。
+
+    底色**不写死**：在同一条竖线上先取"空白处"（编辑区底部）的颜色当背景，再数有多少行
+    与它不同。这样深浅色主题都能用 —— 早先钉的是深色主题的 `(37, 43, 44)`，
+    浅色主题下永远是 0 行，于是"空引用行回车结束引用"这条被误判成失败（R32 实测）。
+    取靠右的一条竖线（`b[2] - 40`）：避开光标（在最左）与提示语（左对齐），
+    但仍在引用底横跨的范围内。
+    """
     from PIL import Image
     b = editor_bounds()
     if not b:
@@ -105,8 +150,12 @@ def quote_box_rows():
     sh("pull", "/sdcard/px.png", "/tmp/px.png")
     im = Image.open("/tmp/px.png").convert("RGB")
     px = im.load()
-    mid = (b[0] + b[2]) // 2
-    return sum(1 for y in range(b[1], min(b[3], im.height)) if px[mid, y] == (37, 43, 44))
+    x = min(b[2] - 40, im.width - 1)
+    y0, y1 = b[1], min(b[3], im.height)
+    if y1 - y0 < 12:
+        return -1
+    bg = px[x, y1 - 6]
+    return sum(1 for y in range(y0, y1 - 2) if px[x, y] != bg)
 
 
 def check(rule, what, expect, actual, ok):
@@ -143,24 +192,23 @@ def main():
     base = caret()
     check(6, "正文空行的光标高度", "~70px", f"{base[3] - base[2] + 1}px" if base else "找不到", bool(base))
 
-    tap("段落样式"); time.sleep(1.0); tap("大标题"); time.sleep(1.2)
+    tap("段落样式"); tap("大标题"); time.sleep(1.0)
     title = caret()
     check(
         6, "切成大标题后的光标高度", "明显更高（>正文 ×1.4）",
         f"{title[3] - title[2] + 1}px" if title else "找不到",
         bool(title) and base and (title[3] - title[2]) > (base[3] - base[2]) * 1.4,
     )
-    shot("r31-device-title-caret")
+    shot("device-title-caret")
 
-    tap("段落样式"); time.sleep(1.0); tap("正文"); time.sleep(1.0)
-    tap("引用"); time.sleep(1.2)
+    tap("段落样式"); tap("正文"); tap("引用"); time.sleep(1.0)
     quote = caret()
     check(
         6, "切成引用后的光标高度（引用字号更小）", "比正文矮",
         f"{quote[3] - quote[2] + 1}px" if quote else "找不到",
         bool(quote) and base and (quote[3] - quote[2]) < (base[3] - base[2]),
     )
-    shot("r31-device-quote-caret")
+    shot("device-quote-caret")
 
     # ---------------- 规则 5：引用行上「居中」置灰 ----------------
     print("\n规则 5 · 居中与引用互斥")
@@ -186,7 +234,7 @@ def main():
         f"~{mid:.0f}", f"{((centered[0] + centered[1]) / 2):.0f}" if centered else "找不到",
         bool(centered) and abs((centered[0] + centered[1]) / 2 - mid) < 40,
     )
-    shot("r31-device-empty-centered")
+    shot("device-empty-centered")
 
     # ---------------- 规则 2/3：六选一互斥 ----------------
     print("\n规则 2/3 · 互斥与作用域")
@@ -195,9 +243,9 @@ def main():
     tap("列表"); time.sleep(1.0)
     check(2, "点列表后行首出现项目符号", "• L", editor_text(), editor_text() == "• L")
 
-    tap("段落样式"); time.sleep(1.0); tap("大标题"); time.sleep(1.2)
+    tap("段落样式"); tap("大标题"); time.sleep(1.0)
     check(2, "列表再切大标题：项目符号消失", "L", editor_text(), editor_text() == "L")
-    shot("r31-device-list-to-title")
+    shot("device-list-to-title")
 
     # ---------------- 规则 4 / D10：回车 ----------------
     print("\n规则 4 · 回车（居中的空行才拦 / 空引用行结束引用）")
@@ -216,7 +264,7 @@ def main():
     sh("shell", "input", "keyevent", "66"); time.sleep(2)
     check(4, "居中的空行：回车被吃掉（文本仍是空的）", "''", repr(editor_text()),
           editor_text() in ("", "开始记录这一刻的想法…"))
-    shot("r31-device-centered-enter-blocked")
+    shot("device-centered-enter-blocked")
 
     # 4c 空的引用行：吃掉 + 结束引用（底消失）
     reset()
@@ -235,7 +283,7 @@ def main():
     for label in ("粗体", "斜体", "删除线", "下划线"):
         tap(label); time.sleep(0.4)
     sh("shell", "input", "text", "BISU"); wait_text("BISU")
-    shot("r31-device-inline-stack")
+    shot("device-inline-stack")
     check(1, "四种行内样式可同时开启并作用于新输入的字", "BISU 四个都亮", "见截图", True)
 
     # ---------------- 汇总 ----------------

@@ -153,6 +153,39 @@ class EditorQuoteRenderTest {
         )
     }
 
+    /**
+     * 末尾那个**空的引用行**也要有行首内缩 —— 否则光标停在列的最左边
+     * （用户 2026-10-01 报的"引用时光标位置不对"），一打字又往右跳 16dp。
+     *
+     * 手法是给那个**位置**挂一个零长度的 `LeadingMarginSpan`（空行没有字符可挂 span）。
+     * 这里断言 span 真的挂上了、长度为零、边距就是引用的内缩。
+     */
+    @Test
+    fun `an empty trailing quote line gets a zero length leading margin for the caret`() {
+        val spanned = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote)),
+            imageProvider = null,
+            containerWidthPx = width,
+            metricsFor = { null },
+            quoteStyle = style,
+        )
+        val margins = spanned.getSpans(0, spanned.length, android.text.style.LeadingMarginSpan::class.java)
+        assertEquals("空引用行上应当正好有一个行首内缩 span", 1, margins.size)
+        val span = margins.first()
+        assertEquals("span 必须是零长度（空行没有字符）", 0, spanned.getSpanEnd(span) - spanned.getSpanStart(span))
+        assertEquals("内缩值 = 引用的文字内缩", style.textInsetPx, span.getLeadingMargin(true))
+
+        // 非引用 / 有字符的末尾行都不该多挂这一个（有字符时段落 span 自带内缩）
+        val body = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "")),
+            imageProvider = null,
+            containerWidthPx = width,
+            metricsFor = { null },
+            quoteStyle = style,
+        )
+        assertEquals("空的正文行不该有内缩", 0, body.getSpans(0, body.length, android.text.style.LeadingMarginSpan::class.java).size)
+    }
+
     @Test
     fun `without a quote style nothing is drawn`() {
         val spanned = SpannableBridge.toSpannable(

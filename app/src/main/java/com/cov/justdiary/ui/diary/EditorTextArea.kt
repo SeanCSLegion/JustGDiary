@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -462,6 +463,32 @@ class EditorTextState(initialLines: List<EditorLine>) {
         //    `Spannable` 上，不写回去用户看不到标记（真机缺陷：回车后续项没有项目符号）。
         //    只在真的改了东西时递增版本号，普通打字不会触发重写。
         if (repaired != parsed) revision += 1
+        // ④ 段落样式是**整行**的语义（iOS 同）：行尾新打的字也要落进这一段的 span 里。
+        //    Android 的段落 span 用"起点包含、终点不包含"，在行尾插入时**不会**长过去，
+        //    于是新字符没有字号 / 行高 span，按正文字号画出来 —— 视觉上像"样式只作用了半行"
+        //    （真机实测：切成大标题后接着打的字仍是正文大小；用户 2026-10-01 报的就是这个）。
+        //    这里在"插入落在带样式的行尾"时补一次回写；组合中（拼音候选还没上屏）不写，
+        //    否则会把候选打断。
+        val inserted = insertedRange
+        if (!composing && !inserted.isEmpty() && needsWholeLineRewrite(inserted)) revision += 1
+    }
+
+    /**
+     * 这次插入是不是落在**带段落样式的那一行**的行尾 —— 那种位置平台不会把段落的 span
+     * 扩到新字符上（见 [onUserText] ④）。
+     *
+     * 只看正文以外的样式（大标题 / 小标题 / 引用）：它们的字号与行高与正文不同，漏挂 span
+     * 当场就能看出来；列表 / 待办行本来就用正文字号画（`effectiveBlockStyle`），不必为它回写。
+     */
+    private fun needsWholeLineRewrite(range: IntRange): Boolean {
+        var cursor = 0
+        lines.forEach { line ->
+            val contentEnd = cursor + line.displayText.length
+            // range.last + 1 = 插入段的右端（独占）
+            if (range.last + 1 == contentEnd && line.blockStyle != ContentPartStyle.body) return true
+            cursor = contentEnd + 1 // 终止换行
+        }
+        return false
     }
 
     /**

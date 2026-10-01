@@ -489,6 +489,28 @@ object SpannableBridge {
                 }
             }
         }
+        // 末尾那个**空的引用行**：一个字符都没有，挂不上任何段落 span —— 光标于是停在
+        // 列的最左边，而不是引用文字该在内缩处（用户 2026-10-01 报的"引用时光标位置不对"；
+        // 一打字光标又会往右跳 16dp，正是这一下的补写）。
+        //
+        // 解法：在这个**位置**挂一个**零长度**的 `LeadingMarginSpan`。`Layout` 取段落左边距
+        // 时用的是 `getSpans(段落起, 段落止)`，而 `Spannable` 的约定是"零长度 span 落在
+        // 查询区间内即算命中"（`SpannableStringBuilder.getSpans` 对 `spanStart == spanEnd`
+        // 不做端点剔除），于是这个空行也有了行首内缩 —— 光标落位、下笔第一个字不跳。
+        // 不用给整个视图加左内边距：那会把**所有**段落一起推右，得逐个补偿，代价大得多。
+        if (quoteStyle != null) {
+            val tail = lines.lastOrNull()
+            if (tail != null && EditorModel.isBlankLine(tail) &&
+                effectiveBlockStyle(tail) == ContentPartStyle.quote
+            ) {
+                builder.setSpan(
+                    android.text.style.LeadingMarginSpan.Standard(quoteStyle.textInsetPx),
+                    builder.length,
+                    builder.length,
+                    ParagraphSpanFlags,
+                )
+            }
+        }
         return builder
     }
 

@@ -475,6 +475,43 @@ class EditorStateTest {
     }
 
     /** 规则 6：末尾空行的视图级字号/居中跟着它的段落格式走（光标就是按这个画的）。 */
+    /**
+     * 段落样式是**整行**的：在带样式的行尾继续打字，必须回写一次平台文本。
+     *
+     * Android 的段落 span 起点包含、终点不包含 —— 在行尾插入的字符拿不到字号 / 行高 span，
+     * 会按正文字号画出来（真机：切成大标题后接着打的字仍是正文大小，用户 2026-10-01 报的）。
+     * `revision` 递增就是"请 EditText 按模型重画一遍"的信号。
+     */
+    @Test
+    fun `typing at the end of a styled line rewrites the whole line`() {
+        listOf(ContentPartStyle.title, ContentPartStyle.heading, ContentPartStyle.quote).forEach { style ->
+            val state = state(EditorLine(text = "标题", blockStyle = style))
+            val text = SpannableStringBuilder(SpannableBridge.toSpannable(state.lines))
+            val before = state.revision
+            state.typeAt(text, at = 2, insert = "续")
+            assertTrue(
+                "$style 行尾打字要触发整行回写",
+                state.revision > before,
+            )
+            assertEquals("整行都还是那个样式", style, state.lines.single().blockStyle)
+            assertEquals("标题续", state.lines.single().text)
+        }
+
+        // 正文行不必回写（字号与行高就是默认的那一套）
+        val body = state(EditorLine(text = "正文"))
+        val bodyText = SpannableStringBuilder(SpannableBridge.toSpannable(body.lines))
+        val before = body.revision
+        body.typeAt(bodyText, at = 2, insert = "续")
+        assertEquals("正文行不需要额外回写", before, body.revision)
+
+        // 在行中间插入：span 会自然包住新字符，也不回写
+        val middle = state(EditorLine(text = "标题很长", blockStyle = ContentPartStyle.title))
+        val middleText = SpannableStringBuilder(SpannableBridge.toSpannable(middle.lines))
+        val middleBefore = middle.revision
+        middle.typeAt(middleText, at = 2, insert = "续")
+        assertEquals("行中间插入不需要额外回写", middleBefore, middle.revision)
+    }
+
     @Test
     fun `rule 6 the trailing blank line drives the view level cursor metrics`() {
         val body = SpannableBridge.BlockMetrics(textSizePx = 48, lineHeightPx = 60, paragraphSpacingPx = 0)
