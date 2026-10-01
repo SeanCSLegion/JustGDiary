@@ -37,7 +37,7 @@ class EditorQuoteRenderTest {
     private val style = SpannableBridge.QuoteStyle(
         backgroundColor = boxColor,
         cornerRadiusPx = 4f,
-        paddingHorizontalPx = 10,
+        textInsetPx = 10,
         paddingVerticalPx = 6,
     )
     private val metrics = SpannableBridge.BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0)
@@ -148,8 +148,8 @@ class EditorQuoteRenderTest {
         }
         assertTrue("引用行里应当找得到文字像素", firstText >= 0)
         assertTrue(
-            "文字要从 $style.paddingHorizontalPx px 之后开始（实际 $firstText）",
-            firstText >= style.paddingHorizontalPx,
+            "文字要从 $style.textInsetPx px 之后开始（实际 $firstText）",
+            firstText >= style.textInsetPx,
         )
     }
 

@@ -57,8 +57,10 @@ fun EditorTextArea(
     imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
     /** 段落样式 → 字号/行高/段距（px）；编辑器与阅读态共用同一把尺子。 */
     metricsFor: ((String) -> SpannableBridge.BlockMetrics?)? = null,
-    /** 引用段的外观（底色/圆角/内边距）；由界面层从主题解析，与阅读态同参数。 */
+    /** 引用段的外观（底色/圆角/内边距/竖条）；由界面层从主题解析，与阅读态同参数。 */
     quoteStyle: SpannableBridge.QuoteStyle? = null,
+    /** 列表 / 待办标记的外观（缩进/图形/配色）；同上。 */
+    markerStyle: SpannableBridge.MarkerStyle? = null,
     /** 把内部的 `EditText` 交给宿主（点空白收键盘要用它）。 */
     onViewReady: (AppCompatEditText) -> Unit = {},
     /**
@@ -114,7 +116,7 @@ fun EditorTextArea(
             // 否则它会贴在那块底的边上（正文有 `LeadingMarginSpan`，提示语是另一套 layout）
             if (tailQuote != null) {
                 setSpan(
-                    android.text.style.LeadingMarginSpan.Standard(tailQuote.paddingHorizontalPx),
+                    android.text.style.LeadingMarginSpan.Standard(tailQuote.textInsetPx),
                     0,
                     length,
                     Spanned.SPAN_INCLUSIVE_INCLUSIVE,
@@ -154,6 +156,7 @@ fun EditorTextArea(
                             imageWidthPx,
                             metricsFor,
                             quoteStyle,
+                            markerStyle,
                         ),
                     )
                     setSelection(text?.length ?: 0)
@@ -179,7 +182,8 @@ fun EditorTextArea(
                                 requestFocus()
                                 val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
                                     as? android.view.inputmethod.InputMethodManager
-                                imm?.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                                // `SHOW_IMPLICIT`（= 0）自 API 34 起被标记废弃，语义就是"不加额外标志"
+                                imm?.showSoftInput(this, 0)
                             },
                             250,
                         )
@@ -250,6 +254,7 @@ fun EditorTextArea(
                             imageWidthPx,
                             metricsFor,
                             quoteStyle,
+                            markerStyle,
                         ),
                     )
                     val safe = caret.coerceIn(0, view.text?.length ?: 0)
@@ -343,11 +348,12 @@ internal class DiaryEditText(context: android.content.Context) : AppCompatEditTe
                 path = tailBoxPath,
                 radii = tailBoxRadii,
                 left = 0f,
-                top = (l.getLineTop(line) - style.paddingVerticalPx).toFloat(),
+                top = l.getLineTop(line).toFloat(),
                 right = l.width.toFloat(),
-                bottom = (l.getLineBottom(line, false) + style.paddingVerticalPx).toFloat(),
-                roundTop = true,
-                roundBottom = true,
+                bottom = l.getLineBottom(line, false).toFloat(),
+                // 末尾这一行自成一块：两端都要圆（`drawBox` 会自己加上下内边距与竖条）
+                first = true,
+                last = true,
             )
             canvas.restore()
         }

@@ -1,19 +1,18 @@
 package com.cov.justdiary.ui.diary
 
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * 内联图片的显示尺寸。移植自 iOS `MediaViews.swift` 的 `DiaryImageView`：
+ * 内联图片的显示尺寸。
  *
- * ```swift
- * let w = min(max(40, geo.size.width), max(40, displayW))
- * let fitH = max(1, displayH * w / max(displayW, 1))
- * ```
+ * 规则：**铺满正文列宽，按原始宽高比推高度**（移植自 iOS `MediaViews.swift` 的
+ * `DiaryImageView`：「Fills the column, keeping the picture's aspect ratio … The stored
+ * pair is only the aspect ratio here — the layout decides the width」）。
  *
- * 也就是：**按图片的自然宽度显示，但不超过可用宽度，也不小于 40**；高度按原始宽高比推出来。
- * iOS 没有"最大高度"上限 —— 竖向长图就是会很高，与照片本身一致。
+ * 库里存的 `w/h` 因此**只当比例用**，不再当"自然宽度"：
+ * 早先编辑态按 `min(可用宽, 自然宽)` 显示，于是窄图在编辑时居中小小一张、点进阅读态
+ * 却被拉满整列 —— 同一张图在两种模式下两个样子（R30 记的那条不一致，本次收掉）。
  *
  * ## 为什么单独抽出来
  *
@@ -22,13 +21,11 @@ import kotlin.math.roundToInt
  */
 object ImageDisplaySize {
 
-    /** 最小显示宽度（与 iOS 的 `max(40, …)` 一致）。 */
-    const val MIN_WIDTH: Double = 40.0
-
     /**
      * 计算显示尺寸（像素）。
      *
-     * @param containerWidthPx 可用宽度；`<= 0` 表示还不知道容器宽度（返回自然尺寸）
+     * @param containerWidthPx 可用宽度（正文列宽）；`<= 0` 表示还不知道容器宽度，
+     *   这时退到自然尺寸（首帧、或纯逻辑测试）
      * @param storedWidth 库里存的原始宽（`content_json` 的 `w`，可能为空）
      * @param storedHeight 库里存的原始高
      * @param fallbackWidth 位图实际宽（`storedWidth` 缺失时用）
@@ -45,9 +42,8 @@ object ImageDisplaySize {
         val naturalHeight = storedHeight?.takeIf { it > 0 } ?: fallbackHeight.toDouble()
         if (naturalWidth <= 0 || naturalHeight <= 0) return 0 to 0
 
-        val available = if (containerWidthPx > 0) containerWidthPx.toDouble() else naturalWidth
-        val width = min(max(MIN_WIDTH, available), max(MIN_WIDTH, naturalWidth))
-        val height = max(1.0, naturalHeight * width / max(naturalWidth, 1.0))
+        val width = if (containerWidthPx > 0) containerWidthPx.toDouble() else naturalWidth
+        val height = max(1.0, naturalHeight * width / naturalWidth)
         return width.roundToInt() to height.roundToInt()
     }
 }

@@ -50,6 +50,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -376,7 +380,7 @@ private fun DiaryBlockCard(
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (selectMode) SelectCircle(selected)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(BlockGeometry.ParagraphGap)) {
                 // 抬头：时间（13sp bold primary）+ 地点（12sp onSurfaceVariant，最多 2 行）
                 if (block.timeLabel.isNotEmpty()) {
                     Text(
@@ -465,7 +469,9 @@ private fun ReadPart(
 
         is ReadLayout.PartRender.Items -> Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            // 列表项之间与段落之间**同一个距离**（iOS 那边组内更紧，但 Android 三个渲染面
+            // 共用一份几何才谈得上一致；设计稿 `.li{margin:0 0 8px}` 也是 8dp）
+            verticalArrangement = Arrangement.spacedBy(BlockGeometry.ParagraphGap),
         ) {
             render.items.forEachIndexed { index, item ->
                 val done = render.done.getOrNull(index) == true
@@ -501,6 +507,8 @@ private fun ParagraphText(
     highlights: List<DiarySearch.Highlight>,
 ) {
     val textStyle = EditorTypography.textStyleFor(render.style)
+    val quoteBackground = MaterialTheme.colorScheme.surfaceContainerHigh
+    val quoteBar = MaterialTheme.colorScheme.outlineVariant
     val annotated = buildAnnotatedString {
         render.spans.forEach { span ->
             withStyle(
@@ -523,15 +531,39 @@ private fun ParagraphText(
     val text = annotated.withHighlights(highlights)
 
     if (render.style == ContentPartStyle.quote) {
-        // 引用：`surfaceContainerHigh` 底 + 4dp 圆角 + 6×10dp 内边距（规范 §2.5）。
-        // iOS 侧**没有**左侧竖线、没有内缩（竖线只出现在分享长图里）。
+        // 引用：整列宽的圆角底 + 左侧竖条 + 文字内缩 16dp。
+        // 几何全部来自 [BlockGeometry]，与编辑态的 `QuoteBackgroundSpan`、首页预览
+        // 是同一套数（编辑态那边画不了的只有右边那 10dp，见 `QuoteStyle` 的说明）。
         Box(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .drawBehind {
+                        val radius = BlockGeometry.QuoteRadius.toPx()
+                        drawRoundRect(
+                            color = quoteBackground,
+                            cornerRadius = CornerRadius(radius),
+                        )
+                        val barWidth = BlockGeometry.QuoteBarWidth.toPx()
+                        if (barWidth > 0f) {
+                            val inset = BlockGeometry.QuoteBarInset.toPx()
+                            drawRoundRect(
+                                color = quoteBar,
+                                topLeft = Offset(BlockGeometry.QuoteBarLeading.toPx(), inset),
+                                size = Size(barWidth, size.height - inset * 2),
+                                cornerRadius = CornerRadius(BlockGeometry.QuoteBarRadius.toPx()),
+                            )
+                        }
+                    },
+            )
             Text(
                 text = text,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                modifier = Modifier.padding(
+                    start = BlockGeometry.QuoteTextInset,
+                    end = BlockGeometry.QuoteTrailingPadding,
+                    top = BlockGeometry.QuotePadding,
+                    bottom = BlockGeometry.QuotePadding,
+                ),
                 style = textStyle,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -547,25 +579,13 @@ private fun ParagraphText(
     }
 }
 
-/** 列表项：前导 `•` + 缩进 18dp（规范 §2.5）。 */
+/** 列表项：圆点在标记槽里居中，正文从 28dp 起（换行后的第二行也一样）。 */
 @Composable
 private fun BulletRow(text: String, highlights: List<DiarySearch.Highlight>) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(MARKER_GAP),
-    ) {
-        // 标记右对齐在 18dp 的槽里（设计稿 `.li .bul { width:18px; text-align:right }`）
-        Box(modifier = Modifier.width(MARKER_SLOT), contentAlignment = Alignment.CenterEnd) {
-            Text(
-                text = "•",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    MarkerRow(isTodo = false, done = false) {
         Text(
             text = AnnotatedString(text).withHighlights(highlights),
-            style = MaterialTheme.typography.bodyLarge,
+            style = EditorTypography.textStyleFor(ContentPartStyle.body),
             color = MaterialTheme.colorScheme.onSurface,
         )
     }
@@ -582,20 +602,14 @@ private fun TodoRow(
     highlights: List<DiarySearch.Highlight>,
     onToggle: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .toggleable(value = done, role = Role.Checkbox) { onToggle() },
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(MARKER_GAP),
+    MarkerRow(
+        isTodo = true,
+        done = done,
+        modifier = Modifier.toggleable(value = done, role = Role.Checkbox) { onToggle() },
     ) {
-        // 勾选框在 18dp 槽里居中对齐，并下沉 3dp 与首行文字对齐（设计稿 `.todo .cbox`）
-        Box(modifier = Modifier.width(MARKER_SLOT), contentAlignment = Alignment.Center) {
-            Box(modifier = Modifier.padding(top = MARKER_TOP)) { TodoBox(done) }
-        }
         Text(
             text = AnnotatedString(text).withHighlights(highlights),
-            style = MaterialTheme.typography.bodyLarge,
+            style = EditorTypography.textStyleFor(ContentPartStyle.body),
             color = if (done) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
@@ -603,30 +617,6 @@ private fun TodoRow(
             },
             textDecoration = if (done) TextDecoration.LineThrough else null,
         )
-    }
-}
-
-/** 待办勾选框：18dp；未完成 = 2dp `onSurfaceVariant` 描边；完成 = `primary` 实底 + 对勾。 */
-@Composable
-private fun TodoBox(done: Boolean) {
-    val shape = RoundedCornerShape(Radius.bar)
-    val color = if (done) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    Box(
-        modifier = Modifier
-            .size(18.dp)
-            .clip(shape)
-            .background(if (done) color else Color.Transparent)
-            .border(if (done) 0.dp else 2.dp, color, shape),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (done) {
-            Icon(
-                imageVector = Icons.Filled.Check,
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onPrimary,
-            )
-        }
     }
 }
 
@@ -880,14 +870,6 @@ object SearchBarMetrics {
     /** 悬浮栏连上下留白占掉的高度 —— 列表顶部要按它让位。 */
     val TotalHeight = BarHeight + VerticalPadding * 2
 }
-
-private val MARKER_SLOT = 18.dp
-
-/** 标记与文字之间的距离（设计稿 `.li` / `.todo` 的 `gap: 10px`）。 */
-private val MARKER_GAP = 10.dp
-
-/** 勾选框下沉量，让它与首行文字视觉对齐（设计稿 `.todo .cbox { margin-top: 3px }`）。 */
-private val MARKER_TOP = 3.dp
 
 private val PREV_MATCH_LABEL: String
     @Composable get() = stringResource(R.string.read_search_prev)

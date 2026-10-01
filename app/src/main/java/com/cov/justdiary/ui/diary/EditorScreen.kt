@@ -188,6 +188,7 @@ fun EditorScreen(
     val fontScale = LocalDensity.current.fontScale
     val metricsFor = rememberBlockMetrics()
     val quoteStyle = rememberQuoteStyle()
+    val markerStyle = rememberMarkerStyle()
     // 正文列宽与阅读态同一条公式（规范 §2.6：阅读 = 编辑）
     val columnWidth: Dp = LocalAdaptiveLayout.current
         .contentColumn(EditorLayout.CONTENT_MAX_WIDTH).dp
@@ -233,6 +234,7 @@ fun EditorScreen(
                         imageProvider = loadImage,
                         metricsFor = metricsFor,
                         quoteStyle = quoteStyle,
+                        markerStyle = markerStyle,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
@@ -513,7 +515,7 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
         ContentPartStyle.quote to EditorTypography.textStyleFor(ContentPartStyle.quote),
         ContentPartStyle.body to EditorTypography.textStyleFor(ContentPartStyle.body),
     )
-    val paragraphSpacingPx = with(density) { QuoteParagraphSpacing.toPx() }.toInt()
+    val paragraphSpacingPx = with(density) { BlockGeometry.ParagraphGap.toPx() }.toInt()
     return remember(density, styles) {
         { style ->
             val textStyle = styles[style] ?: styles.getValue(ContentPartStyle.body)
@@ -533,28 +535,57 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
 }
 
 /**
- * 引用段的外观（编辑态）。**参数与阅读态逐项相同**（规范 §2.5 / `DiaryReadScreen` 的引用分支）：
- * `surfaceContainerHigh` 底 + 4dp 圆角 + 6dp 纵向内边距 + 10dp 横向内边距。
+ * 引用段的外观（编辑态）。**参数与阅读态、首页预览逐项相同**（[BlockGeometry]）：
+ * `surfaceContainerHigh` 底 + 4dp 圆角 + 上下 6dp + 左侧 4dp 竖条 + 文字内缩 16dp。
  *
  * 编辑态以前只挂了块样式 span，点「引用」时正文外观**逐像素不变**（R30 记的 F1）——
  * 而阅读态与 iOS 编辑态都是有底的。这里用平台的 `LineBackgroundSpan` 补上（官方做法，
  * 见 [SpannableBridge.QuoteStyle]）。
  */
-/** 段后距：段落排版（`rememberBlockMetrics`）与引用底（`rememberQuoteStyle`）共用同一个值。 */
-private val QuoteParagraphSpacing = 8.dp
-
 @Composable
 private fun rememberQuoteStyle(): SpannableBridge.QuoteStyle {
     val density = LocalDensity.current
     val background = MaterialTheme.colorScheme.surfaceContainerHigh
-    return remember(density, background) {
+    val bar = MaterialTheme.colorScheme.outlineVariant
+    return remember(density, background, bar) {
         SpannableBridge.QuoteStyle(
             backgroundColor = background.toArgb(),
-            cornerRadiusPx = with(density) { 4.dp.toPx() },
-            paddingHorizontalPx = with(density) { 10.dp.toPx() }.toInt(),
-            paddingVerticalPx = with(density) { 6.dp.toPx() }.toInt(),
-            // ⚠️ 必须与段落排版里的段后距是同一个值（引用底的末行要把它减掉）
-            paragraphSpacingPx = with(density) { QuoteParagraphSpacing.toPx() }.toInt(),
+            cornerRadiusPx = with(density) { BlockGeometry.QuoteRadius.toPx() },
+            textInsetPx = with(density) { BlockGeometry.QuoteTextInset.toPx() }.toInt(),
+            paddingVerticalPx = with(density) { BlockGeometry.QuotePadding.toPx() }.toInt(),
+            barLeadingPx = with(density) { BlockGeometry.QuoteBarLeading.toPx() },
+            barWidthPx = with(density) { BlockGeometry.QuoteBarWidth.toPx() },
+            barInsetPx = with(density) { BlockGeometry.QuoteBarInset.toPx() },
+            barRadiusPx = with(density) { BlockGeometry.QuoteBarRadius.toPx() },
+            barColor = bar.toArgb(),
+            // ⚠️ 必须与段落排版里的段距是同一个值（引用底的末行要把它减掉）
+            paragraphSpacingPx = with(density) { BlockGeometry.ParagraphGap.toPx() }.toInt(),
+        )
+    }
+}
+
+/**
+ * 列表 / 待办的标记（编辑态）：几何全部来自 [BlockGeometry]，颜色用 M3 语义色 ——
+ * 与阅读态的 `BulletRow` / `TodoBox` 是同一套数（那边按 dp 直接用同一批常量）。
+ */
+@Composable
+private fun rememberMarkerStyle(): SpannableBridge.MarkerStyle {
+    val density = LocalDensity.current
+    val outline = MaterialTheme.colorScheme.onSurfaceVariant
+    val fill = MaterialTheme.colorScheme.primary
+    val onFill = MaterialTheme.colorScheme.onPrimary
+    return remember(density, outline, fill, onFill) {
+        SpannableBridge.MarkerStyle(
+            indentPx = with(density) { BlockGeometry.MarkerIndent.toPx() }.toInt(),
+            centerXPx = with(density) { BlockGeometry.MarkerSlot.toPx() } / 2f,
+            bulletDiameterPx = with(density) { BlockGeometry.BulletSize.toPx() },
+            checkboxSizePx = with(density) { BlockGeometry.CheckboxSize.toPx() },
+            checkboxRadiusPx = with(density) { BlockGeometry.CheckboxRadius.toPx() },
+            checkboxBorderPx = with(density) { BlockGeometry.CheckboxBorder.toPx() },
+            outlineColor = outline.toArgb(),
+            fillColor = fill.toArgb(),
+            checkColor = onFill.toArgb(),
+            doneTextColor = outline.toArgb(),
         )
     }
 }

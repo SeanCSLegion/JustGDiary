@@ -70,6 +70,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.draw.clipToBounds
@@ -106,7 +110,10 @@ import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.AssistPill
 import com.cov.justdiary.ui.components.PillVariant
+import com.cov.justdiary.ui.diary.BlockGeometry
+import com.cov.justdiary.ui.diary.MarkerRow
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
+import com.cov.justdiary.ui.theme.EditorTypography
 import com.cov.justdiary.ui.theme.LocalReduceMotion
 import com.cov.justdiary.ui.theme.Spacing
 import com.cov.justdiary.ui.theme.TypeSize
@@ -1971,30 +1978,74 @@ private fun DayPanelPart(part: ContentPart, imageLoader: (String) -> ImageBitmap
             }
         }
 
-        !part.items.isNullOrEmpty() -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        // 列表 / 待办：与阅读态共用 `MarkerRow`（同一套缩进、同一个 M3 勾选框），
+        // 所以"预览里看到的"就是点进去以后看到的。
+        !part.items.isNullOrEmpty() -> Column(
+            verticalArrangement = Arrangement.spacedBy(BlockGeometry.ParagraphGap),
+        ) {
             part.items.orEmpty().forEachIndexed { index, item ->
                 val done = part.done?.getOrNull(index) == true
-                val bullet = when {
-                    part.style != ContentPartStyle.todo -> "• "
-                    done -> "☑ "
-                    else -> "☐ "
+                MarkerRow(isTodo = part.style == ContentPartStyle.todo, done = done) {
+                    Text(
+                        text = item,
+                        style = EditorTypography.textStyleFor(ContentPartStyle.body),
+                        color = if (done) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        textDecoration = if (done) TextDecoration.LineThrough else null,
+                    )
                 }
-                Text(
-                    text = bullet + item,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (done) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    textDecoration = if (done) TextDecoration.LineThrough else null,
-                )
             }
         }
 
+        // 引用：整列宽的圆角底 + 左侧竖条 + 文字内缩，与阅读态、编辑态同一套几何
+        part.style == ContentPartStyle.quote -> QuotePreview(ContentFlatten.flattenPart(part))
+
         else -> Text(
             text = ContentFlatten.flattenPart(part),
-            style = MaterialTheme.typography.bodyMedium,
+            style = EditorTypography.textStyleFor(part.style),
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = if (part.align == "center") TextAlign.Center else TextAlign.Start,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 日面板预览里的引用：几何与阅读态、编辑态完全同源（[BlockGeometry]）。 */
+@Composable
+private fun QuotePreview(text: String) {
+    val background = MaterialTheme.colorScheme.surfaceContainerHigh
+    val bar = MaterialTheme.colorScheme.outlineVariant
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .drawBehind {
+                    val radius = BlockGeometry.QuoteRadius.toPx()
+                    drawRoundRect(color = background, cornerRadius = CornerRadius(radius))
+                    val barWidth = BlockGeometry.QuoteBarWidth.toPx()
+                    if (barWidth > 0f) {
+                        val inset = BlockGeometry.QuoteBarInset.toPx()
+                        drawRoundRect(
+                            color = bar,
+                            topLeft = Offset(BlockGeometry.QuoteBarLeading.toPx(), inset),
+                            size = Size(barWidth, size.height - inset * 2),
+                            cornerRadius = CornerRadius(BlockGeometry.QuoteBarRadius.toPx()),
+                        )
+                    }
+                },
+        )
+        Text(
+            text = text,
+            modifier = Modifier.padding(
+                start = BlockGeometry.QuoteTextInset,
+                end = BlockGeometry.QuoteTrailingPadding,
+                top = BlockGeometry.QuotePadding,
+                bottom = BlockGeometry.QuotePadding,
+            ),
+            style = EditorTypography.textStyleFor(ContentPartStyle.quote),
             color = MaterialTheme.colorScheme.onSurface,
         )
     }

@@ -51,6 +51,154 @@ object SpannableBridge {
     /** 承载块样式的自定义段落 span（对应 iOS 的 `.diaryBlockStyle`）。 */
     class BlockStyleSpan(val style: String) : android.text.style.ParagraphStyle
 
+    /** 标记前缀的字符数（`• ` / `☐ ` / `☑ ` 都是"图形 + 一个空格"）。 */
+    const val MARKER_LENGTH = 2
+
+    /**
+     * 列表圆点 / 待办勾选框在**编辑态**的几何与配色。
+     *
+     * 由界面层从 [BlockGeometry] 与主题解析成 `px`（与 [QuoteStyle] 同一条约定），
+     * 阅读态与首页预览用同一批 dp 常量 —— 三处因此是同一套数。
+     */
+    data class MarkerStyle(
+        /** 标记槽宽，也是这一行（含换行后的每一行）的正文起点。 */
+        val indentPx: Int,
+        /** 图形中心距列左边的距离（槽内居中）。 */
+        val centerXPx: Float,
+        /** 圆点直径。 */
+        val bulletDiameterPx: Float,
+        val checkboxSizePx: Float,
+        val checkboxRadiusPx: Float,
+        val checkboxBorderPx: Float,
+        /** 圆点 / 未选勾选框的颜色：`onSurfaceVariant`。 */
+        val outlineColor: Int,
+        /** 勾选后的底色：`primary`。 */
+        val fillColor: Int,
+        /** 勾选后的对勾色：`onPrimary`。 */
+        val checkColor: Int,
+        /** 待办完成后的文字色：`onSurfaceVariant`。 */
+        val doneTextColor: Int,
+    )
+
+    /**
+     * 列表圆点 / 待办勾选框在编辑态的画法。
+     *
+     * 标记在可编辑文本里仍然是**两个真实字符**，只是被这枚 `ReplacementSpan` 换成
+     * "一张宽度等于缩进的画布"（iOS 那边是 `MarkerGlyph` 生成同宽度的图片附件）：
+     *
+     * - 宽度固定 = [MarkerStyle.indentPx]，于是正文起点与阅读态一致；换行后的第二行
+     *   由同一段落上的 `LeadingMarginSpan` 对齐到同一个起点 —— 这就是悬挂缩进，
+     *   修掉"换行后第二行顶到圆点底下"；
+     * - 图形在**首行行盒里垂直居中**：`(top + bottom) / 2`。阅读态与预览也用同一条
+     *   规则（`(行高 − 图形高) / 2`），三处因此对得上；iOS 用的是"基线之上 0.32em"，
+     *   那是只有 TextKit 才表达得准的规则，这里不照抄；
+     * - **字符数不变**（仍是 2 个），因此光标 / 选区的全部算术与落库格式一行都不用改。
+     */
+    class MarkerSpan(
+        private val kind: EditorLine.MarkerKind,
+        private val done: Boolean,
+        private val style: MarkerStyle,
+    ) : android.text.style.ReplacementSpan() {
+
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val rect = android.graphics.RectF()
+        private val checkPath = android.graphics.Path()
+
+        override fun getSize(
+            paint: android.graphics.Paint,
+            text: CharSequence,
+            start: Int,
+            end: Int,
+            fm: android.graphics.Paint.FontMetricsInt?,
+        ): Int {
+            // 行高由这一段的 `BlockMetricsSpan` 定，这里只把字体度量原样交回去
+            // （不动 fm = 与一个普通字符占的高度一致，不会把行撑高）。
+            if (fm != null) {
+                val metrics = paint.fontMetricsInt
+                fm.ascent = metrics.ascent
+                fm.descent = metrics.descent
+                fm.top = metrics.top
+                fm.bottom = metrics.bottom
+            }
+            return style.indentPx
+        }
+
+        override fun draw(
+            canvas: android.graphics.Canvas,
+            text: CharSequence,
+            start: Int,
+            end: Int,
+            x: Float,
+            top: Int,
+            y: Int,
+            bottom: Int,
+            paint: android.graphics.Paint,
+        ) {
+            val centerX = x + style.centerXPx
+            val centerY = (top + bottom) / 2f
+            when (kind) {
+                EditorLine.MarkerKind.Bullet -> {
+                    this.paint.reset()
+                    this.paint.isAntiAlias = true
+                    this.paint.color = style.outlineColor
+                    canvas.drawCircle(centerX, centerY, style.bulletDiameterPx / 2f, this.paint)
+                }
+
+                EditorLine.MarkerKind.Todo -> drawCheckbox(canvas, centerX, centerY)
+            }
+        }
+
+        /** 勾选框：18dp 圆角方框；未完成 = 2dp 描边（描边**画在框内**，与 M3 一致）。 */
+        private fun drawCheckbox(canvas: android.graphics.Canvas, centerX: Float, centerY: Float) {
+            val half = style.checkboxSizePx / 2f
+            rect.set(centerX - half, centerY - half, centerX + half, centerY + half)
+            paint.reset()
+            paint.isAntiAlias = true
+            if (done) {
+                paint.color = style.fillColor
+                canvas.drawRoundRect(rect, style.checkboxRadiusPx, style.checkboxRadiusPx, paint)
+                drawCheck(canvas, centerX, centerY)
+                return
+            }
+            val inset = style.checkboxBorderPx / 2f
+            rect.inset(inset, inset)
+            paint.color = style.outlineColor
+            paint.style = android.graphics.Paint.Style.STROKE
+            paint.strokeWidth = style.checkboxBorderPx
+            canvas.drawRoundRect(rect, style.checkboxRadiusPx, style.checkboxRadiusPx, paint)
+        }
+
+        /** 对勾：三段折线，占勾选框内侧约 60%（M3 的对勾图标就是这个比例）。 */
+        private fun drawCheck(canvas: android.graphics.Canvas, centerX: Float, centerY: Float) {
+            val r = style.checkboxSizePx / 2f * 0.62f
+            paint.style = android.graphics.Paint.Style.STROKE
+            paint.strokeWidth = style.checkboxSizePx * 0.11f
+            paint.strokeCap = android.graphics.Paint.Cap.ROUND
+            paint.strokeJoin = android.graphics.Paint.Join.ROUND
+            paint.color = style.checkColor
+            checkPath.reset()
+            checkPath.moveTo(centerX - r * 0.95f, centerY + r * 0.05f)
+            checkPath.lineTo(centerX - r * 0.25f, centerY + r * 0.75f)
+            checkPath.lineTo(centerX + r, centerY - r * 0.7f)
+            canvas.drawPath(checkPath, paint)
+        }
+    }
+
+    /**
+     * 待办**完成**态的绘制样式：删除线 + 变灰（阅读态与预览同此）。
+     *
+     * 刻意**不**用平台的 `StrikethroughSpan`：`fromSpannable` 会把它解析成
+     * `run.strike = true` 写进 `content_json` —— 勾一下待办会把整行变成"手动删除线"
+     * （取消勾选也退不回来）。这是一个只改绘制的 [android.text.style.CharacterStyle]，
+     * 解析器认不出它，因此不会污染模型。
+     */
+    class TodoDoneSpan(private val color: Int) : android.text.style.CharacterStyle() {
+        override fun updateDrawState(tp: android.text.TextPaint) {
+            tp.isStrikeThruText = true
+            tp.color = color
+        }
+    }
+
     /**
      * 一个段落样式在**编辑器里的排版**（字号 / 行高 / 段后距），单位 px。
      *
@@ -133,13 +281,24 @@ object SpannableBridge {
         ) {
             val natural = baseMetrics.descent - baseMetrics.ascent
             if (natural <= 0) return
-            // 行高：按比例拉开 ascent/descent（保持基线位置的比例），得到 M3 角色的行高
+            // 行高：按比例拉开 ascent/descent（保持基线位置的比例），得到 M3 角色的行高。
+            // 与 Compose 默认的 `LineHeightStyle`（`Alignment.Proportional` + `Mode.Fixed`）
+            // 是同一条规则，因此编辑态与阅读态的基线位置一致（见 BlockGeometry 的说明）。
             val scale = if (lineHeightPx > natural) lineHeightPx.toFloat() / natural else 1f
-            val ascent = (baseMetrics.ascent * scale).toInt()
-            var descent = (baseMetrics.descent * scale).toInt()
-            // 段后距：只加在段落最后一行（行尾是换行，或已到文末）
-            val lastOfParagraph = end >= text.length || text[end] == '\n'
-            if (lastOfParagraph && paragraphSpacingPx > 0) descent += paragraphSpacingPx
+            // 行盒高度必须**正好**是角色的行高：ascent 取整之后把剩下的都给 descent
+            // （各自独立取整会让行盒少 1px —— 光标高度与阅读态的行盒都会差这一点）。
+            val ascent = Math.round(baseMetrics.ascent * scale)
+            var descent = lineHeightPx + ascent
+            // 段距：只加在**段落之间**那一行。文末最后一段不加 —— 阅读态的一段到底就是到底，
+            // 多出来的那段距离只会让末尾光标凭空高 8dp（R31 §10 记的差异）。
+            //
+            // ⚠️ `chooseHeight` 给的 `end` 是**含终止换行**的行尾（实测 "甲\n乙" 的第一行
+            // end=2、len=3），所以判据要看 `end - 1` 那个字符 —— 早先写成 `text[end]`，
+            // 那已经是下一行的首字，于是**段距从来没有生效过**（编辑器里两段之间一直
+            // 只有行高、没有间距，与阅读态的 8dp 对不上）。
+            val endsParagraph = end >= text.length || (end > 0 && text[end - 1] == '\n')
+            val isLastParagraph = end >= text.length
+            if (endsParagraph && !isLastParagraph && paragraphSpacingPx > 0) descent += paragraphSpacingPx
             fm.ascent = ascent
             fm.descent = descent
             fm.top = ascent
@@ -175,6 +334,8 @@ object SpannableBridge {
         metricsFor: ((String) -> BlockMetrics?)? = null,
         /** 引用段的底色与内边距；null 表示不画（纯文本模式 / 测试不关心外观时）。 */
         quoteStyle: QuoteStyle? = null,
+        /** 列表 / 待办标记的几何与配色；null 表示用字面的 `• ` / `☐ ` 字符画（纯文本模式）。 */
+        markerStyle: MarkerStyle? = null,
     ): SpannableStringBuilder {
         val builder = SpannableStringBuilder()
         val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
@@ -236,6 +397,32 @@ object SpannableBridge {
             // 空行因此也有承载（一个只有标记的空行、或"刚设了样式还没输入"的空行不会丢样式），
             // 行内继续输入时样式也会延续（靠 [ParagraphSpanFlags] 的"起点包含"）。
             val paragraphEnd = if (hasTerminator) end + 1 else end
+            // 列表 / 待办：标记仍是两个真实字符，但画成"宽度 = 缩进"的画布，并给整段挂上
+            // 悬挂缩进 —— 换行后的第二行因此对齐到正文起点（与阅读态同一个缩进）。
+            val markerEnd = (start + MARKER_LENGTH).coerceAtMost(end)
+            if (line.marker != null && markerStyle != null && markerEnd > start) {
+                builder.setSpan(
+                    MarkerSpan(line.marker, line.done, markerStyle),
+                    start,
+                    markerEnd,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+                builder.setSpan(
+                    android.text.style.LeadingMarginSpan.Standard(0, markerStyle.indentPx),
+                    start,
+                    paragraphEnd,
+                    ParagraphSpanFlags,
+                )
+                if (line.isTodoItem && line.done) {
+                    // 完成态：删除线 + 变灰（只改绘制，解析器认不出这枚 span，见 [TodoDoneSpan]）
+                    builder.setSpan(
+                        TodoDoneSpan(markerStyle.doneTextColor),
+                        start,
+                        paragraphEnd,
+                        ParagraphSpanFlags,
+                    )
+                }
+            }
             if (paragraphEnd > start) {
                 val style = effectiveBlockStyle(line)
                 builder.setSpan(
@@ -277,7 +464,7 @@ object SpannableBridge {
                 // 因此不需要动文字颜色。
                 if (quoteStyle != null && style == ContentPartStyle.quote) {
                     builder.setSpan(
-                        android.text.style.LeadingMarginSpan.Standard(quoteStyle.paddingHorizontalPx),
+                        android.text.style.LeadingMarginSpan.Standard(quoteStyle.textInsetPx),
                         start,
                         paragraphEnd,
                         ParagraphSpanFlags,
@@ -291,8 +478,10 @@ object SpannableBridge {
                 }
             }
             if (end > start) {
-                // 行内样式：按 run 的字符偏移挂 span
-                var cursor = start
+                // 行内样式：按 run 的字符偏移挂 span。**标记行要跳过标记前缀** ——
+                // `line.text` 不含标记，直接从行首开始挂会让整行样式左移两格
+                // （列表项第一字加粗会画到圆点上，回读时那一格又落在正文之外）。
+                var cursor = start + if (line.marker != null && markerStyle != null) MARKER_LENGTH else 0
                 for (run in EditorModel.materializeRuns(line)) {
                     val runEnd = cursor + run.text.length
                     applyInlineSpans(builder, cursor, runEnd, run)
@@ -357,19 +546,25 @@ object SpannableBridge {
     /**
      * 引用段在**编辑器**里的样子。
      *
-     * 逐项对着阅读态（规范 §2.5 / `DiaryReadScreen` 的 `render.style == quote` 分支）：
-     * `surfaceContainerHigh` 底 + 4dp 圆角 + 6×10dp 内边距 —— 编辑态与阅读态必须看起来是同一件事
-     * （用户 2026-09-28 的"样式参考 Google 官方 SDK / 未覆盖处对齐 iOS"里，iOS 编辑态的引用**也是有底的**）。
+     * 与阅读态、首页预览逐项同源（[BlockGeometry]）：`surfaceContainerHigh` 底 + 4dp 圆角
+     * + 上下各 6dp 内边距 + 左侧 4dp 竖条 + 文字内缩 16dp —— 三处必须看起来是同一件事。
      *
      * ⚠️ 平台限制记一笔：`Spannable` 只有**左边**的 `LeadingMarginSpan`，没有右边距 span，
-     * 所以那 10dp 只能缩进左侧；换行时文字会贴到引用底的右边缘（与正文贴右边缘一致）。
-     * 阅读态是左右对称的 10dp —— 这是两者唯一的外观差异。
+     * 所以文字只缩进左侧；一行正好排满时文字会贴到引用底的右边缘。阅读态与预览右边还有
+     * 10dp（`BlockGeometry.QuoteTrailingPadding`）—— 这是三处唯一对不齐的地方。
      */
     data class QuoteStyle(
         val backgroundColor: Int,
         val cornerRadiusPx: Float,
-        val paddingHorizontalPx: Int,
+        /** 引用正文距列左边界的距离（竖条在里面）。 */
+        val textInsetPx: Int,
         val paddingVerticalPx: Int,
+        /** 左侧竖条：距列左、宽度、上下各让出、圆角、颜色。宽 0 表示不画竖条。 */
+        val barLeadingPx: Float = 0f,
+        val barWidthPx: Float = 0f,
+        val barInsetPx: Float = 0f,
+        val barRadiusPx: Float = 0f,
+        val barColor: Int = 0,
         /**
          * 段后距（px）—— 必须与 [BlockMetricsSpan] 用的是**同一个值**。
          *
@@ -380,11 +575,18 @@ object SpannableBridge {
         val paragraphSpacingPx: Int = 0,
     ) {
         /**
-         * 在画布上画一块引用底。**两处共用同一套几何**：
-         * [QuoteBackgroundSpan]（有字符的段落）与 `DiaryEditText.onDraw`
-         * （末尾那个空行没有字符、挂不上任何 span，只能由视图自己补）。
+         * 在画布上画一块引用：**整列宽的圆角底 + 左侧竖条**。
          *
-         * 圆角只给整块底的最外沿：首行上边、末行下边（多行拼起来才是一个连续的块）。
+         * **两处共用同一套几何**：[QuoteBackgroundSpan]（有字符的段落，按行调用）与
+         * `DiaryEditText.onDraw`（末尾那个空行没有字符、挂不上任何 span，只能由视图自己补）。
+         *
+         * `first` / `last` 表示"这一行是不是整段的第一行 / 最后一行"：底色与竖条都只在
+         * 整段的最外沿加内边距与圆角、中间行直接接上 —— 多行拼起来才是一个连续的块。
+         *
+         * `bakedSpacingPx` = 末行的 `bottom` 里**实际含**的段距（[BlockMetricsSpan] 把它
+         * 烘进了 descent）。不减掉它，底会比文字往下多出一大截（用户 2026-09-28 实测：
+         * "引用的作用范围现在也不对"）；而**文末最后一段**与**末尾空行**并没有那段距离，
+         * 减了反而会把底削短 —— 所以由调用方按"后面还有没有内容"传进来。
          */
         fun drawBox(
             canvas: android.graphics.Canvas,
@@ -395,21 +597,54 @@ object SpannableBridge {
             top: Float,
             right: Float,
             bottom: Float,
+            first: Boolean,
+            last: Boolean,
+            bakedSpacingPx: Int = 0,
+        ) {
+            val boxTop = if (first) top - paddingVerticalPx else top
+            val boxBottom = if (last) bottom + paddingVerticalPx - bakedSpacingPx else bottom
+            drawRoundRect(canvas, paint, path, radii, left, boxTop, right, boxBottom, cornerRadiusPx, first, last)
+
+            if (barWidthPx <= 0f) return
+            // 竖条：只占块内的一小条，上下各让 barInset（免得顶到圆角外面）；
+            // 圆角同样只给整段的两端，中间行接上。
+            val barTop = if (first) boxTop + barInsetPx else top
+            val barBottom = if (last) boxBottom - barInsetPx else bottom
+            if (barBottom <= barTop) return
+            paint.color = barColor
+            drawRoundRect(
+                canvas, paint, path, radii,
+                left + barLeadingPx, barTop, left + barLeadingPx + barWidthPx, barBottom,
+                barRadiusPx, first, last,
+            )
+        }
+
+        /** 画一个圆角矩形，圆角只给指定的两端（`radii` 是复用的暂存数组）。 */
+        private fun drawRoundRect(
+            canvas: android.graphics.Canvas,
+            paint: android.graphics.Paint,
+            path: android.graphics.Path,
+            radii: FloatArray,
+            left: Float,
+            top: Float,
+            right: Float,
+            bottom: Float,
+            radius: Float,
             roundTop: Boolean,
             roundBottom: Boolean,
         ) {
             java.util.Arrays.fill(radii, 0f)
             if (roundTop) {
-                radii[0] = cornerRadiusPx
-                radii[1] = cornerRadiusPx
-                radii[2] = cornerRadiusPx
-                radii[3] = cornerRadiusPx
+                radii[0] = radius
+                radii[1] = radius
+                radii[2] = radius
+                radii[3] = radius
             }
             if (roundBottom) {
-                radii[4] = cornerRadiusPx
-                radii[5] = cornerRadiusPx
-                radii[6] = cornerRadiusPx
-                radii[7] = cornerRadiusPx
+                radii[4] = radius
+                radii[5] = radius
+                radii[6] = radius
+                radii[7] = radius
             }
             path.reset()
             path.addRoundRect(left, top, right, bottom, radii, android.graphics.Path.Direction.CW)
@@ -458,23 +693,20 @@ object SpannableBridge {
         ) {
             // `end` 是**含终止换行**的行尾（`Layout.getLineEnd(line, visibleEnd = false)`），
             // 所以"这一行是不是整段的最后一行"用 end >= paragraphEnd 判定。
-            val first = start <= paragraphStart
-            val last = end >= paragraphEnd
+            // 加内边距、画竖条、减段距都在 `drawBox` 里统一处理（两处共用同一套几何）。
             style.drawBox(
                 canvas = canvas,
                 paint = boxPaint,
                 path = path,
                 radii = radii,
                 left = 0f,
-                top = (if (first) top - style.paddingVerticalPx else top).toFloat(),
+                top = top.toFloat(),
                 right = containerWidthPx.toFloat(),
-                // 末行的 `bottom` 含段后距（见 QuoteStyle.paragraphSpacingPx），要减掉，
-                // 这样上下内边距才对称；中间行不减（那段距离正好是多行之间的行距）
-                bottom = (
-                    if (last) bottom + style.paddingVerticalPx - style.paragraphSpacingPx else bottom
-                    ).toFloat(),
-                roundTop = first,
-                roundBottom = last,
+                bottom = bottom.toFloat(),
+                first = start <= paragraphStart,
+                last = end >= paragraphEnd,
+                // 文末最后一段没有那 8dp（`applyHeight` 不再给文末加），这里也就不能减
+                bakedSpacingPx = if (paragraphEnd >= text.length) 0 else style.paragraphSpacingPx,
             )
         }
     }
