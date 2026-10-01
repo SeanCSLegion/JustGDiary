@@ -532,7 +532,7 @@ private fun ParagraphText(
 
     if (render.style == ContentPartStyle.quote) {
         // 引用：整列宽的圆角底 + 左侧竖条 + 文字内缩 16dp。
-        // 几何全部来自 [BlockGeometry]，与编辑态的 `QuoteBackgroundSpan`、首页预览
+        // 几何全部来自 [BlockGeometry]，与编辑态的 `DiaryEditText.onDraw`、首页预览
         // 是同一套数（编辑态那边画不了的只有右边那 10dp，见 `QuoteStyle` 的说明）。
         Box(modifier = Modifier.fillMaxWidth()) {
             Box(

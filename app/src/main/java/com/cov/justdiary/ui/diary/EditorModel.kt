@@ -187,7 +187,7 @@ enum class EditorBlockStyle(val partStyle: String) {
          *   但绘制时用正文属性。
          *
          * 于是"引用行上段落样式菜单显示正文"是**有意**的：引用只改这一个按钮之外的东西
-         * （字号走 bodyMedium、底色由 `QuoteBackgroundSpan` 画）。
+         * （字号走 bodyMedium、底色由 `DiaryEditText.onDraw` 画）。
          */
         fun fromPartStyle(partStyle: String): EditorBlockStyle = when (partStyle) {
             ContentPartStyle.title -> Title
@@ -497,19 +497,28 @@ object EditorModel {
      * | --- | --- |
      * | 列表 / 待办项**有内容**时回车 | 新行继承同种标记（继续加一项），待办默认未勾选 |
      * | 列表 / 待办项**空**时回车 | **结束列表**：上一行去掉标记，新行是普通空行（iOS 同） |
-     * | 大 / 小标题、引用回车 | **新行继承同一样式** —— 规则 3 的"回车之后也不取消格式，直到用户取消格式" |
+     * | 大 / 小标题回车 | **新行继承同一样式** —— 规则 3 的"回车之后也不取消格式，直到用户取消格式" |
+     * | **引用**回车 | **新行回到正文**（引用不延续）—— 见下面的"用户 2026-10-01 的口径" |
      * | 居中的正文回车 | 新行**不继承居中**（居中只作用于"本行"，见下面的 ⚠️） |
      * | 正文回车 | 新行还是正文（= 没有样式要延续，行为与以前一致） |
      *
      * 三种"新行"都只继承**上一行**的状态，因此只对"新出现、且内容为空"的行生效 ——
      * 粘贴 / 删除 / 普通输入都不受影响。
      *
-     * ## 与 iOS 的一处**有意差异**（D10）
+     * ## 引用：回车即退出（用户 2026-10-01 定稿，D10 再次改写）
      *
-     * iOS 在**空引用行**上回车是"消费按键 + 结束引用"（`RichTextEngine.swift:675-682`：
-     * *"空引用行回车 → 结束引用"*）。用户规则 3 说得更直接：**"回车之后也不取消格式，
-     * 直到用户取消格式"** —— 引用只能由「引用」按钮取消，回车必须延续。这里按用户的口径实现；
-     * "怎么退出引用"的答案因此变成"再点一次引用按钮"（或选别的段落格式）。
+     * 用户原话：*"当开启引用后，输入回车换行之后，如果引用状态没有输入内容的话，就取消本次引用，
+     * 光标位置重置。如果有输入内容，回车到新行也需要取消引用状态。"*
+     *
+     * 于是引用的两条出口都是回车：
+     *
+     * - **本行还是空的**：回车被 [blocksNewline] 吃掉，本行变回正文
+     *   （[endQuoteOnBlockedNewline]）—— 不新增行，光标回到列的最左边；
+     * - **本行有内容**：平台正常换行，**新行是正文**（就是这里的 `above.blockStyle == quote`
+     *   分支）。已经打好的那段仍然是引用（它是一整段引用文字），只是"引用"到这里结束。
+     *
+     * 这样"引用只覆盖用户真正引用的那几行"，不必再点一次「引用」按钮退出；iOS 侧随后按同一口径改
+     * （此前的 iOS `RichTextEngine.handleReturn` 是非空引用行继续引用，本仓库早先也照抄了它）。
      *
      * 居中空行的回车在**更早一步**就被 [blocksNewline] 吃掉了（规则 4），走不到这里；
      * 万一走到（例如粘贴带进来的换行），也是"新行继承居中"，与 iOS 的
@@ -534,7 +543,12 @@ object EditorModel {
                 above.marker != null ->
                     result[index] = line.copy(marker = above.marker, done = false)
 
-                // 非标记行 → **块样式跟着换行延续**（规则 3：标题 / 引用"回车之后也不取消格式"）。
+                // 引用回车 → **新行回到正文**（引用不延续，见上面的"引用：回车即退出"）。
+                // 上一行是空的引用行时走不到这里（那次回车被 `blocksNewline` 吃掉了）。
+                above.blockStyle == ContentPartStyle.quote ->
+                    result[index] = line.copy(blockStyle = ContentPartStyle.body, align = null)
+
+                // 非标记行 → **块样式跟着换行延续**（规则 3：标题"回车之后也不取消格式"）。
                 //
                 // iOS 是靠"段落属性挂在终止换行上"天然延续的；Android 这边
                 // `Spannable` 的块 span 虽然也覆盖终止换行，但新插入的 `\n` 会让**旧 span**
@@ -551,7 +565,66 @@ object EditorModel {
                     result[index] = line.copy(blockStyle = above.blockStyle)
             }
         }
-        return result
+        return repairSplitAtParagraphStart(result, previous)
+    }
+
+    /**
+     * **在段落行首按回车**留下的那个空行：段落样式该归谁（用户 2026-10-01 补充的口径）。
+     *
+     * 用户原话：*"如果在引用的段前输入回车换行，现在是让上一个空行也是引用格式。但是我希望的是
+     * 那个空行应该是没有引用格式的。因为如果是引用行回车换行之后会自动取消引用，所以，理论上是
+     * 没有引用的空行的。"*
+     *
+     * ## 平台为什么会那样（Robolectric 实测，见 `docs/migration-progress.md` R33）
+     *
+     * 段落 span 用"起点包含、终点不包含"（[SpannableBridge.ParagraphSpanFlags]），于是把光标放在
+     * 行首敲回车时，新插入的 `\n` **落在 span 里面** —— 段落 span 连同字号 / 对齐 / 引用内缩 /
+     * 列表缩进一起"漏"到了上面那个空行上，而真正有文字的那一行反而因为 span 起点不再等于行首，
+     * 解析回来掉成正文：
+     *
+     * ```
+     * "Q"(quote) --段首回车--> 平台文本 "\nQ"、span [0,2)
+     *   解析：[""(quote), "Q"(body)]     ← 空行顶了样式、正文丢了样式
+     *   目标：[""(body),  "Q"(quote)]    ← 引用不留在空行上，样式跟文字走
+     * ```
+     *
+     * 这里按"上一版这一行是什么"把归属纠正回来（只在**行数正好 +1**、也就是一次拆分时动手）：
+     *
+     * - **空行**：引用 → 正文（用户口径：引用行回车会自动取消引用，所以不该有空引用行）；
+     *   大标题 / 小标题 → **保留**（规则 3 的"回车之后也不取消格式"，与"先在空行上选大标题再回车"
+     *   是同一条）；**居中对齐一律不留在空行上**（规则 4：居中的作用域是本行）；
+     * - **被顶下去的那一行**：把上一版的段落样式与对齐**接回来** —— 少了这一步，
+     *   "在标题行首回车"会把标题悄悄变成正文（落库就错了）。
+     */
+    private fun repairSplitAtParagraphStart(
+        lines: List<EditorLine>,
+        previous: List<EditorLine>,
+    ): List<EditorLine> {
+        if (lines.size != previous.size + 1) return lines
+        val result = lines.toMutableList()
+        var changed = false
+        for (index in 0 until lines.size - 1) {
+            val above = lines[index]
+            val pushed = lines[index + 1]
+            if (pushed.text.isEmpty() || pushed.marker != null || pushed.isImage) continue
+            // 上一版里**同一个下标**是"带着这一段样式的那一行"，且文字正好被顶到了下一行
+            val before = previous.getOrNull(index) ?: continue
+            if (before.text != pushed.text) continue
+            if (before.blockStyle == ContentPartStyle.body && before.align == null) continue
+            if (isBlankLine(above)) {
+                result[index] = above.copy(
+                    blockStyle = if (before.blockStyle == ContentPartStyle.quote) {
+                        ContentPartStyle.body
+                    } else {
+                        before.blockStyle
+                    },
+                    align = null,
+                )
+            }
+            result[index + 1] = pushed.copy(blockStyle = before.blockStyle, align = before.align)
+            changed = true
+        }
+        return if (changed) result else lines
     }
 
     /** 兼容旧名字（D9 的继承规则已经并入 [repairAfterEnter]）。 */

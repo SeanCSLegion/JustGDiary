@@ -51,6 +51,41 @@ object SpannableBridge {
     /** 承载块样式的自定义段落 span（对应 iOS 的 `.diaryBlockStyle`）。 */
     class BlockStyleSpan(val style: String) : android.text.style.ParagraphStyle
 
+    /**
+     * **末尾空行的补位换行**（phantom）的标记 —— 一个挂在文本最末端的零长度段落 span。
+     *
+     * ## 它是干什么的
+     *
+     * 段落样式（字号 / 行高 / 引用底 / 行首内缩）只能挂在**字符**上，而"文档末尾那一行"
+     * 如果是空的，它在平台文本里就一个字符都没有（它的终止换行属于上一段）——
+     * `Layout.getParagraphSpans` 对 `start == end && start > 0` 的空段落**直接返回空数组**
+     * （`text/Layout.java:3489`，源码注释只说"整个缓冲区都空时样式才会作用于新输入的文字"），
+     * 于是那一行挂不上任何东西：光标停在列的最左边（用户 2026-10-01 报的"引用时光标位置不对"），
+     * 底也画不出来。
+     *
+     * 解法：末尾那一行是**空的引用行**时，给它也补一个终止换行 —— 这样它就从"文档末尾的空段落"
+     * 变成了"一段正常的、自带换行的空段落"，段落 span（行首内缩 / 字号 / 引用底线）全部照常生效
+     * （`getLineStart(line) != getLineEnd(line)`）。
+     *
+     * 代价是平台文本比模型多出一个**空段落**（多出来的那个 `\n` 之后什么都没有），
+     * 由 [PhantomLineSpan] 标记它、[fromSpannable] 解析时丢掉它，模型因此不多也不少一行。
+     * 标记用 `SPAN_POINT_POINT`：在最末尾插入文字时它跟着往后走，始终留在文本最后
+     * （[fromSpannable] 还会额外要求它正好落在 `text.length`，位置不对就不当补位行）。
+     */
+    class PhantomLineSpan : android.text.style.ParagraphStyle
+
+    /** [PhantomLineSpan] 的挂法：零长度、跟着末尾插入往后走。 */
+    private const val PhantomSpanFlags = Spanned.SPAN_POINT_POINT
+
+    /** 末尾空行要不要补终止换行（见 [PhantomLineSpan]）：只有**空的引用行**需要。 */
+    fun needsPhantomTerminator(lines: List<EditorLine>): Boolean {
+        // 单行（空文档）不补：那时文本本身是空的，提示语要靠"文本为空"才显示得出来，
+        // 而且那一种情况下零长度 span 落在位置 0、平台是认的（R32 已经验证）。
+        if (lines.size < 2) return false
+        val tail = lines.last()
+        return EditorModel.isBlankLine(tail) && tail.blockStyle == ContentPartStyle.quote
+    }
+
     /** 标记前缀的字符数（`• ` / `☐ ` / `☑ ` 都是"图形 + 一个空格"）。 */
     const val MARKER_LENGTH = 2
 
@@ -339,6 +374,9 @@ object SpannableBridge {
     ): SpannableStringBuilder {
         val builder = SpannableStringBuilder()
         val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
+        // 末尾空引用行要补一个终止换行（见 [PhantomLineSpan]）：那一行因此成为"有字符的段落"，
+        // 行首内缩、字号、引用底线才挂得上 —— 否则光标会停在列的最左边。
+        val phantomTail = needsPhantomTerminator(lines)
 
         lines.forEachIndexed { index, line ->
             // 图片行：插入一个占位字符并把 src 挂在 ImagePayloadSpan 上
@@ -368,7 +406,7 @@ object SpannableBridge {
                     end,
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
                 )
-                val hasTerminator = index < lines.size - 1
+                val hasTerminator = index < lines.size - 1 || phantomTail
                 if (hasTerminator) builder.append('\n')
                 // **图片段居中**（对应 iOS `PartsCodec.imageParagraphStyle()`：
                 // `alignment = .center`，让图片永远不会贴在宽栏的左边）。
@@ -390,7 +428,7 @@ object SpannableBridge {
             val end = builder.length
             lineStarts.add(start to end)
             // 先把终止换行补上，段落级 span 才能覆盖到它（见下）
-            val hasTerminator = index < lines.size - 1
+            val hasTerminator = index < lines.size - 1 || phantomTail
             if (hasTerminator) builder.append('\n')
 
             // 段落级 span 的右端**含本行的终止换行**（iOS 把块属性挂在终止换行上）：
@@ -459,18 +497,16 @@ object SpannableBridge {
                         ParagraphSpanFlags,
                     )
                 }
-                // 引用：圆角底 + 左侧内边距（与阅读态同参数，见 [QuoteStyle]）。
-                // 底画在**文字下面**（`LineBackgroundSpan` 平台保证在文字之前绘制），
-                // 因此不需要动文字颜色。
+                // 引用：行首内缩（与阅读态同参数，见 [QuoteStyle]）。
+                // **底色不在这里画**：`LineBackgroundSpan` 由平台在**光标之后**绘制
+                // （`Editor.onDraw` 先 `drawCursor` 再 `drawLayout`，见
+                // `android-37.0/android/widget/Editor.java:2143-2154`），一块不透明的圆角底
+                // 会把光标整个盖住 —— 真机实测：引用段里打上字之后光标就再也看不见了。
+                // 现在底一律由 `DiaryEditText.onDraw` 在 `super.onDraw` **之前**画（与末尾那个
+                // 空行同一条路径），光标因此永远在底之上。
                 if (quoteStyle != null && style == ContentPartStyle.quote) {
                     builder.setSpan(
                         android.text.style.LeadingMarginSpan.Standard(quoteStyle.textInsetPx),
-                        start,
-                        paragraphEnd,
-                        ParagraphSpanFlags,
-                    )
-                    builder.setSpan(
-                        QuoteBackgroundSpan(quoteStyle, containerWidthPx, start, paragraphEnd),
                         start,
                         paragraphEnd,
                         ParagraphSpanFlags,
@@ -489,16 +525,20 @@ object SpannableBridge {
                 }
             }
         }
-        // 末尾那个**空的引用行**：一个字符都没有，挂不上任何段落 span —— 光标于是停在
-        // 列的最左边，而不是引用文字该在内缩处（用户 2026-10-01 报的"引用时光标位置不对"；
-        // 一打字光标又会往右跳 16dp，正是这一下的补写）。
+        // 末尾那个**空的引用行**：
         //
-        // 解法：在这个**位置**挂一个**零长度**的 `LeadingMarginSpan`。`Layout` 取段落左边距
-        // 时用的是 `getSpans(段落起, 段落止)`，而 `Spannable` 的约定是"零长度 span 落在
-        // 查询区间内即算命中"（`SpannableStringBuilder.getSpans` 对 `spanStart == spanEnd`
-        // 不做端点剔除），于是这个空行也有了行首内缩 —— 光标落位、下笔第一个字不跳。
-        // 不用给整个视图加左内边距：那会把**所有**段落一起推右，得逐个补偿，代价大得多。
-        if (quoteStyle != null) {
+        // - 模型里有**两行以上**时，上面已经给它补了终止换行（[PhantomLineSpan]），它因此是
+        //   一段"有字符的段落"，行首内缩（`LeadingMarginSpan`）与引用底全都照常生效；
+        // - 模型**只有这一行**（空文档上点了「引用」）时不能补 —— 补了文本就不为空，
+        //   提示语（placeholder）会消失。那一种情况退回到"在这个**位置**挂一个**零长度**的
+        //   `LeadingMarginSpan`"：此时位置是 0，`Layout.getParagraphSpans` 对
+        //   `start == end && start > 0` 才返回空数组（`text/Layout.java:3489`），
+        //   位置 0 是认的 —— 光标因此同样落在内缩处（真机实测 x=77 → 120）。
+        if (phantomTail) {
+            // 补位换行那段（多出来的空段落）的**标记**：解析时靠它把多出来的空行丢掉。
+            // 与 `quoteStyle` 无关 —— 补位换行是"文本形状"的一部分，标记必须跟着它一起出现。
+            builder.setSpan(PhantomLineSpan(), builder.length, builder.length, PhantomSpanFlags)
+        } else if (quoteStyle != null) {
             val tail = lines.lastOrNull()
             if (tail != null && EditorModel.isBlankLine(tail) &&
                 effectiveBlockStyle(tail) == ContentPartStyle.quote
@@ -513,6 +553,18 @@ object SpannableBridge {
         }
         return builder
     }
+
+    /**
+     * **引用段**在文本里的区间 `[start, end)`（含终止换行）—— 编辑器画引用底时按它逐行来。
+     *
+     * 认的是 [BlockStyleSpan]（段落语义的唯一来源），不认几何：底由谁画、画多大都不影响这里。
+     */
+    fun quoteRanges(text: Spanned): List<Pair<Int, Int>> =
+        text.getSpans(0, text.length, BlockStyleSpan::class.java)
+            .filter { it.style == ContentPartStyle.quote }
+            .map { text.getSpanStart(it) to text.getSpanEnd(it) }
+            .filter { it.second > it.first }
+            .sortedBy { it.first }
 
     /**
      * 这一行**画出来**用的段落样式。
@@ -537,7 +589,8 @@ object SpannableBridge {
      * 那一行没有 span，就只能落到**视图级**的 `textSize` 与 `gravity` 上
      * （`TextView.getLayoutAlignment()` 把 gravity 翻成 `Layout.Alignment`）。
      *
-     * 返回 null 表示末尾那一行**有内容**（它有 span 撑着，视图级设置不影响任何一行）。
+     * 返回 null 表示末尾那一行**有 span 撑着**（有内容，或者空的引用行已经补过终止换行 ——
+     * 见 [PhantomLineSpan]），视图级设置不影响任何一行。
      */
     fun tailDefaults(
         lines: List<EditorLine>,
@@ -545,23 +598,29 @@ object SpannableBridge {
     ): BlockMetrics? {
         val tail = lines.lastOrNull() ?: return null
         if (!EditorModel.isBlankLine(tail)) return null
+        if (needsPhantomTerminator(lines)) return null
         return metricsFor?.invoke(effectiveBlockStyle(tail))
     }
 
     /**
-     * 末尾空行是**引用**时的外观 —— 它一个字符都没有，[QuoteBackgroundSpan] 挂不上，
-     * 只能由 `DiaryEditText` 自己把这块底画出来（与 span 共用 [QuoteStyle.drawBox]）。
-     * 返回 null 表示末尾不是"空的引用行"，不需要兜底。
+     * 末尾空行是**引用**时的外观 —— 只有"空文档上点了引用"那一种（模型只有一行）需要它：
+     * 那一行在平台文本里一个字符都没有，段落 span 挂不上，只能由 `DiaryEditText` 自己把这块底
+     * 画出来（与段落底共用 [QuoteStyle.drawBox]）。
+     *
+     * 模型有两行以上时空的引用行会补一个终止换行（[PhantomLineSpan]），底由段落 span 的那条路径
+     * 一起画 —— 这里返回 null，免得画两遍。
      */
     fun tailQuoteStyle(lines: List<EditorLine>, quoteStyle: QuoteStyle?): QuoteStyle? {
         val tail = lines.lastOrNull() ?: return null
         if (!EditorModel.isBlankLine(tail)) return null
+        if (needsPhantomTerminator(lines)) return null
         return if (tail.blockStyle == ContentPartStyle.quote) quoteStyle else null
     }
 
     /** 末尾空行是不是居中的（视图级 `gravity` 的来源，与 [tailDefaults] 配对）。 */
     fun tailCentered(lines: List<EditorLine>): Boolean {
         val tail = lines.lastOrNull() ?: return false
+        if (needsPhantomTerminator(lines)) return false
         return EditorModel.isBlankLine(tail) && tail.align == EditorModel.ALIGN_CENTER
     }
 
@@ -599,7 +658,7 @@ object SpannableBridge {
         /**
          * 在画布上画一块引用：**整列宽的圆角底 + 左侧竖条**。
          *
-         * **两处共用同一套几何**：[QuoteBackgroundSpan]（有字符的段落，按行调用）与
+         * **两处共用同一套几何**：`DiaryEditText.onDraw`（所有引用段，按行调用）与
          * `DiaryEditText.onDraw`（末尾那个空行没有字符、挂不上任何 span，只能由视图自己补）。
          *
          * `first` / `last` 表示"这一行是不是整段的第一行 / 最后一行"：底色与竖条都只在
@@ -674,65 +733,6 @@ object SpannableBridge {
         }
     }
 
-    /**
-     * 引用段的圆角底（`LineBackgroundSpan` 是平台给的**官方**做法：Compose 的 `ParagraphStyle`
-     * 没有背景属性，`BasicTextField` 里画不出段落底）。
-     *
-     * 一个引用段可能折成多行，因此：
-     * - **纵向**：首行向上扩 6dp、末行向下扩 6dp，中间行不扩 —— 多行拼起来是一个连续的底，不留缝；
-     * - **横向**：铺满可用宽度（与阅读态的整块底同宽）；
-     * - **圆角**：只圆"整段最外沿"的那两个角（首行上、末行下）。
-     */
-    class QuoteBackgroundSpan(
-        private val style: QuoteStyle,
-        private val containerWidthPx: Int,
-        private val paragraphStart: Int,
-        private val paragraphEnd: Int,
-    ) : android.text.style.LineBackgroundSpan {
-
-        private val boxPaint = android.graphics.Paint().apply {
-            // ⚠️ 这里的 `style` 是**本 span 的构造参数**（QuoteStyle），不是 Paint 的 style ——
-            // `Paint.style` 与它同名，直接写 `style = …` 会被解析成 Paint 的属性。
-            color = this@QuoteBackgroundSpan.style.backgroundColor
-            isAntiAlias = true
-            this.style = android.graphics.Paint.Style.FILL
-        }
-        private val radii = FloatArray(8)
-        private val path = android.graphics.Path()
-
-        override fun drawBackground(
-            canvas: android.graphics.Canvas,
-            paint: android.graphics.Paint,
-            left: Int,
-            right: Int,
-            top: Int,
-            baseline: Int,
-            bottom: Int,
-            text: CharSequence,
-            start: Int,
-            end: Int,
-            lineNumber: Int,
-        ) {
-            // `end` 是**含终止换行**的行尾（`Layout.getLineEnd(line, visibleEnd = false)`），
-            // 所以"这一行是不是整段的最后一行"用 end >= paragraphEnd 判定。
-            // 加内边距、画竖条、减段距都在 `drawBox` 里统一处理（两处共用同一套几何）。
-            style.drawBox(
-                canvas = canvas,
-                paint = boxPaint,
-                path = path,
-                radii = radii,
-                left = 0f,
-                top = top.toFloat(),
-                right = containerWidthPx.toFloat(),
-                bottom = bottom.toFloat(),
-                first = start <= paragraphStart,
-                last = end >= paragraphEnd,
-                // 文末最后一段没有那 8dp（`applyHeight` 不再给文末加），这里也就不能减
-                bakedSpacingPx = if (paragraphEnd >= text.length) 0 else style.paragraphSpacingPx,
-            )
-        }
-    }
-
     private fun applyInlineSpans(builder: SpannableStringBuilder, start: Int, end: Int, run: com.cov.justdiary.model.TextRun) {        if (end <= start) return
         val flag = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         val style = when {
@@ -754,6 +754,10 @@ object SpannableBridge {
      *  - 行首的 `• ` / `☐ ` / `☑ ` 前缀决定标记与勾选状态；
      *  - 块样式优先读 [BlockStyleSpan]；**没有字号推断这条兜底路径**；
      *  - 行内样式按 span 的实际覆盖区间切 run，并且**只记录开启的项**。
+     *
+     * 唯一的例外是**补位换行**（[PhantomLineSpan]）：末尾空引用行为了能挂段落样式而多出来的
+     * 那个空段落不属于模型，这里按标记把它丢掉（标记必须正好落在文本末端才算数 ——
+     * 编辑过程中零长度 span 可能被留在别处，那种情况一律不当补位行）。
      */
     fun fromSpannable(text: Spanned): List<EditorLine> {
         if (text.isEmpty()) return listOf(EditorModel.EMPTY_LINE)
@@ -763,6 +767,9 @@ object SpannableBridge {
         while (lineStart <= text.length) {
             var lineEnd = lineStart
             while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd++
+            if (lineStart == lineEnd && lineStart == text.length && isPhantomLine(text)) {
+                break
+            }
             // **空行必须保留**：它是"光标所在的那一段"。
             // 以前这里丢掉空行，于是按回车后新行在模型里根本不存在 —— 工具栏会把操作
             // 落到**上一行**（真机缺陷）。落库时空白行由 `linesToParts` 丢弃，两者不冲突。
@@ -772,6 +779,64 @@ object SpannableBridge {
         }
         if (lines.isEmpty()) lines.add(EditorModel.EMPTY_LINE)
         return lines
+    }
+
+    /** 文本末端那个空段落是不是**补位行**（[PhantomLineSpan]，见 [toSpannable]）。 */
+    fun isPhantomLine(text: Spanned): Boolean {
+        if (text.isEmpty()) return false
+        val end = text.length
+        return text.getSpans(end, end, PhantomLineSpan::class.java)
+            .any { text.getSpanStart(it) == end && text.getSpanEnd(it) == end }
+    }
+
+    /**
+     * 段落 span 用到的全部类型（[hasLeakedParagraphSpan] 逐个查；补位行标记不算段落样式）。
+     */
+    private val ParagraphSpanKinds: List<Class<*>> = listOf(
+        BlockStyleSpan::class.java,
+        BlockMetricsSpan::class.java,
+        android.text.style.AlignmentSpan::class.java,
+        android.text.style.LeadingMarginSpan::class.java,
+    )
+
+    /**
+     * 平台文本里有没有**被新插入的换行漏过去**的段落 span。
+     *
+     * ## 什么时候会漏
+     *
+     * 段落 span 的起点是**包含**的（[ParagraphSpanFlags]，否则在行首打的字会掉出这一段）。
+     * 于是把光标放在某一行行首敲回车时，新插入的 `\n` 落进了 span 里面：段落字号 / 对齐 /
+     * 引用内缩 / 列表缩进一起"漏"到了上面那个**空行**上（Robolectric 实测：引用 `[0,2)`、
+     * 大标题 `[0,2)`、列表缩进 `[0,4)`，都把空行连同下一段一起盖住）。
+     *
+     * 模型侧的样式归属由 `EditorModel.repairSplitAtParagraphStart` 纠正；平台的 span 只能靠
+     * **回写一次**（`EditorTextState.revision`）清掉 —— 这个判据就是"该不该回写"。
+     *
+     * 判据：某个段落 span 的**起点正好落在一条空行的行首**，但终点越过了这条空行的终止换行
+     * （也就是它同时盖住了下一段）。正常的段落 span 一定止于自己那一段的终止换行，因此不会误报
+     * （[toSpannable] 造出来的文本永远不满足这个条件，回写一次之后就不再成立）。
+     */
+    fun hasLeakedParagraphSpan(text: Spanned): Boolean {
+        if (text.isEmpty()) return false
+        var lineStart = 0
+        while (lineStart <= text.length) {
+            var lineEnd = lineStart
+            while (lineEnd < text.length && text[lineEnd] != '\n') lineEnd++
+            // 只看**空行**（有文字的行不受影响：它的样式归属本来就看行首有没有 span）
+            if (lineEnd == lineStart && lineEnd < text.length) {
+                val paragraphEnd = lineEnd + 1
+                val queryEnd = (lineStart + 1).coerceAtMost(text.length)
+                for (kind in ParagraphSpanKinds) {
+                    val leaked = text.getSpans(lineStart, queryEnd, kind).any {
+                        text.getSpanStart(it) == lineStart && text.getSpanEnd(it) > paragraphEnd
+                    }
+                    if (leaked) return true
+                }
+            }
+            lineStart = lineEnd + 1
+            if (lineEnd >= text.length) break
+        }
+        return false
     }
 
     private fun parseLine(text: Spanned, start: Int, end: Int): EditorLine {

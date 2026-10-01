@@ -533,4 +533,107 @@ class EditorStateTest {
         // 末尾一行**有内容**时不需要视图级兜底：那一行自己有 span
         assertEquals(null, SpannableBridge.tailDefaults(listOf(EditorLine(text = "有内容")), metrics))
     }
+
+    // -------------------------------------------------- 行首回车：段落 span 会"漏"到上面那个空行
+
+    /**
+     * 平台把新插入的换行**并进段落 span**（起点包含是必须的，否则行首打的字会掉出这一段），
+     * 于是在行首敲回车会让上面那个空行也带上下一段的字号 / 对齐 / 引用内缩 / 列表缩进。
+     *
+     * 这个判据是"要不要按模型回写一次"的依据（`EditorTextState.onUserText` ⑤）。
+     */
+    @Test
+    fun `a paragraph span leaked over an inserted newline is detected`() {
+        val markerStyle = SpannableBridge.MarkerStyle(
+            indentPx = 28, centerXPx = 9f, bulletDiameterPx = 8f,
+            checkboxSizePx = 18f, checkboxRadiusPx = 2f, checkboxBorderPx = 2f,
+            outlineColor = 0, fillColor = 0, checkColor = 0, doneTextColor = 0,
+        )
+        val metrics = { _: String -> SpannableBridge.BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0) }
+        val quoteStyle = SpannableBridge.QuoteStyle(
+            backgroundColor = 0, cornerRadiusPx = 4f, textInsetPx = 48, paddingVerticalPx = 6,
+        )
+
+        // 干净文本：一个都不该报（否则每次打字都会触发整篇回写）
+        val clean = listOf(
+            SpannableBridge.toSpannable(
+                listOf(EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)),
+                metricsFor = metrics, quoteStyle = quoteStyle,
+            ),
+            SpannableBridge.toSpannable(
+                listOf(EditorLine(text = "条目", marker = EditorLine.MarkerKind.Bullet)),
+                metricsFor = metrics, markerStyle = markerStyle,
+            ),
+            SpannableBridge.toSpannable(
+                listOf(EditorLine(text = "大标题", blockStyle = ContentPartStyle.title)), metricsFor = metrics,
+            ),
+        )
+        for (sb in clean) {
+            assertFalse("造出来的文本不该有漏出去的段落 span", SpannableBridge.hasLeakedParagraphSpan(sb))
+        }
+
+        // 行首回车：三种格式都会漏
+        val quoted = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "Q", blockStyle = ContentPartStyle.quote)),
+            metricsFor = metrics, quoteStyle = quoteStyle,
+        ).also { it.insert(0, "\n") }
+        assertTrue("引用：内缩漏到了上面的空行", SpannableBridge.hasLeakedParagraphSpan(quoted))
+
+        val listed = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "L", marker = EditorLine.MarkerKind.Bullet)),
+            metricsFor = metrics, markerStyle = markerStyle,
+        ).also { it.insert(0, "\n") }
+        assertTrue("列表：标记缩进漏到了上面的空行", SpannableBridge.hasLeakedParagraphSpan(listed))
+
+        val titled = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "T", blockStyle = ContentPartStyle.title)), metricsFor = metrics,
+        ).also { it.insert(0, "\n") }
+        assertTrue("大标题：字号漏到了上面的空行", SpannableBridge.hasLeakedParagraphSpan(titled))
+
+        // 行尾插入换行不会漏
+        val atEnd = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "Q", blockStyle = ContentPartStyle.quote)),
+            metricsFor = metrics, quoteStyle = quoteStyle,
+        ).also { it.insert(it.length, "\n") }
+        assertFalse("行尾回车不该算漏", SpannableBridge.hasLeakedParagraphSpan(atEnd))
+    }
+
+    /**
+     * 用户在**引用段前**回车（光标在引用行行首）：上面那个空行**不能**是引用
+     * （用户 2026-10-01："理论上没有引用的空行"），而引用文字那一行要把引用接回来。
+     *
+     * 这一条走完整的输入链路：平台文本 → 状态机（模型纠正 + 请求回写）。
+     */
+    @Test
+    fun `enter at the start of a quote line leaves a body blank line and keeps the quote`() {
+        val state = state(EditorLine(text = "Q", blockStyle = ContentPartStyle.quote))
+        state.onSelectionChanged(EditorSelection(0, 0, 0))
+        val text = SpannableStringBuilder(SpannableBridge.toSpannable(state.lines))
+        val before = state.revision
+
+        state.typeAt(text, at = 0, insert = "\n")
+
+        assertEquals(
+            "空行给正文、引用文字那一行接回引用",
+            listOf("" to ContentPartStyle.body, "Q" to ContentPartStyle.quote),
+            state.lines.map { it.text to it.blockStyle },
+        )
+        assertTrue("平台 span 漏了 → 必须按模型回写一次", state.revision > before)
+    }
+
+    /** 大标题：行首回车之后两条都还是大标题（规则 3 的"回车之后也不取消格式"）。 */
+    @Test
+    fun `enter at the start of a title line keeps the title on both lines`() {
+        val state = state(EditorLine(text = "T", blockStyle = ContentPartStyle.title))
+        state.onSelectionChanged(EditorSelection(0, 0, 0))
+        val text = SpannableStringBuilder(SpannableBridge.toSpannable(state.lines))
+
+        state.typeAt(text, at = 0, insert = "\n")
+
+        assertEquals(
+            "标题延续在两条上（空行也还是标题）",
+            listOf("" to ContentPartStyle.title, "T" to ContentPartStyle.title),
+            state.lines.map { it.text to it.blockStyle },
+        )
+    }
 }

@@ -53,12 +53,14 @@ class EditorCursorLayoutTest {
         lines: List<EditorLine>,
         width: Int = 3000,
         metricsOverride: SpannableBridge.BlockMetrics? = null,
+        quoteStyle: SpannableBridge.QuoteStyle? = null,
     ): StaticLayout {
         val spanned = SpannableBridge.toSpannable(
             lines,
             imageProvider = null,
             containerWidthPx = width,
             metricsFor = { metricsOverride ?: metrics(it) },
+            quoteStyle = quoteStyle,
         )
         val tail = SpannableBridge.tailDefaults(lines, ::metrics)
         val paint = TextPaint().apply { textSize = (tail?.textSizePx ?: body.textSizePx).toFloat() }
@@ -184,5 +186,71 @@ class EditorCursorLayoutTest {
         val layout = layoutOf(lines)
         assertEquals("第一段仍然左对齐", 0f, layout.getPrimaryHorizontal(0), 1f)
         assertEquals("末尾空行居中", layout.width / 2f, layout.getPrimaryHorizontal(layout.text.length), 1f)
+    }
+
+    // ------------------------------------------------------------------ 引用段的**光标 x**（用户 2026-10-01 报的"光标位置不对"）
+
+    private val inset = 48
+    private val quoteStyle = SpannableBridge.QuoteStyle(
+        backgroundColor = 0,
+        cornerRadiusPx = 0f,
+        textInsetPx = inset,
+        paddingVerticalPx = 0,
+    )
+
+    /** 光标在 (行, 行内偏移) 处的 x —— 平台的 `Editor.updateCursorPosition` 取的就是这个值。 */
+    private fun caretX(layout: StaticLayout, lines: List<EditorLine>, line: Int, offset: Int): Float =
+        layout.getPrimaryHorizontal(EditorSelectionMap.flatOffset(lines, line, offset))
+
+    /**
+     * **空的引用行**也要把光标放在引用的文字起点上。
+     *
+     * 平台对"文档末尾那个空段落"是不认段落 span 的
+     * （`Layout.getParagraphSpans`：`start == end && start > 0` 直接返回空数组，`text/Layout.java:3489`），
+     * 所以文档里有别的行时，末尾那个空的引用行必须补一个终止换行（[SpannableBridge.PhantomLineSpan]）
+     * 才挂得上 `LeadingMarginSpan` —— 真机实测：不补就是 x=77（列最左边），补了才是 120（内缩处）。
+     */
+    @Test
+    fun `an empty trailing quote line keeps the caret at the quote inset`() {
+        val lines = listOf(EditorLine(text = "上一行"), EditorLine(text = "", blockStyle = ContentPartStyle.quote))
+        val layout = layoutOf(lines, quoteStyle = quoteStyle)
+        assertEquals(
+            "末尾的空引用行：光标要落在内缩处",
+            inset.toFloat(),
+            caretX(layout, lines, 1, 0),
+            1f,
+        )
+
+        // 对照：末尾是空的**正文**行时不能有内缩（光标贴列左边）
+        val bodyTail = listOf(EditorLine(text = "上一行"), EditorLine(text = ""))
+        val bodyLayout = layoutOf(bodyTail, quoteStyle = quoteStyle)
+        assertEquals("末尾的空正文行：光标贴列左边", 0f, caretX(bodyLayout, bodyTail, 1, 0), 1f)
+    }
+
+    /**
+     * **不同格式混排**时每一行的光标都要落在**这一行自己的**文字起点上
+     * （用户 2026-10-01："特别是你注意不同格式混合的时候，光标位置的异常"）。
+     *
+     * 一行一段、段段不同（引用 / 正文 / 空的引用行 / 列表），逐行量光标的 x。
+     */
+    @Test
+    fun `every line in a mixed format document puts the caret on its own text start`() {
+        val lines = listOf(
+            EditorLine(text = "引用", blockStyle = ContentPartStyle.quote),
+            EditorLine(text = "正文"),
+            EditorLine(text = "", blockStyle = ContentPartStyle.quote),
+            EditorLine(text = "条目", marker = EditorLine.MarkerKind.Bullet),
+        )
+        val layout = layoutOf(lines, quoteStyle = quoteStyle)
+
+        assertEquals("第 1 行是引用 → 内缩处", inset.toFloat(), caretX(layout, lines, 0, 0), 1f)
+        assertEquals("第 2 行是正文 → 列左边", 0f, caretX(layout, lines, 1, 0), 1f)
+        assertEquals("第 3 行是空的引用行 → 内缩处", inset.toFloat(), caretX(layout, lines, 2, 0), 1f)
+        // 列表：标记槽的宽度来自 MarkerStyle，这里不给 markerStyle → 标记是两个字面字符，
+        // 光标在"条目"之后 = 标记 + 文字宽度，只要 > 0 就说明没有被引用段的边距串味
+        assertTrue(
+            "第 4 行是列表 → 光标在标记 + 文字之后（实际 ${caretX(layout, lines, 3, 2)}）",
+            caretX(layout, lines, 3, 2) > caretX(layout, lines, 1, 0),
+        )
     }
 }

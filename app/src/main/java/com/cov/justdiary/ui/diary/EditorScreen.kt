@@ -537,8 +537,9 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
  * `surfaceContainerHigh` 底 + 4dp 圆角 + 上下 6dp + 左侧 4dp 竖条 + 文字内缩 16dp。
  *
  * 编辑态以前只挂了块样式 span，点「引用」时正文外观**逐像素不变**（R30 记的 F1）——
- * 而阅读态与 iOS 编辑态都是有底的。这里用平台的 `LineBackgroundSpan` 补上（官方做法，
- * 见 [SpannableBridge.QuoteStyle]）。
+ * 而阅读态与 iOS 编辑态都是有底的。这里把这套几何交给 `DiaryEditText.onDraw` 画
+ * （**不能**用 `LineBackgroundSpan`：平台先画光标、再画行背景 span，底会把光标盖住，
+ * 见 [SpannableBridge.QuoteStyle] 与 R33 的记录）。
  */
 @Composable
 private fun rememberQuoteStyle(): SpannableBridge.QuoteStyle {

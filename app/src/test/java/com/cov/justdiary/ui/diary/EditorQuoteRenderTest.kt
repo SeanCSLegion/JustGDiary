@@ -3,27 +3,33 @@ package com.cov.justdiary.ui.diary
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.text.StaticLayout
-import android.text.TextPaint
+import android.text.Spanned
+import android.util.TypedValue
+import android.view.View
 import com.cov.justdiary.model.ContentPartStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
  * 引用段**画出来**长什么样（R30 记的 F1：编辑态点「引用」正文外观逐像素不变）。
  *
- * 这一条只能看像素，所以测试真的**把 `StaticLayout` 画进 `Bitmap` 再探针**：
- * Robolectric 的 native graphics 走的是真的 Skia，画出来的就是设备上看到的东西。
- * 探的是三件事：
+ * 这一条只能看像素，所以测试真的**把真实的 `DiaryEditText` 画进 `Bitmap` 再探针**
+ * （Robolectric 的 native graphics 走的是真的 Skia，画出来的就是设备上看到的东西）。
+ * 探的是四件事：
  *
  * 1. **有没有底**：引用行中间那块像素必须是底色，正文行的同一位置必须是白的；
  * 2. **纵向内边距**：行框上下各多出 6dp 的底，再往外就是白的；
- * 3. **多行是一个整块**：折行的引用在行与行之间**不留缝**（中间行不重复扩边）。
+ * 3. **多行是一个整块**：折行的引用在行与行之间**不留缝**（中间行不重复扩边）；
+ * 4. **底不能盖住光标**：底画在 `super.onDraw` 之前、文本里一个 `LineBackgroundSpan` 都没有
+ *    —— 平台的 `Editor` 是"先画光标、再画行背景 span"（`Editor.java:2143-2154`），
+ *    底挂在 span 上就会把光标整个盖住（真机实测：引用段里打上字之后，
+ *    光标在 8 张连拍里一张都找不到，而正文 / 大标题行同样的操作 3/8 张能找到）。
  *
  * 另外钉住"横向内边距是左侧缩进"这个平台限制（`Spannable` 没有右边距 span，见
  * [SpannableBridge.QuoteStyle] 的说明）。
@@ -43,104 +49,114 @@ class EditorQuoteRenderTest {
     private val metrics = SpannableBridge.BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0)
 
     private val width = 400
+    private val height = 600
 
-    private fun layoutOf(lines: List<EditorLine>): StaticLayout {
-        val spanned = SpannableBridge.toSpannable(
-            lines,
-            imageProvider = null,
-            containerWidthPx = width,
-            metricsFor = { metrics },
-            quoteStyle = style,
-        )
-        val paint = TextPaint().apply { textSize = metrics.textSizePx.toFloat() }
-        return StaticLayout.Builder.obtain(spanned, 0, spanned.length, paint, width).build()
+    /** 画好的视图与它的位图（探针用视图坐标 = 位图坐标）。 */
+    private class Rendered(val view: DiaryEditText, val bitmap: Bitmap) {
+        val layout get() = view.layout
+        fun pixel(x: Int, y: Int) = bitmap.getPixel(x, y)
+
+        /** layout 坐标 → 视图坐标：视图上内边距就是引用底的纵向内边距。 */
+        fun v(y: Int) = y + view.extendedPaddingTop
+        fun mid(line: Int) = (layout.getLineTop(line) + layout.getLineBottom(line)) / 2
     }
 
     /**
-     * 把 layout 画进 Bitmap —— **按 EditText 的真实画法**：视图上下各留出
-     * [SpannableBridge.QuoteStyle.paddingVerticalPx] 的内边距，引用底的上下 6dp 才有地方画
-     * （`EditorTextArea` 里就是 `setPadding(0, padV, 0, padV)`，否则第一行的引用底会被视图上沿裁掉）。
+     * 按 `EditorTextArea` 的真实接法建视图并画进 Bitmap：
+     * 文本 → `SpannableBridge.toSpannable`，引用样式 → 视图级字段，末尾空行的字号 → 视图级 `textSize`。
      */
-    private fun render(layout: StaticLayout): Bitmap {
-        val pad = style.paddingVerticalPx
-        val bitmap = Bitmap.createBitmap(width, layout.height + pad * 2, Bitmap.Config.ARGB_8888)
+    private fun render(
+        lines: List<EditorLine>,
+        quoteStyle: SpannableBridge.QuoteStyle? = style,
+        metricsFor: ((String) -> SpannableBridge.BlockMetrics?)? = { metrics },
+    ): Rendered {
+        val view = DiaryEditText(RuntimeEnvironment.getApplication())
+        view.quoteStyle = quoteStyle
+        view.tailQuote = SpannableBridge.tailQuoteStyle(lines, quoteStyle) != null
+        view.setPadding(0, style.paddingVerticalPx, 0, style.paddingVerticalPx)
+        view.setText(
+            SpannableBridge.toSpannable(
+                lines,
+                imageProvider = null,
+                containerWidthPx = width,
+                metricsFor = metricsFor,
+                quoteStyle = quoteStyle,
+            ),
+        )
+        // 末尾空行（一个字符都没有）的字号只能走视图级 —— 与 `EditorTextArea.update` 同一条规则
+        SpannableBridge.tailDefaults(lines, metricsFor)?.let {
+            view.setTextSize(TypedValue.COMPLEX_UNIT_PX, it.textSizePx.toFloat())
+        }
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+        )
+        view.layout(0, 0, width, height)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
-        canvas.translate(0f, pad.toFloat())
-        layout.draw(canvas)
-        return bitmap
+        view.draw(canvas)
+        return Rendered(view, bitmap)
     }
-
-    /** 探针坐标：bitmap 坐标（= 视图坐标）。 */
-    private fun pixel(bitmap: Bitmap, x: Int, y: Int) = bitmap.getPixel(x, y)
-
-    /** layout 坐标 → bitmap 坐标。 */
-    private fun v(y: Int) = y + style.paddingVerticalPx
 
     private fun isBox(color: Int) =
         Color.red(color) > 150 && Color.green(color) < 120 && Color.blue(color) < 120
 
     @Test
     fun `a quote paragraph gets a background box and a body paragraph does not`() {
-        val layout = layoutOf(listOf(EditorLine(text = "bbbb"), EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)))
-        val bitmap = render(layout)
+        val r = render(listOf(EditorLine(text = "bbbb"), EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)))
 
         // 正文那一行：同一列必须是白的（没有底）
-        assertTrue("正文行不该有底", !isBox(pixel(bitmap, width / 2, v(layout.getLineTop(0) + 4))))
+        assertTrue("正文行不该有底", !isBox(r.pixel(width / 2, r.v(r.layout.getLineTop(0) + 4))))
 
         // 引用那一行：行的正中间必须是底色
-        val quoteLine = layout.getLineForOffset(layout.getLineStart(1) + 1)
-        val quoteMid = (layout.getLineTop(quoteLine) + layout.getLineBottom(quoteLine)) / 2
+        val quoteLine = r.layout.getLineForOffset(r.layout.getLineStart(1) + 1)
         assertTrue(
-            "引用行该有底（实际 ${Integer.toHexString(pixel(bitmap, width / 2, v(quoteMid)))}）",
-            isBox(pixel(bitmap, width / 2, v(quoteMid))),
+            "引用行该有底（实际 ${Integer.toHexString(r.pixel(width / 2, r.v(r.mid(quoteLine))))}）",
+            isBox(r.pixel(width / 2, r.v(r.mid(quoteLine)))),
         )
     }
 
     @Test
     fun `the box extends six pixels above and below the quote line and then stops`() {
-        val layout = layoutOf(listOf(EditorLine(text = "bbbb"), EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)))
-        val bitmap = render(layout)
-        val line = layout.getLineForOffset(layout.getLineStart(1))
-        val top = layout.getLineTop(line)
-        val bottom = layout.getLineBottom(line, /* includeLineSpacing = */ false)
+        val r = render(listOf(EditorLine(text = "bbbb"), EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)))
+        val line = r.layout.getLineForOffset(r.layout.getLineStart(1))
+        val top = r.layout.getLineTop(line)
+        val bottom = r.layout.getLineBottom(line, /* includeLineSpacing = */ false)
 
-        assertTrue("行框里侧 2px 处是底", isBox(pixel(bitmap, width / 2, v(top + 2))))
-        assertTrue("行框上方 3px（在 6px 内边距里）还是底", isBox(pixel(bitmap, width / 2, v(top - 3))))
-        assertTrue("行框下方 3px 还是底", isBox(pixel(bitmap, width / 2, v(bottom + 3))))
-        // 再往外（>6px）应当是白的。探上方：引用是文档最后一行时，下方已经在 bitmap 之外了
-        assertTrue("上方再往外（>6px）应当是白的", !isBox(pixel(bitmap, width / 2, v(top - 9))))
+        assertTrue("行框里侧 2px 处是底", isBox(r.pixel(width / 2, r.v(top + 2))))
+        assertTrue("行框上方 3px（在 6px 内边距里）还是底", isBox(r.pixel(width / 2, r.v(top - 3))))
+        assertTrue("行框下方 3px 还是底", isBox(r.pixel(width / 2, r.v(bottom + 3))))
+        // 再往外（>6px）应当是白的
+        assertTrue("上方再往外（>6px）应当是白的", !isBox(r.pixel(width / 2, r.v(top - 9))))
     }
 
     @Test
     fun `a wrapped quote is one continuous box with rounded outer corners only`() {
         val long = "引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用引用"
-        val layout = layoutOf(listOf(EditorLine(text = long, blockStyle = ContentPartStyle.quote)))
-        assertTrue("这一段应当折成多行（实际 ${layout.lineCount} 行）", layout.lineCount >= 2)
-        val bitmap = render(layout)
+        val r = render(listOf(EditorLine(text = long, blockStyle = ContentPartStyle.quote)))
+        assertTrue("这一段应当折成多行（实际 ${r.layout.lineCount} 行）", r.layout.lineCount >= 2)
 
         // 行与行之间不能有白缝
-        val firstBottom = layout.getLineBottom(0, /* includeLineSpacing = */ false)
+        val firstBottom = r.layout.getLineBottom(0, /* includeLineSpacing = */ false)
         for (y in (firstBottom - 2)..(firstBottom + 2)) {
-            assertTrue("折行处第 $y 行像素断了", isBox(pixel(bitmap, width / 2, v(y))))
+            assertTrue("折行处第 $y 行像素断了", isBox(r.pixel(width / 2, r.v(y))))
         }
         // 整块底**上沿**是圆的：底的最上一行像素里，最左那一点不该是实心（被圆角切掉）
-        val boxTop = v(layout.getLineTop(0) - style.paddingVerticalPx)
-        assertTrue("上沿正中是底的实心", isBox(pixel(bitmap, width / 2, boxTop + 1)))
-        assertTrue("左上角要圆掉", !isBox(pixel(bitmap, 0, boxTop)))
+        val boxTop = r.v(r.layout.getLineTop(0) - style.paddingVerticalPx)
+        assertTrue("上沿正中是底的实心", isBox(r.pixel(width / 2, boxTop + 1)))
+        assertTrue("左上角要圆掉", !isBox(r.pixel(0, boxTop)))
     }
 
     @Test
     fun `the quote text is inset from the left by the horizontal padding`() {
-        val layout = layoutOf(listOf(EditorLine(text = "MMMM", blockStyle = ContentPartStyle.quote)))
-        val bitmap = render(layout)
-        val line = layout.getLineForOffset(0)
-        val band = ((layout.getLineTop(line) + layout.getLineBottom(line)) / 2)
+        val r = render(listOf(EditorLine(text = "MMMM", blockStyle = ContentPartStyle.quote)))
+        val band = r.mid(0)
 
         // 找这一行里第一个"既不是底、也不是白"的像素 —— 那就是文字
         var firstText = -1
         for (x in 0 until width) {
-            val c = pixel(bitmap, x, v(band))
+            val c = r.pixel(x, r.v(band))
             if (!isBox(c) && c != Color.WHITE) {
                 firstText = x
                 break
@@ -148,8 +164,29 @@ class EditorQuoteRenderTest {
         }
         assertTrue("引用行里应当找得到文字像素", firstText >= 0)
         assertTrue(
-            "文字要从 $style.textInsetPx px 之后开始（实际 $firstText）",
+            "文字要从 ${style.textInsetPx} px 之后开始（实际 $firstText）",
             firstText >= style.textInsetPx,
+        )
+    }
+
+    /**
+     * 文本层里**不能**再有 `LineBackgroundSpan`：平台先画光标、再画行背景 span
+     * （`Editor.onDraw` → `drawCursor` 在前、`drawLayout` 在后），底挂在 span 上就等于
+     * 把光标盖掉 —— 引用段里打上字之后光标就再也看不见了（用户 2026-10-01 报的"光标位置不对"）。
+     */
+    @Test
+    fun `no line background span is set so the box can never cover the cursor`() {
+        val spanned = SpannableBridge.toSpannable(
+            listOf(EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)),
+            imageProvider = null,
+            containerWidthPx = width,
+            metricsFor = { metrics },
+            quoteStyle = style,
+        )
+        assertEquals(
+            "引用底必须由视图自己画（画在光标之下），不能挂在文本层",
+            0,
+            spanned.getSpans(0, spanned.length, android.text.style.LineBackgroundSpan::class.java).size,
         )
     }
 
@@ -157,124 +194,105 @@ class EditorQuoteRenderTest {
      * 末尾那个**空的引用行**也要有行首内缩 —— 否则光标停在列的最左边
      * （用户 2026-10-01 报的"引用时光标位置不对"），一打字又往右跳 16dp。
      *
-     * 手法是给那个**位置**挂一个零长度的 `LeadingMarginSpan`（空行没有字符可挂 span）。
-     * 这里断言 span 真的挂上了、长度为零、边距就是引用的内缩。
+     * 手法：模型有两行以上时给它补一个终止换行（[SpannableBridge.PhantomLineSpan]），
+     * 它因此是一段"有字符的段落"，`LeadingMarginSpan` 照常生效。
      */
     @Test
-    fun `an empty trailing quote line gets a zero length leading margin for the caret`() {
+    fun `an empty trailing quote line carries the leading margin and a phantom terminator`() {
+        val lines = listOf(EditorLine(text = "上一行"), EditorLine(text = "", blockStyle = ContentPartStyle.quote))
         val spanned = SpannableBridge.toSpannable(
-            listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote)),
+            lines,
             imageProvider = null,
             containerWidthPx = width,
             metricsFor = { null },
             quoteStyle = style,
         )
+        // 补位换行：文本比模型多一个空段落，靠标记认出来
+        assertEquals("补位换行要在文本末端留下标记", "上一行\n\n", spanned.toString())
+
         val margins = spanned.getSpans(0, spanned.length, android.text.style.LeadingMarginSpan::class.java)
         assertEquals("空引用行上应当正好有一个行首内缩 span", 1, margins.size)
         val span = margins.first()
-        assertEquals("span 必须是零长度（空行没有字符）", 0, spanned.getSpanEnd(span) - spanned.getSpanStart(span))
+        assertEquals(
+            "内缩 span 要挂在那一段上（零长度在 start>0 时平台不认，见 Layout.getParagraphSpans）",
+            1,
+            spanned.getSpanEnd(span) - spanned.getSpanStart(span),
+        )
         assertEquals("内缩值 = 引用的文字内缩", style.textInsetPx, span.getLeadingMargin(true))
+        // 解析回来还是两行（补位行被丢掉，模型不多也不少；行内 run 会被规范化，只比文本与样式）
+        assertEquals(
+            listOf("上一行" to ContentPartStyle.body, "" to ContentPartStyle.quote),
+            SpannableBridge.fromSpannable(spanned).map { it.text to it.blockStyle },
+        )
 
-        // 非引用 / 有字符的末尾行都不该多挂这一个（有字符时段落 span 自带内缩）
+        // 正文的末尾空行不该多挂这一个（它不需要内缩）
         val body = SpannableBridge.toSpannable(
-            listOf(EditorLine(text = "")),
+            listOf(EditorLine(text = "上一行"), EditorLine(text = "")),
             imageProvider = null,
             containerWidthPx = width,
             metricsFor = { null },
             quoteStyle = style,
         )
-        assertEquals("空的正文行不该有内缩", 0, body.getSpans(0, body.length, android.text.style.LeadingMarginSpan::class.java).size)
+        assertEquals("正文的末尾空行不该有内缩", 0, body.getSpans(0, body.length, android.text.style.LeadingMarginSpan::class.java).size)
+        assertEquals("上一行\n", body.toString())
+    }
+
+    /** 空文档（模型只有一行）上点「引用」：走零长度 span 那条老路，提示语也得还在。 */
+    @Test
+    fun `a single empty quote line keeps the empty text so the placeholder survives`() {
+        val lines = listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote))
+        val spanned = SpannableBridge.toSpannable(
+            lines,
+            imageProvider = null,
+            containerWidthPx = width,
+            metricsFor = { null },
+            quoteStyle = style,
+        )
+        assertEquals("文本必须还是空的（否则提示语不显示）", "", spanned.toString())
+        val margins = spanned.getSpans(0, spanned.length, android.text.style.LeadingMarginSpan::class.java)
+        assertEquals("空文档上的空引用行靠零长度 span 撑内缩", 1, margins.size)
+        assertEquals(0, spanned.getSpanEnd(margins.first()) - spanned.getSpanStart(margins.first()))
+        assertEquals(style.textInsetPx, margins.first().getLeadingMargin(true))
+        // 空文本解析回来只剩"一个空行"（空文本本来就没有字符可挂 span，样式靠 keepStylesForBlankLines 续）
+        assertEquals(listOf(""), SpannableBridge.fromSpannable(spanned).map { it.text })
     }
 
     @Test
     fun `without a quote style nothing is drawn`() {
-        val spanned = SpannableBridge.toSpannable(
+        val r = render(
             listOf(EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)),
-            imageProvider = null,
-            containerWidthPx = width,
-            metricsFor = { metrics },
             quoteStyle = null,
         )
-        val paint = TextPaint().apply { textSize = metrics.textSizePx.toFloat() }
-        val layout = StaticLayout.Builder.obtain(spanned, 0, spanned.length, paint, width).build()
-        val bitmap = render(layout)
-
-        val mid = (layout.getLineTop(0) + layout.getLineBottom(0)) / 2
-        assertEquals("没给引用样式时一个底都不该画", Color.WHITE, pixel(bitmap, width / 2, mid))
+        assertEquals("没给引用样式时一个底都不该画", Color.WHITE, r.pixel(width / 2, r.v(r.mid(0))))
     }
 
     /**
-     * **末尾空行**的引用底：那一行一个字符都没有，`QuoteBackgroundSpan` 挂不上，
-     * 由 `DiaryEditText.onDraw` 自己画（F1 里用户最容易撞上的那一幕：在空行上点「引用」）。
-     * 这里直接驱动真实 `EditText`：量好 → 布局 → 画进 Bitmap → 探针。
+     * **空文档**上点「引用」：那一行一个字符都没有，段落 span 挂不上，
+     * 由 `DiaryEditText.onDraw` 自己画（F1 里用户最容易撞上的那一幕）。
      */
     @Test
-    fun `an empty trailing quote line is painted by the view itself`() {
-        val context = org.robolectric.RuntimeEnvironment.getApplication()
-        val view = DiaryEditText(context)
-        val tail = EditorLine(text = "", blockStyle = ContentPartStyle.quote)
-        view.tailQuoteStyle = style
-        view.setPadding(0, style.paddingVerticalPx, 0, style.paddingVerticalPx)
-        view.setText(
-            SpannableBridge.toSpannable(
-                listOf(tail),
-                imageProvider = null,
-                containerWidthPx = width,
-                metricsFor = { metrics },
-                quoteStyle = style,
-            ),
-        )
-
-        view.measure(
-            android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),
-            android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY),
-        )
-        view.layout(0, 0, width, 400)
-
-        val bitmap = Bitmap.createBitmap(width, 400, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
-        view.draw(canvas)
+    fun `an empty single quote line is painted by the view itself`() {
+        val r = render(listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote)))
+        assertTrue("tailQuote 要打开（模型只有一行）", r.view.tailQuote)
 
         assertTrue(
-            "末尾空行的引用底要画出来（视图级兜底），实际 ${Integer.toHexString(pixel(bitmap, width / 2, 30))}",
-            isBox(pixel(bitmap, width / 2, 30)),
+            "末尾空行的引用底要画出来（视图级兜底），实际 ${Integer.toHexString(r.pixel(width / 2, 30))}",
+            isBox(r.pixel(width / 2, 30)),
         )
-        assertTrue("底只在顶部那条带里，下方仍是白的", !isBox(pixel(bitmap, width / 2, 300)))
+        assertTrue("底只在顶部那条带里，下方仍是白的", !isBox(r.pixel(width / 2, 300)))
     }
 
-    /** 末尾不是空的引用行时，视图一个像素都不该画（避免和 span 画两遍）。 */
+    /** 末尾不是空的引用行时，视图一个像素都不该画（避免和段落那一路画两遍）。 */
     @Test
     fun `the view paints nothing when the trailing line is not an empty quote`() {
-        val context = org.robolectric.RuntimeEnvironment.getApplication()
-        val view = DiaryEditText(context)
-        view.tailQuoteStyle = null
-        view.setText(
-            SpannableBridge.toSpannable(
-                listOf(EditorLine(text = "正文")),
-                imageProvider = null,
-                containerWidthPx = width,
-                metricsFor = { metrics },
-                quoteStyle = style,
-            ),
-        )
-        view.measure(
-            android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),
-            android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY),
-        )
-        view.layout(0, 0, width, 400)
-
-        val bitmap = Bitmap.createBitmap(width, 400, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
-        view.draw(canvas)
-
-        assertTrue("正文行不该有任何引用底", !isBox(pixel(bitmap, width / 2, 30)))
+        val r = render(listOf(EditorLine(text = "正文")))
+        assertTrue("tailQuote 要关着", !r.view.tailQuote)
+        assertTrue("正文行不该有任何引用底", !isBox(r.pixel(width / 2, 30)))
     }
 
     /**
      * 段后距**不能**算进引用底：它是烘进 `LineHeightSpan` 的 descent 里的，
-     * `drawBackground` 拿到的 `bottom` 含这一段，不减掉就会"引用底比文字多出一大截"，
+     * `getLineBottom` 拿到的值含这一段，不减掉就会"引用底比文字多出一大截"，
      * 看起来像把下一行也包进来了（用户 2026-09-28 实测："引用的作用范围现在也不对"）。
      *
      * 不去算具体的行高（各家字体的度量不一样），直接比**同一段内容在段后距 0 / 24 下的底高**：
@@ -284,22 +302,12 @@ class EditorQuoteRenderTest {
     fun `the paragraph spacing does not stretch the box`() {
         fun boxHeight(spacing: Int): Int {
             val quoteStyle = style.copy(paragraphSpacingPx = spacing)
-            val spanned = SpannableBridge.toSpannable(
+            val r = render(
                 listOf(EditorLine(text = "bbbb"), EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)),
-                imageProvider = null,
-                containerWidthPx = width,
-                metricsFor = { metrics.copy(paragraphSpacingPx = spacing) },
                 quoteStyle = quoteStyle,
+                metricsFor = { metrics.copy(paragraphSpacingPx = spacing) },
             )
-            val paint = TextPaint().apply { textSize = metrics.textSizePx.toFloat() }
-            val layout = StaticLayout.Builder.obtain(spanned, 0, spanned.length, paint, width).build()
-            val pad = quoteStyle.paddingVerticalPx
-            val bitmap = Bitmap.createBitmap(width, layout.height + pad * 2, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.drawColor(Color.WHITE)
-            canvas.translate(0f, pad.toFloat())
-            layout.draw(canvas)
-            val rows = (0 until bitmap.height).filter { isBox(pixel(bitmap, width / 2, it)) }
+            val rows = (0 until height).filter { isBox(r.pixel(width / 2, it)) }
             assertTrue("没画出引用底", rows.isNotEmpty())
             return rows.last() - rows.first() + 1
         }
@@ -307,5 +315,21 @@ class EditorQuoteRenderTest {
         val withoutSpacing = boxHeight(0)
         val withSpacing = boxHeight(24)
         assertEquals("段后距把引用底撑高了", withoutSpacing, withSpacing)
+    }
+
+    /** 补位换行里那个 `\n` 不能被解析成"多出来的一行"：往返之后模型一致。 */
+    @Test
+    fun `the phantom terminator never leaks into the parsed model`() {
+        val lines = listOf(
+            EditorLine(text = "正文"),
+            EditorLine(text = "引用", blockStyle = ContentPartStyle.quote),
+            EditorLine(text = "", blockStyle = ContentPartStyle.quote),
+        )
+        val spanned = SpannableBridge.toSpannable(lines, metricsFor = { metrics }, quoteStyle = style)
+        assertTrue("补位换行挂在文本末端", SpannableBridge.isPhantomLine(spanned as Spanned))
+        assertEquals(
+            lines.map { it.text to it.blockStyle },
+            SpannableBridge.fromSpannable(spanned).map { it.text to it.blockStyle },
+        )
     }
 }

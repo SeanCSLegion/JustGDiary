@@ -5,7 +5,7 @@
 > **当前状态：M0–M9 的代码工作已完成，并已在模拟器上实测通过一轮界面返工**
 > （详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)，
 > 界面规范见 [`docs/design-spec.md`](docs/design-spec.md)）。
-> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**580 个 JVM 单测**全绿，
+> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**594 个 JVM 单测**全绿，
 > 另有 2 个脚本做跨端与 SQL 的独立校验。首页已按 Material 3 重新设计并在
 > Pixel 10 Pro AVD 上验证（竖屏 / 横屏分栏 / 深色 / TalkBack 语义，
 > 证据见 `docs/design-spec.md` §8）。
@@ -89,7 +89,7 @@
 ```bash
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"   # 本机无系统 JDK
 
-./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 580 个 JVM 单测（含 15 个 Robolectric 类 / 133 条运行时用例）
+./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 594 个 JVM 单测（含 15 个 Robolectric 类 / 146 条运行时用例）
 
 # 两个独立校验脚本
 python3 tools/verify_sqlite_schema.py    # 从 Kotlin 源码抽出 DDL，用宿主 sqlite3 真跑一遍（18 条断言）

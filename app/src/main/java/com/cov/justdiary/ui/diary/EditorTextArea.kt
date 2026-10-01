@@ -94,7 +94,7 @@ fun EditorTextArea(
     // 所以这里的 gravity 只会影响末尾那一行。
     val tailMetrics = SpannableBridge.tailDefaults(state.lines, metricsFor)
     val tailCentered = SpannableBridge.tailCentered(state.lines)
-    // 末尾那行是"空的引用行"时，它没有字符可挂 `QuoteBackgroundSpan` —— 由 EditText 自己画
+    // 文档只有一行、且是"空的引用行"时，它没有字符可挂段落 span —— 由 EditText 自己画
     val tailQuote = SpannableBridge.tailQuoteStyle(state.lines, quoteStyle)
 
     // 提示语**永远是正文字号**（iOS 的 placeholder 用正文曲线画：`RichTextView.swift:69-77`），
@@ -139,7 +139,7 @@ fun EditorTextArea(
                     isSingleLine = false
                     background = null
                     // 上下各留出引用底的纵向内边距：引用段的圆角底要画到行框外 6dp
-                    // （`QuoteBackgroundSpan`），视图不留这点地方的话，**第一行**的引用底
+                    // （`DiaryEditText.onDraw`），视图不留这点地方的话，**第一行**的引用底
                     // 会被视图上沿裁掉一条平边。左右仍是 0 —— 正文与光标贴边（真机实测 x=77）。
                     val quotePadV = with(density) { BlockGeometry.TextInset.toPx() }.toInt()
                     setPadding(0, quotePadV, 0, quotePadV)
@@ -232,7 +232,8 @@ fun EditorTextArea(
                     android.view.Gravity.TOP or android.view.Gravity.START
                 }
                 if (view.gravity != targetGravity) view.gravity = targetGravity
-                view.tailQuoteStyle = tailQuote
+                view.quoteStyle = quoteStyle
+                view.tailQuote = tailQuote != null
                 // 回写条件 = "模型被工具栏改过"（版本号变了）**或**整个状态对象换了
                 // （放弃修改 / 换了一个片段：`AndroidView` 的节点会被复用、`factory` 不会再跑，
                 //  只比版本号会在两边都是 0 时判成"不用回写"，内容就回不去了 —— 真机缺陷）。
@@ -319,46 +320,115 @@ internal class DiaryEditText(context: android.content.Context) : AppCompatEditTe
     var shouldBlockNewline: (() -> Boolean)? = null
 
     /**
-     * 末尾空行是引用时要画的那块底（[SpannableBridge.tailQuoteStyle]）。
+     * **引用底**（所有引用段）由视图自己画 —— 与末尾那个空行走同一条路径。
      *
-     * 前面每一段的引用底都由 `QuoteBackgroundSpan` 画 —— 但那个 span 得挂在字符上，
-     * 而文档末尾的空行一个字符都没有。不补这一笔，用户在空行上点「引用」就看不到任何反馈
-     * （R30 记的 F1 最典型的那一幕）。几何与 span 共用 [SpannableBridge.QuoteStyle.drawBox]。
+     * ## 为什么不用 `LineBackgroundSpan`
+     *
+     * 平台画文本与光标的顺序是（`android-37.0/android/widget/Editor.java:2143-2154`）：
+     *
+     * ```
+     * drawCursor()   →   drawLayout()（行背景 span → 字形）
+     * ```
+     *
+     * 光标**在文字之前**画。一块不透明的圆角引用底只要挂在 `LineBackgroundSpan` 上，
+     * 就会把光标整个盖住（不透明、铺满整行）—— 真机实测：引用段里打上第一个字之后，
+     * 光标在 8 张连拍里一张都找不到；正文 / 大标题行里同样的操作 3/8 张能找到。
+     *
+     * 在 `super.onDraw` **之前**画就没有这个问题（光标由 `super.onDraw` 里的 `Editor` 画）。
+     * 顺带还修掉了另一个真机缺陷：以前那个 `QuoteBackgroundSpan`（已删）复用同一个 `Paint`，
+     * 而 [SpannableBridge.QuoteStyle.drawBox] 画竖条时会把 `Paint.color` 改成竖条色 ——
+     * 第二帧起整块底就变成竖条那种深灰（截图里引用底明显比末尾空行那块底暗一档）。
      */
-    var tailQuoteStyle: SpannableBridge.QuoteStyle? = null
+    var quoteStyle: SpannableBridge.QuoteStyle? = null
 
-    private val tailBoxPaint = android.graphics.Paint().apply {
+    /**
+     * 文档**只有一行**、且那一行是空的引用行时，它的底没有任何字符可挂（见
+     * [SpannableBridge.tailQuoteStyle]）—— 由视图按最后一行兜底画出来。
+     */
+    var tailQuote: Boolean = false
+
+    private val boxPaint = android.graphics.Paint().apply {
         isAntiAlias = true
         style = android.graphics.Paint.Style.FILL
     }
-    private val tailBoxPath = android.graphics.Path()
-    private val tailBoxRadii = FloatArray(8)
+    private val boxPath = android.graphics.Path()
+    private val boxRadii = FloatArray(8)
 
     override fun onDraw(canvas: android.graphics.Canvas) {
-        val style = tailQuoteStyle
+        val style = quoteStyle
         val l = layout
-        if (style != null && l != null && l.lineCount > 0) {
-            val line = l.lineCount - 1
-            tailBoxPaint.color = style.backgroundColor
+        val content: Spanned? = text
+        if (style != null && l != null && content != null && l.lineCount > 0) {
             canvas.save()
-            // 与 TextView 自己画文本时同一套平移（gravity 是 TOP，所以没有额外的 voffset）
-            canvas.translate(compoundPaddingLeft.toFloat(), extendedPaddingTop.toFloat())
-            style.drawBox(
-                canvas = canvas,
-                paint = tailBoxPaint,
-                path = tailBoxPath,
-                radii = tailBoxRadii,
-                left = 0f,
-                top = l.getLineTop(line).toFloat(),
-                right = l.width.toFloat(),
-                bottom = l.getLineBottom(line, false).toFloat(),
-                // 末尾这一行自成一块：两端都要圆（`drawBox` 会自己加上下内边距与竖条）
-                first = true,
-                last = true,
+            // 与 TextView 自己画文本时同一套平移（含滚动），否则文档一长、滚动之后底就错位。
+            // gravity 固定 TOP（见 init），所以没有垂直居中的 voffset。
+            canvas.translate(
+                (compoundPaddingLeft - scrollX).toFloat(),
+                (extendedPaddingTop - scrollY).toFloat(),
             )
+            for ((start, end) in SpannableBridge.quoteRanges(content)) {
+                drawQuoteParagraph(canvas, l, style, start, end)
+            }
+            if (tailQuote) {
+                val line = l.lineCount - 1
+                drawQuoteBox(
+                    canvas = canvas, layout = l, style = style, line = line,
+                    firstLine = line, lastLine = line, bakedSpacingPx = 0,
+                )
+            }
             canvas.restore()
         }
+        // 引用底画在**这一句之前**：`super.onDraw` 里的 `Editor` 先画光标、再画文字
+        // （`Editor.java:2143-2154`），块底因此永远压在光标下面
         super.onDraw(canvas)
+    }
+
+    /** 画一个引用段：它可能折成多行，首行上扩、末行下扩、中间行直接接上（[QuoteStyle.drawBox]）。 */
+    private fun drawQuoteParagraph(
+        canvas: android.graphics.Canvas,
+        layout: android.text.Layout,
+        style: SpannableBridge.QuoteStyle,
+        start: Int,
+        end: Int,
+    ) {
+        val firstLine = layout.getLineForOffset(start)
+        val lastLine = layout.getLineForOffset((end - 1).coerceAtLeast(start))
+        // 段后距烘在段末行的 descent 里（`BlockMetricsSpan`）：底要减掉，否则会多出一截。
+        // **文末最后一段**没有那段距离（`applyHeight` 只加在段与段之间），减了反而会把底削短。
+        val baked = if (end >= layout.text.length) 0 else style.paragraphSpacingPx
+        for (line in firstLine..lastLine) {
+            drawQuoteBox(
+                canvas = canvas, layout = layout, style = style, line = line,
+                firstLine = firstLine, lastLine = lastLine, bakedSpacingPx = baked,
+            )
+        }
+    }
+
+    private fun drawQuoteBox(
+        canvas: android.graphics.Canvas,
+        layout: android.text.Layout,
+        style: SpannableBridge.QuoteStyle,
+        line: Int,
+        firstLine: Int,
+        lastLine: Int,
+        bakedSpacingPx: Int,
+    ) {
+        // 每次画之前都重新上色：`drawBox` 画完竖条会把 Paint 留在竖条色上（真机缺陷根源之一）
+        boxPaint.color = style.backgroundColor
+        style.drawBox(
+            canvas = canvas,
+            paint = boxPaint,
+            path = boxPath,
+            radii = boxRadii,
+            // 底铺满**视图**宽度：画布已按 compoundPaddingLeft 平移，左边界在这里就是 -paddingLeft
+            left = -paddingLeft.toFloat(),
+            top = layout.getLineTop(line).toFloat(),
+            right = layout.width.toFloat(),
+            bottom = layout.getLineBottom(line, /* includeLineSpacing = */ false).toFloat(),
+            first = line == firstLine,
+            last = line == lastLine,
+            bakedSpacingPx = bakedSpacingPx,
+        )
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -471,6 +541,10 @@ class EditorTextState(initialLines: List<EditorLine>) {
         //    否则会把候选打断。
         val inserted = insertedRange
         if (!composing && !inserted.isEmpty() && needsWholeLineRewrite(inserted)) revision += 1
+        // ⑤ 平台把段落 span **并进了新插入的换行**（光标在行首敲回车时：字号 / 对齐 / 引用内缩 /
+        //    列表缩进都会漏到上面那个空行上）—— 模型侧的归属修正在 `repairAfterEnter` 里做完了，
+        //    平台的 span 必须按模型回写一次才会干净。判据自包含，所以不必在这里记"上一版光标在哪"。
+        if (SpannableBridge.hasLeakedParagraphSpan(spanned)) revision += 1
     }
 
     /**

@@ -82,6 +82,36 @@ class EditorMarkerRenderTest {
         return bitmap
     }
 
+    /**
+     * 引用底（含左侧竖条）现在由**视图**在 `super.onDraw` 之前画（画在光标之下，见
+     * `DiaryEditText.onDraw`），所以这一条要经过真实的 `DiaryEditText`，不能再只画 `StaticLayout`。
+     */
+    private fun renderQuoteView(lines: List<EditorLine>, quoteStyle: SpannableBridge.QuoteStyle): Bitmap {
+        val pad = px(BlockGeometry.TextInset.value)
+        val view = DiaryEditText(RuntimeEnvironment.getApplication())
+        view.quoteStyle = quoteStyle
+        view.tailQuote = false
+        view.setPadding(0, pad, 0, pad)
+        view.setText(
+            SpannableBridge.toSpannable(
+                lines = lines,
+                containerWidthPx = width,
+                metricsFor = { metrics },
+                quoteStyle = quoteStyle,
+            ),
+        )
+        view.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY),
+        )
+        view.layout(0, 0, width, 400)
+        val bitmap = Bitmap.createBitmap(width, 400, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        view.draw(canvas)
+        return bitmap
+    }
+
     private fun pixel(bitmap: Bitmap, x: Int, y: Int): Int = bitmap.getPixel(x, y)
 
     /** 位图里所有"接近某个颜色"的像素（抗锯齿会掺一点底色，所以按通道差判定）。 */
@@ -237,20 +267,10 @@ class EditorMarkerRenderTest {
             barRadiusPx = px(BlockGeometry.QuoteBarRadius.value).toFloat(),
             barColor = barColor,
         )
-        val spanned = SpannableBridge.toSpannable(
-            lines = listOf(EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)),
-            containerWidthPx = width,
-            metricsFor = { metrics },
-            quoteStyle = quoteStyle,
+        val bitmap = renderQuoteView(
+            listOf(EditorLine(text = "引用", blockStyle = ContentPartStyle.quote)),
+            quoteStyle,
         )
-        val paint = TextPaint().apply { textSize = metrics.textSizePx.toFloat() }
-        val layout = StaticLayout.Builder.obtain(spanned, 0, spanned.length, paint, width).build()
-        val pad = px(BlockGeometry.TextInset.value)
-        val bitmap = Bitmap.createBitmap(width, layout.height + pad * 2, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
-        canvas.translate(0f, pad.toFloat())
-        layout.draw(canvas)
 
         val bar = pixelsNear(bitmap, barColor)
         assertTrue("引用块要有左侧竖条", bar.isNotEmpty())

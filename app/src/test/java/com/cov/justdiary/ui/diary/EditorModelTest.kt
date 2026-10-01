@@ -760,13 +760,15 @@ class EditorModelTest {
 
     @Test
     fun `a paragraph style continues onto the next line however the line looks`() {
-        // 用户规则 3："列表、引用、待办……回车之后也不取消格式，直到用户取消格式" ——
-        // **空行也一样**（用户的原话没有给空行开例外），于是"怎么退出引用"的答案是
-        // "再点一次引用按钮"。这是与 iOS 的一处有意差异（D10：iOS 在空引用行上
-        // 消费按键并结束引用），文档 §7 有记。
+        // 用户规则 3："列表、待办、大标题、小标题……回车之后也不取消格式，直到用户取消格式"
+        // （**空行也一样**）。
+        //
+        // ⚠️ **引用是唯一的例外**（用户 2026-10-01 定稿）：引用行回车 → 新行回到正文。
+        // 空的引用行更彻底：那次回车被吃掉、连新行都不产生（`blocksNewline`），本行直接结束引用 ——
+        // 所以这里看到的也是 body。
         val emptyQuote = listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote))
         assertEquals(
-            ContentPartStyle.quote,
+            ContentPartStyle.body,
             EditorModel.repairAfterEnter(emptyQuote + EditorLine(text = ""), previous = emptyQuote)[1].blockStyle,
         )
 
@@ -928,13 +930,16 @@ class EditorModelTest {
         assertEquals("没选中的行不能被回头改", ContentPartStyle.quote, unquoted[1].blockStyle)
     }
 
-    /** 规则 3：列表 / 引用 / 待办**回车之后不取消**（新行接着同一格式），直到用户取消。 */
+    /**
+     * 规则 3 的正文一半 + 用户 2026-10-01 定的引用：**列表 / 待办 / 标题回车之后不取消**，
+     * 而**引用回车即结束**（新行回到正文）。
+     */
     @Test
-    fun `rule 3 quote and markers survive the newline`() {
-        // 有内容的引用行回车 → 新行还是引用
+    fun `rule 3 markers and titles survive the newline but the quote ends`() {
+        // 有内容的引用行回车 → 新行是**正文**（用户 2026-10-01：回车之后取消引用状态）
         val quoteBefore = listOf(EditorLine(text = "引用一句", blockStyle = ContentPartStyle.quote))
         val quoteAfter = EditorModel.repairAfterEnter(quoteBefore + EditorLine(text = ""), previous = quoteBefore)
-        assertEquals(ContentPartStyle.quote, quoteAfter[1].blockStyle)
+        assertEquals(ContentPartStyle.body, quoteAfter[1].blockStyle)
 
         // 有内容的大标题行回车 → 新行还是大标题（iOS：段落属性随换行延续）
         val titleBefore = listOf(EditorLine(text = "标题", blockStyle = ContentPartStyle.title))
@@ -951,6 +956,82 @@ class EditorModelTest {
         val listBefore = listOf(EditorLine(text = "甲", marker = EditorLine.MarkerKind.Bullet))
         val listAfter = EditorModel.repairAfterEnter(listBefore + EditorLine(text = ""), previous = listBefore)
         assertEquals(EditorLine.MarkerKind.Bullet, listAfter[1].marker)
+    }
+
+    /**
+     * **在段落行首回车**（用户 2026-10-01 补充的口径）：平台会把新插入的换行并进段落 span，
+     * 于是上面多出来的空行也带着下一段的样式。纠正后：
+     *
+     * - **引用**：空行给正文（"理论上没有引用的空行"），引用文字那一行接回引用；
+     * - **大标题 / 小标题**：两条都是标题（规则 3 的"回车之后也不取消格式"）；
+     * - **居中**：空行不居中（规则 4），原来那一行的居中接回来。
+     */
+    @Test
+    fun `a newline at the start of a styled line does not leave the style on the blank line`() {
+        // 引用：空行不是引用，引用跟文字走
+        val quoteBefore = listOf(EditorLine(text = "引用一句", blockStyle = ContentPartStyle.quote))
+        val quoteAfter = EditorModel.repairAfterEnter(
+            listOf(EditorLine(text = "", blockStyle = ContentPartStyle.quote), EditorLine(text = "引用一句")),
+            previous = quoteBefore,
+        )
+        assertEquals(ContentPartStyle.body, quoteAfter[0].blockStyle)
+        assertEquals(ContentPartStyle.quote, quoteAfter[1].blockStyle)
+
+        // 文档中间也一样（上面还有别的行）
+        val midBefore = listOf(
+            EditorLine(text = "上面"),
+            EditorLine(text = "引用一句", blockStyle = ContentPartStyle.quote),
+        )
+        val midAfter = EditorModel.repairAfterEnter(
+            listOf(
+                EditorLine(text = "上面"),
+                EditorLine(text = "", blockStyle = ContentPartStyle.quote),
+                EditorLine(text = "引用一句"),
+            ),
+            previous = midBefore,
+        )
+        assertEquals("上面那一行不动、空行给正文、引用跟文字走",
+            listOf(ContentPartStyle.body, ContentPartStyle.body, ContentPartStyle.quote),
+            listOf(midAfter[0].blockStyle, midAfter[1].blockStyle, midAfter[2].blockStyle))
+
+        // 大标题：两条都还是标题
+        val titleBefore = listOf(EditorLine(text = "标题", blockStyle = ContentPartStyle.title))
+        val titleAfter = EditorModel.repairAfterEnter(
+            listOf(EditorLine(text = "", blockStyle = ContentPartStyle.title), EditorLine(text = "标题")),
+            previous = titleBefore,
+        )
+        assertEquals(ContentPartStyle.title, titleAfter[0].blockStyle)
+        assertEquals(ContentPartStyle.title, titleAfter[1].blockStyle)
+
+        // 居中：空行不居中（规则 4），原来那一行的居中接回来
+        val centerBefore = listOf(EditorLine(text = "居中", align = EditorModel.ALIGN_CENTER))
+        val centerAfter = EditorModel.repairAfterEnter(
+            listOf(EditorLine(text = "", align = EditorModel.ALIGN_CENTER), EditorLine(text = "居中")),
+            previous = centerBefore,
+        )
+        assertEquals(null, centerAfter[0].align)
+        assertEquals(EditorModel.ALIGN_CENTER, centerAfter[1].align)
+
+        // 普通正文行首回车：什么都不用改（没有样式要接）
+        val bodyBefore = listOf(EditorLine(text = "正文"))
+        val bodyAfter = EditorModel.repairAfterEnter(
+            listOf(EditorLine(text = ""), EditorLine(text = "正文")),
+            previous = bodyBefore,
+        )
+        assertEquals(ContentPartStyle.body, bodyAfter[0].blockStyle)
+        assertEquals(ContentPartStyle.body, bodyAfter[1].blockStyle)
+
+        // 行**中**回车（上面那一行还有文字）：不是"段首"，一个字都不许动
+        val cutBefore = listOf(EditorLine(text = "甲乙", blockStyle = ContentPartStyle.quote))
+        val cutAfter = EditorModel.repairAfterEnter(
+            listOf(
+                EditorLine(text = "甲", blockStyle = ContentPartStyle.quote),
+                EditorLine(text = "乙", blockStyle = ContentPartStyle.quote),
+            ),
+            previous = cutBefore,
+        )
+        assertEquals(ContentPartStyle.quote, cutAfter[0].blockStyle)
+        assertEquals(ContentPartStyle.quote, cutAfter[1].blockStyle)
     }
 
     /** 规则 4：居中的作用对象就是"本行" —— 有内容是整行，没内容是光标（模型里就是空行的 align）。 */
