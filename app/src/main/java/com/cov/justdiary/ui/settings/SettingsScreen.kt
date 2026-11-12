@@ -207,6 +207,34 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
     }
 
+    // P0-3：导入的换日时刻与当前不同 → 先问是否重算现有日记。
+    state.pendingImportDayStartHour?.let { hour ->
+        AlertDialog(
+            onDismissRequest = viewModel::cancelImportDayStart,
+            title = { Text(stringResource(R.string.settings_import_day_start_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.settings_import_day_start_msg,
+                        hour,
+                        state.settings.dayStartHour,
+                        state.pendingImportDayStartMovedBlocks,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmImportDayStart) {
+                    Text(stringResource(R.string.settings_import_day_start_apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelImportDayStart) {
+                    Text(stringResource(R.string.settings_import_day_start_keep))
+                }
+            },
+        )
+    }
+
     if (state.importModePromptVisible) {
         ImportModeDialog(
             onSkip = { viewModel.runImport(ImportMode.SKIP) },

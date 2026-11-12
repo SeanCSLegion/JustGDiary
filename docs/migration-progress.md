@@ -4002,3 +4002,119 @@ x=120 且引用底只剩它那一行（87 行像素）；大标题段首回车 �
 - 末尾空引用行的**补位换行**只在这一个状态下出现（模型有两行以上时）；如果以后还有别的
   "空段落需要挂段落样式"的场景，可以把它推广成"始终补一行"的口径（本期不做：会牵动
   提示语、`linesToParts` 与一串"最后一行"判定）。
+
+---
+
+## R34 · P0 修复：备份路径穿越 / 草稿持久化 / 导入设置 / 首页日期与竞态（2026-11-12）
+
+> 本轮按 `TODO.md` 的 P0 清单一次性修复，随后统一跑测试与模拟器验证。
+> 用户已确认的口径见 `TODO.md` §0.1；本文件只记录“改了什么、怎么验证”。
+
+### 1. P0-0 备份导入路径穿越
+
+**问题**：`manifest.images[].file` 的后缀与 `content_json.src` 都曾可以带 `../`；
+`File(imagesDir, …)` 会解析到 `images/` 之外，导入后编辑/删除时甚至能删到数据库/设置。
+
+**改动**：
+
+- `model/ContentPart.kt` 的 `ImagePathUtil`：
+  - `normalizeSrcKey` 永远只取 basename，非法名折成 `images/invalid_image`；
+  - 新增 `isSafeImageFileName` / `isValidStoredSrc` / `isValidImportSrc` / `isInside`；
+  - `isValidImportSrc` 兼容 v1 的裸文件名（`a.jpg`），但仍拒绝 `../`、绝对路径、嵌套目录。
+- `service/BackupService.kt`：导入前校验 manifest 的每个 `src` / `file`；
+  `file` 只允许 `images/<safe>` 与图片扩展名白名单；目标名只由自增序号生成，
+  再做 canonical containment。
+- `data/DiaryRepository.kt`：在写任何一天之前扫描备份库全部 `content_json.src`，
+  非法路径直接抛 `BackupException.InvalidManifest`；整包拒绝，不做“清洗后继续导入”。
+- 导出侧也因 `normalizeSrcKey` 收窄，恶意 `src` 不再能把私有文件复制进备份包。
+
+**测试**：`BackupSecurityRobolectricTest`（manifest `file` 穿越 / manifest `src` 穿越 /
+备份库 `content_json` 穿越，3 条）、`ImagePathUtilTest`（5 条）。
+
+### 2. P0-1 编辑器草稿持久化
+
+**改动**：
+
+- 新增 `service/EditorDraftStore.kt`：按 `dayKey#blockId` 落盘，SHA-256 文件名、
+  临时文件 + rename、坏文件自愈、14 天过期清理。
+- `DiaryPageViewModel`：进入编辑时读草稿；编辑器 250ms 防抖上报；
+  `ON_STOP` 同步落盘；`onCleared` 兜底；保存/放弃/空内容退出时清草稿。
+- `EditorScreen`：优先用草稿的内容 + 选区 + `startTimeUtc` 初始化；
+  新增 `onDraftChanged`，退出时清空 flush 回调。
+- `DiaryPageScreen`：配置变更后**不再重复 `open()`**（否则会把编辑态复位成阅读态）；
+  阅读态重进同一天仍会 `open()` 并清 `requestDismiss`。
+- `JustDiaryApplication` 启动时清理过期草稿。
+
+**测试**：`EditorDraftStoreTest`（5 条）、`DiaryPageStateTest` 新增 3 条
+（新建草稿/已有片段草稿/保存清草稿）。
+**模拟器实测**（Pixel_10_Pro，1280×2856）：输入 `draft-p0-1` → 切系统深色
+（Activity 重建）→ 文本仍在；`adb shell am force-stop` → 重新启动 → 点同一天
+“Write”→ 文本仍在。
+
+### 3. P0-2 关闭 Auto Backup
+
+`AndroidManifest.xml` 改 `android:allowBackup="false"`，并注释“备份只走设置页 `.jdiary`”。
+构建产物用 `aapt2 dump xmltree` 确认 `allowBackup=false`。
+
+### 4. P0-3 导入设置完整恢复
+
+**改动**：
+
+- `AppSettingsJson.toSettings(current, presentKeys)`：旧备份里缺失的键保留当前值，
+  不再用 DTO 默认值覆盖（旧 10 键包不会重置两个精度偏好）。
+- `BackupService` **不再直接写设置**；把 `restoredSettings` 放在 `BackupStats` 里交回 UI。
+- `AppSettingsApplier.applyImported`：应用主题/语言/提醒；语言放最后，避免重建 Activity
+  把前面的副作用截断；不自动回填地区。
+- `SettingsViewModel`：先采用“除换日时刻外”的设置；换日时刻与当前不同时，
+  用 `previewDayKeyChanges` 算影响面并弹确认；确认才 `commit` 重算，取消保留当前。
+- `SettingsScreen` 新增导入换日确认框与中英文案。
+
+**测试**：`BackupModelsTest` 缺键保留；`SettingsImportRobolectricTest`
+（主题/周起始立即生效；换日时刻先挂起；确认后落库）；`BackupServiceRobolectricTest`
+改为断言服务层只返回设置、不改本机存储。
+
+### 5. P0-4 首页选中日竞态
+
+`HomeViewModel` 增加 `dayLoadGeneration`：`select` / `reload` 每次挂起返回后校验
+代际与当前 key；`select` 先清空 `dayBlocks`。`HomeViewModelTest` 用两个
+`CompletableDeferred` 让 A 晚于 B 返回，最终仍是 B 的内容。
+
+### 6. P0-5 首页“今天”遵循 day_start_hour
+
+`HomeViewModel` 的 `today` 改用 `DateUtil.dayKeyForUtc(now, dayStartHour)`；
+回前台（`AppForeground.tick`）、设置变化、`refresh()` 都重算；
+`HomeScreen` 只在“当前选中的正好是旧的今天”时跟随。`HomeViewModelTest`
+覆盖“01:00 + 4 点换日 → 前一天”和“中午切到今天”。
+
+### 7. 验证
+
+- `./gradlew clean assembleDebug testDebugUnitTest`：**614 条 JVM 测试全绿**（新增 20 条）。
+- `python3 tools/verify_sqlite_schema.py`：全部通过。
+- `bash tools/verify_backup_interop.sh`：Android 产出的 `.jdiary` 可被 iOS `ZipArchive` 读取。
+- Pixel_10_Pro 模拟器：P0-1 的切深色 / force-stop 恢复；首页/编辑页启动正常。
+- 未做：P1 及以后（引用回车跟随 iOS、原图、年历几何、月历无障碍等）留给后续轮次。
+
+---
+
+## R35 · 首页「写日记」先阅读、再编辑（2026-11-12）
+
+用户反馈：首页周视图点「写日记」不应直接进编辑，应先到阅读态，再点一次才编辑；
+并确认 iOS 是否如此。核对 iOS `RootView.swift:45-47` 后确认：`HomeView(openEditor:)` 实际接的是
+`appState.openDiary(dayKey:)`，`DiaryViewModel.load()` 末尾把 `isRead` 置回 `true`；
+`DayContentView` 的「写日记 / 继续写日记」只是打开阅读页，编辑入口在阅读页顶栏的
+`square.and.pencil` 与空态按钮。**用户说得对，Android 需要改。**
+
+**改动**：
+
+- `RootScreen.kt` 去掉 `openInWrite` 与 `startInWrite` 的生产调用；首页 `onWrite`
+  与 `onOpenDay` 走同一条 `openDayKey`（阅读态）。
+- 阅读态原有的两个编辑入口保持：
+  - 顶栏铅笔（`read_action_edit` / `index_write`）只在天；
+  - 空态「写日记」按钮（`onWrite`）。
+- `DiaryPageScreen` / `DiaryPageViewModel.open(startInWrite)` 保留参数（现有测试与深链调试用），
+  但首页不再传 `true`。
+
+**模拟器实测**（Pixel_10_Pro）：周视图点「写日记」→ 出现阅读页空态与顶栏「搜索 / 写日记 / 分享」，
+没有 `EditText`；再点顶栏铅笔 → 编辑页出现 `EditText`。与 iOS 路径一致。
+
+**测试**：现有 614 条全绿；本次只改导航接线，未新增测试。

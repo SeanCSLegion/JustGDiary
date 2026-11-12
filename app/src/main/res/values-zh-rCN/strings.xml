@@ -85,6 +85,10 @@
     <string name="settings_import_busy">正在导入备份…</string>
     <string name="settings_import_success_title">导入完成</string>
     <string name="settings_import_success_msg">新增 %1$d 天，跳过 %2$d 天，覆盖 %3$d 天（共 %4$d 个编辑块、%5$d 张图片）。</string>
+    <string name="settings_import_day_start_title">调整新一天的开始时间？</string>
+    <string name="settings_import_day_start_msg">备份里新一天从 %1$d:00 开始，本机是 %2$d:00。按备份设置重算会把 %3$d 个编辑块移到另一天。现在重算吗？</string>
+    <string name="settings_import_day_start_apply">重算</string>
+    <string name="settings_import_day_start_keep">保留当前</string>
     <string name="settings_import_failed_title">导入失败</string>
     <string name="settings_import_failed_msg">备份文件无效或导入出错，请重试。</string>
     <string name="settings_settings_restored">已同时恢复应用设置。</string>

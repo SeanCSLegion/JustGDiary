@@ -193,6 +193,17 @@ fun HomeScreen(
     var selectedKey by rememberSaveable { mutableStateOf(todayKey) }
     var mode by rememberSaveable { mutableStateOf(HomeViewMode.MONTH) }
 
+    // P0-5：`today` 可能因为换日时刻/回前台而变化。只有“用户当前选中的正好是旧的今天”时才
+    // 跟着切到新的今天；如果他在看别的日期，不要把他拽回来。
+    var lastTodayKey by rememberSaveable { mutableStateOf(todayKey) }
+    LaunchedEffect(todayKey) {
+        if (todayKey != lastTodayKey && selectedKey == lastTodayKey) {
+            selectedKey = todayKey
+            monthKey = CalendarGrid.monthKeyOf(today)
+        }
+        lastTodayKey = todayKey
+    }
+
     // ⚠️ 两个进度条必须**从恢复出来的 mode 初始化**，不能固定从 0 起。
     //
     // `mode` 是 `rememberSaveable`（配置变更 / 进程重建后会恢复），而 `Animatable`

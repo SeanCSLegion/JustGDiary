@@ -30,33 +30,83 @@ data class AppSettingsJson(
     @SerialName("share_loc_precision") val shareLocPrecision: String = LocPrecision.district,
     @SerialName("default_loc_precision") val defaultLocPrecision: String = LocPrecision.auto,
 ) {
-    /** 转成内存中的设置；非法取值会被 [AppSettings.from] 的同一套校验兜住。 */
-    fun toSettings(current: AppSettings): AppSettings = current.copy(
-        dayStartHour = dayStartHour.coerceIn(0, 23),
-        autoTime = autoTime,
-        autoLoc = autoLoc,
-        allowHistoryEdit = allowHistoryEdit,
-        themeMode = if (themeMode in AppSettings.THEME_MODES) themeMode else AppSettings.THEME_SYSTEM,
-        appLanguage = if (appLanguage in AppSettings.LANGUAGES) appLanguage else AppSettings.LANGUAGE_SYSTEM,
-        weekStart = if (weekStart in AppSettings.WEEK_STARTS) weekStart else AppSettings.WEEK_START_MONDAY,
-        remindEnabled = remindEnabled,
-        remindHour = remindHour.coerceIn(0, 23),
-        remindMinute = remindMinute.coerceIn(0, 59),
-        // 与 `AppSettings.from` 同一套取值域：比区县更细的上限要收回区县（隐藏则原样保留）
-        shareLocPrecision = if (shareLocPrecision in AppSettings.SHARE_LOC_PRECISIONS) {
-            shareLocPrecision
+    /**
+     * 转成内存中的设置；非法取值会被 `AppSettings.from` 的同一套校验兜住。
+     *
+     * @param presentKeys 备份 JSON 里**实际出现**的键。旧备份（10 键）里没有
+     *   `share_loc_precision` / `default_loc_precision`；这些缺失键必须保留 [current] 的值，
+     *   不能用 DTO 的默认值把用户当前设置覆盖掉。
+     */
+    fun toSettings(
+        current: AppSettings,
+        presentKeys: Set<String> = BUSINESS_KEYS,
+    ): AppSettings = current.copy(
+        dayStartHour = if (KEY_DAY_START_HOUR in presentKeys) dayStartHour.coerceIn(0, 23) else current.dayStartHour,
+        autoTime = if (KEY_AUTO_TIME in presentKeys) autoTime else current.autoTime,
+        autoLoc = if (KEY_AUTO_LOC in presentKeys) autoLoc else current.autoLoc,
+        allowHistoryEdit = if (KEY_ALLOW_HISTORY_EDIT in presentKeys) allowHistoryEdit else current.allowHistoryEdit,
+        themeMode = if (KEY_THEME_MODE in presentKeys) {
+            if (themeMode in AppSettings.THEME_MODES) themeMode else AppSettings.THEME_SYSTEM
         } else {
-            LocPrecision.district
+            current.themeMode
         },
-        defaultLocPrecision = if (defaultLocPrecision in AppSettings.DEFAULT_LOC_PRECISIONS) {
-            defaultLocPrecision
+        appLanguage = if (KEY_APP_LANGUAGE in presentKeys) {
+            if (appLanguage in AppSettings.LANGUAGES) appLanguage else AppSettings.LANGUAGE_SYSTEM
         } else {
-            LocPrecision.auto
+            current.appLanguage
+        },
+        weekStart = if (KEY_WEEK_START in presentKeys) {
+            if (weekStart in AppSettings.WEEK_STARTS) weekStart else AppSettings.WEEK_START_MONDAY
+        } else {
+            current.weekStart
+        },
+        remindEnabled = if (KEY_REMIND_ENABLED in presentKeys) remindEnabled else current.remindEnabled,
+        remindHour = if (KEY_REMIND_HOUR in presentKeys) remindHour.coerceIn(0, 23) else current.remindHour,
+        remindMinute = if (KEY_REMIND_MINUTE in presentKeys) remindMinute.coerceIn(0, 59) else current.remindMinute,
+        // 与 `AppSettings.from` 同一套取值域：比区县更细的上限要收回区县（隐藏则原样保留）
+        shareLocPrecision = if (KEY_SHARE_LOC_PRECISION in presentKeys) {
+            if (shareLocPrecision in AppSettings.SHARE_LOC_PRECISIONS) shareLocPrecision else LocPrecision.district
+        } else {
+            current.shareLocPrecision
+        },
+        defaultLocPrecision = if (KEY_DEFAULT_LOC_PRECISION in presentKeys) {
+            if (defaultLocPrecision in AppSettings.DEFAULT_LOC_PRECISIONS) defaultLocPrecision else LocPrecision.auto
+        } else {
+            current.defaultLocPrecision
         },
         // searchIndexVersion / contentFormatVersion 刻意不动：它们是数据版本，不是偏好
     )
 
     companion object {
+        const val KEY_DAY_START_HOUR = "day_start_hour"
+        const val KEY_AUTO_TIME = "auto_time"
+        const val KEY_AUTO_LOC = "auto_loc"
+        const val KEY_ALLOW_HISTORY_EDIT = "allow_history_edit"
+        const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_APP_LANGUAGE = "app_language"
+        const val KEY_WEEK_START = "week_start"
+        const val KEY_REMIND_ENABLED = "remind_enabled"
+        const val KEY_REMIND_HOUR = "remind_hour"
+        const val KEY_REMIND_MINUTE = "remind_minute"
+        const val KEY_SHARE_LOC_PRECISION = "share_loc_precision"
+        const val KEY_DEFAULT_LOC_PRECISION = "default_loc_precision"
+
+        /** `settingsJson` 里全部业务键；缺键恢复时用这个集合与备份 JSON 的实际键求差。 */
+        val BUSINESS_KEYS: Set<String> = setOf(
+            KEY_DAY_START_HOUR,
+            KEY_AUTO_TIME,
+            KEY_AUTO_LOC,
+            KEY_ALLOW_HISTORY_EDIT,
+            KEY_THEME_MODE,
+            KEY_APP_LANGUAGE,
+            KEY_WEEK_START,
+            KEY_REMIND_ENABLED,
+            KEY_REMIND_HOUR,
+            KEY_REMIND_MINUTE,
+            KEY_SHARE_LOC_PRECISION,
+            KEY_DEFAULT_LOC_PRECISION,
+        )
+
         fun from(settings: AppSettings): AppSettingsJson = AppSettingsJson(
             dayStartHour = settings.dayStartHour,
             autoTime = settings.autoTime,

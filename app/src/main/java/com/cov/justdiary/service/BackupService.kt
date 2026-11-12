@@ -9,6 +9,7 @@ import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.data.ImportMode
 import com.cov.justdiary.model.AppSettingsJson
 import com.cov.justdiary.model.ImagePathUtil
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -38,7 +39,7 @@ import java.util.Locale
  *
  * ## 注意
  *
- * `settingsJson` 只含 10 个业务设置项；`search_index_version` / `content_format_version`
+ * `settingsJson` 只含 12 个业务设置项；`search_index_version` / `content_format_version`
  * **刻意不在其中**（它们是数据版本而非偏好，恢复备份不能重置它们）。
  */
 class BackupService(
@@ -174,21 +175,27 @@ class BackupService(
                     zip.extractTo("$LEGACY_PREFIX$DATABASE_NAME", backupDb)
                 if (!dbExtracted) throw BackupException.InvalidManifest("备份包里没有数据库")
 
-                val srcMap = manifest.images.associate { it.src to it.file }
+                // 先校验 manifest 里的图片映射，任何可疑路径都整包拒绝（P0-0）。
+                val srcMap = validatedImageEntries(zip, manifest)
                 val copied = mutableMapOf<String, String>()
                 var importedImages = 0
 
                 val copyImage: (String) -> String = { rawSrc ->
+                    if (!ImagePathUtil.isValidStoredSrc(rawSrc)) {
+                        throw BackupException.InvalidManifest("备份包含非法图片路径：$rawSrc")
+                    }
                     val key = ImagePathUtil.normalizeSrcKey(rawSrc)
                     copied[key] ?: run {
                         val entryName = srcMap[key]
-                        val ext = entryName?.substringAfterLast('.', "")
-                            ?.takeIf { it.isNotEmpty() }
-                            ?: DEFAULT_IMAGE_EXT
                         var result = key
                         if (entryName != null) {
+                            val ext = imageExtension(entryName)
                             val newName = "imp_${stamp}_${importedImages + 1}.$ext"
-                            if (zip.extractTo(entryName, File(imagesDir, newName))) {
+                            val target = File(imagesDir, newName)
+                            if (!ImagePathUtil.isInside(imagesDir, target)) {
+                                throw BackupException.InvalidManifest("图片目标路径越界：$newName")
+                            }
+                            if (zip.extractTo(entryName, target)) {
                                 importedImages += 1
                                 result = ImagePathUtil.IMAGE_DIR_PREFIX + newName
                                 copied[key] = result
@@ -202,12 +209,23 @@ class BackupService(
                 stats = stats.copy(importedImages = importedImages)
 
                 if (manifest.settingsJson.isNotEmpty()) {
+                    val current = settings.load()
+                    val element = runCatching {
+                        json.parseToJsonElement(manifest.settingsJson)
+                    }.getOrNull() as? JsonObject
+                    val presentKeys = element?.keys ?: emptySet()
                     val parsed = runCatching {
                         json.decodeFromString(AppSettingsJson.serializer(), manifest.settingsJson)
                     }.getOrNull()
                     if (parsed != null) {
-                        settings.save(parsed.toSettings(settings.load()))
-                        stats = stats.copy(settingsRestored = true)
+                        // 服务层**不写**设置：换日时刻要先问用户，语言/主题也要走
+                        // `SettingsViewModel` + `AppSettingsApplier` 的副作用。
+                        // 这里只把解析结果交回调用方。
+                        val restored = parsed.toSettings(current, presentKeys)
+                        stats = stats.copy(
+                            settingsRestored = presentKeys.any { it in AppSettingsJson.BUSINESS_KEYS },
+                            restoredSettings = restored,
+                        )
                     }
                 }
 
@@ -220,6 +238,66 @@ class BackupService(
         } finally {
             workDir.deleteRecursively()
         }
+    }
+
+    /**
+     * 校验 manifest 里的图片映射（P0-0）。
+     *
+     * 规则：
+     * - `src` 归一后必须是 `images/<safe-name>`；
+     * - `file` 必须是 `images/<safe-name>`（允许旧布局的 `jdiary_export/` 前缀）；
+     * - 扩展名必须在白名单里（备份只可能有图片）；
+     * - 同一个 `src` 可以出现多次（导出时两个片段共用一张图会产生多条），取第一条。
+     *
+     * 返回 `src -> zip entry`（entry 取实际存在的那个；缺失图片允许，后续只指向原 key）。
+     */
+    private fun validatedImageEntries(
+        zip: ZipArchive.Reader,
+        manifest: BackupManifest,
+    ): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        for (ref in manifest.images) {
+            val src = normalizedManifestSrc(ref.src)
+                ?: throw BackupException.InvalidManifest("备份包含非法图片 src：${ref.src}")
+            val entry = validatedImageEntry(ref.file)
+                ?: throw BackupException.InvalidManifest("备份包含非法图片路径：${ref.file}")
+            // 同一个 src 可能有多条（两个片段共用一张图），取第一条即可；
+            // 不能因此拒绝整包，否则本应用自己导出的包都导不回来。
+            result.putIfAbsent(src, zipEntryFor(zip, entry))
+        }
+        return result
+    }
+
+    /** manifest 的 `src` 允许省略 `images/` 前缀（旧包），但归一后必须安全。 */
+    private fun normalizedManifestSrc(raw: String): String? {
+        val candidate = if (raw.startsWith(ImagePathUtil.IMAGE_DIR_PREFIX)) {
+            raw
+        } else {
+            ImagePathUtil.IMAGE_DIR_PREFIX + raw
+        }
+        return candidate.takeIf(ImagePathUtil::isValidStoredSrc)
+    }
+
+    /** manifest 的 `file` 必须是 zip 内的 `images/<safe-name>`；允许旧布局前缀。 */
+    private fun validatedImageEntry(raw: String): String? {
+        val stripped = raw.removePrefix(LEGACY_PREFIX)
+        if (!stripped.startsWith(ImagePathUtil.IMAGE_DIR_PREFIX)) return null
+        val name = stripped.removePrefix(ImagePathUtil.IMAGE_DIR_PREFIX)
+        if (!ImagePathUtil.isSafeImageFileName(name)) return null
+        val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        if (ext !in IMAGE_EXTENSIONS) return null
+        return ImagePathUtil.IMAGE_DIR_PREFIX + name
+    }
+
+    /** 实际 zip entry：优先无前缀布局，再兼容 `jdiary_export/` 前缀。 */
+    private fun zipEntryFor(zip: ZipArchive.Reader, entry: String): String =
+        if (zip.contains(entry)) entry
+        else if (zip.contains(LEGACY_PREFIX + entry)) LEGACY_PREFIX + entry
+        else entry
+
+    private fun imageExtension(entry: String): String {
+        val ext = entry.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        return if (ext in IMAGE_EXTENSIONS) ext else DEFAULT_IMAGE_EXT
     }
 
     private fun readManifest(zip: ZipArchive.Reader): BackupManifest {
@@ -246,6 +324,7 @@ class BackupService(
         const val DATABASE_NAME: String = "db/just_diary.db"
         const val LEGACY_PREFIX: String = "jdiary_export/"
         const val DEFAULT_IMAGE_EXT: String = "jpg"
+        val IMAGE_EXTENSIONS: Set<String> = setOf("jpg", "jpeg", "png", "webp", "heic", "heif")
         const val DEFAULT_APP_VERSION: String = "1.0"
         const val BACKUP_EXTENSION: String = "jdiary"
         const val BACKUP_MIME: String = "application/octet-stream"

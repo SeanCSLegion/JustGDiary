@@ -3,6 +3,7 @@ package com.cov.justdiary.app
 import android.content.Context
 import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.service.BackupService
+import com.cov.justdiary.service.EditorDraftStore
 import com.cov.justdiary.service.ImageShareRenderer
 import com.cov.justdiary.service.LocationService
 import com.cov.justdiary.service.MediaStore
@@ -52,6 +53,9 @@ class AppContainer(context: Context) {
 
     /** 分享长图渲染（自绘，版式来自纯函数 `ShareLayout`）。 */
     val imageShareRenderer: ImageShareRenderer by lazy { ImageShareRenderer(appContext, mediaStore) }
+
+    /** 编辑器未保存草稿（P0-1）；按 `dayKey#blockId` 落盘。 */
+    val editorDrafts: EditorDraftStore by lazy { EditorDraftStore(appContext) }
 
     /** 设置变更的平台侧执行器（外观 / 语言 / day_key 重算 / 回填 / 提醒重排）。 */
     val appSettingsApplier: AppSettingsApplier by lazy {

@@ -16,6 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +28,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.app.AppForeground
@@ -115,7 +119,23 @@ fun DiaryPageScreen(
     val requestLocation: () -> Unit = { askForLocation(false) }
     val refreshLocation: () -> Unit = { askForLocation(true) }
 
-    LaunchedEffect(dayKey) { viewModel.open(dayKey, startInWrite) }
+    LaunchedEffect(dayKey) {
+        // P0-1：配置变更（深色/字号/分屏）后 Compose 会重跑这个 effect，但同一个
+        // ViewModel 里已经是编辑态了 —— 再 open() 会把 isRead 复位成阅读态并清掉草稿恢复。
+        // 只有“这个 ViewModel 还没打开过这一天”时才真正 open。
+        val current = viewModel.state.value
+        val sameDay = if (dayKey.isNullOrBlank()) {
+            current.dayKey.isNotEmpty()
+        } else {
+            current.dayKey == dayKey
+        }
+        // 只有“同一天且正在编辑/多选”才跳过 open —— 那正是配置变更后要保住的状态。
+        // 阅读态重进同一天仍要 open：它会清掉上一次的 requestDismiss 并重新读库。
+        val keepEditing = sameDay && (!current.isRead || current.selectMode)
+        if (!keepEditing) {
+            viewModel.open(dayKey, startInWrite)
+        }
+    }
     // 设置变过（尤其是"新一天的开始时间"）：重算 todayKey 与位置/时间等显示设置。
     // 编辑态与待确认的保存**一律不动** —— 只换设置，不碰内容。
     // 首帧跳过：那时 `open()` 还没跑，refreshSettings 会先按默认设置算一次 todayKey。
@@ -250,6 +270,17 @@ fun DiaryPageScreen(
             )
             // 编辑器的把手：顶栏的插图/放弃/保存通过它转到编辑器内部（不必提升编辑器状态）
             val editorActions = remember(state.loadToken) { EditorActions() }
+            // P0-1：进后台前把最新草稿同步落盘；进程此时随时可能被回收。
+            // 用 Activity（LocalContext）而不是已废弃的 LocalLifecycleOwner；预览环境下为 null 时跳过。
+            val lifecycleOwner = LocalContext.current as? LifecycleOwner
+            DisposableEffect(lifecycleOwner, editorActions) {
+                if (lifecycleOwner == null) return@DisposableEffect onDispose { }
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_STOP) editorActions.flushDraft()
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 containerColor = MaterialTheme.colorScheme.background,
@@ -349,6 +380,8 @@ fun DiaryPageScreen(
                     canRelocate = state.canRelocate,
                     startTimeUtc = state.startTimeUtc,
                     actions = editorActions,
+                    initialDraft = state.editorDraft,
+                    onDraftChanged = viewModel::onEditorDraftChanged,
                     contentPadding = innerPadding,
                     autoTime = state.settings.autoTime,
                     startTimeLabel = formats.timeOf(java.time.Instant.ofEpochMilli(state.startTimeUtc)),

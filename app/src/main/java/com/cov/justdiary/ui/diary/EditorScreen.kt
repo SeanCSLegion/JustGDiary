@@ -30,7 +30,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,8 +56,10 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.cov.justdiary.R
+import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.model.ContentPartStyle
+import com.cov.justdiary.service.EditorDraft
 import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
@@ -66,6 +71,9 @@ import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
 import com.cov.justdiary.ui.theme.Spacing
 import com.cov.justdiary.ui.theme.TypeSize
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -101,6 +109,7 @@ import kotlinx.coroutines.launch
  * 顶栏的「插入图片 / 放弃修改 / 保存」属于宿主（`Scaffold` 的 `topBar`），
  * 由 [EditorActions] 这个把手转发进来 —— 编辑器不需要把自己的状态提升出去。
  */
+@OptIn(FlowPreview::class)
 @Composable
 fun EditorScreen(
     initialParts: List<ContentPart>,
@@ -117,6 +126,10 @@ fun EditorScreen(
     canRelocate: Boolean,
     startTimeUtc: Long,
     actions: EditorActions,
+    /** 上次未保存的草稿；非空时优先恢复它，而不是 [initialParts]。 */
+    initialDraft: EditorDraft? = null,
+    /** 编辑器内容变化后上报草稿（由 ViewModel 落盘）。 */
+    onDraftChanged: (EditorDraft) -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(),
     modifier: Modifier = Modifier,
     autoTime: Boolean = true,
@@ -133,10 +146,48 @@ fun EditorScreen(
     /** 是否有未保存内容（宿主用它决定返回键是否要二次确认）。 */
     onDirtyChange: (Boolean) -> Unit = {},
 ) {
-    val initialLines = remember(loadToken) { EditorModel.partsToLines(initialParts) }
-    val state = remember(loadToken) { EditorTextState(initialLines) }
-    val history = remember(loadToken) { EditorHistory(initial = initialLines) }
-    val dirty = hasChanges(state, initialLines, history)
+    val originalLines = remember(loadToken) { EditorModel.partsToLines(initialParts) }
+    val restoredLines = remember(loadToken) {
+        initialDraft?.let { draft ->
+            runCatching { EditorModel.partsToLines(ContentFlatten.parseContent(draft.contentJson)) }
+                .getOrElse { originalLines }
+        } ?: originalLines
+    }
+    val restoredSelection = remember(loadToken) {
+        initialDraft?.let {
+            EditorSelection(
+                lineIndex = it.lineIndex,
+                start = it.selectionStart,
+                end = it.selectionEnd,
+                endLineIndex = it.endLineIndex,
+            )
+        } ?: EditorSelection.NONE
+    }
+    val state = remember(loadToken) { EditorTextState(restoredLines, restoredSelection) }
+    val history = remember(loadToken) { EditorHistory(initial = originalLines) }
+    val effectiveStartTimeUtc = initialDraft?.startTimeUtc ?: startTimeUtc
+    val dirty = hasChanges(state, originalLines, history)
+
+    // 草稿快照：内容 + 选区 + 新片段的时间。只在上报时序列化，不在每次重组做。
+    fun currentDraft(): EditorDraft = EditorDraft(
+        contentJson = ContentFlatten.serializeContent(EditorModel.linesToParts(state.lines)),
+        startTimeUtc = effectiveStartTimeUtc,
+        lineIndex = state.selection.lineIndex,
+        selectionStart = state.selection.start,
+        selectionEnd = state.selection.end,
+        endLineIndex = state.selection.endLineIndex,
+    )
+
+    val latestOnDraftChanged by rememberUpdatedState(onDraftChanged)
+    LaunchedEffect(loadToken) {
+        snapshotFlow { state.lines to state.selection }
+            .drop(1)
+            .debounce(250)
+            .collect { latestOnDraftChanged(currentDraft()) }
+    }
+    DisposableEffect(Unit) {
+        onDispose { actions.onFlushDraft = {} }
+    }
     // 用 SideEffect（每次成功组合后都跑）而不是 LaunchedEffect(脏标记)：
     // 放弃修改会换一个 [EditorActions] 实例，而脏标记本身没变，LaunchedEffect 不会重跑，
     // 新实例就会停在 dirty = false（实测：返回键因此不再拦截）。
@@ -177,7 +228,8 @@ fun EditorScreen(
         // 「保存时还没有位置」的二次确认（规范 §3.6 D3）在 **ViewModel** 里做，
         // 不在这一层：它后面还紧跟着跨日确认（D4），两个弹窗共用同一个待写入项，
         // 分在两处会出现"弹窗点确认时编辑器内容已经变了"这种不一致。
-        actions.onSave = { onSave(buildPayload(state.lines, startTimeUtc)) }
+        actions.onSave = { onSave(buildPayload(state.lines, effectiveStartTimeUtc)) }
+        actions.onFlushDraft = { latestOnDraftChanged(currentDraft()) }
         actions.onDismissKeyboard = { dismissKeyboard(context, editText, focusManager) }
     }
 
@@ -357,6 +409,7 @@ class EditorActions {
     internal var onSave: () -> Unit = {}
     internal var onDiscard: () -> Unit = {}
     internal var onDismissKeyboard: () -> Unit = {}
+    internal var onFlushDraft: () -> Unit = {}
 
     /** 有未保存内容（顶栏据此决定返回是否拦截）。 */
     var dirty: Boolean by mutableStateOf(false)
@@ -367,6 +420,9 @@ class EditorActions {
 
     /** 点顶栏空白 / 内容空白时收键盘（规范 §3.8）。 */
     fun dismissKeyboard() = onDismissKeyboard()
+
+    /** Activity 进后台前强制把最新草稿落盘（P0-1）。 */
+    fun flushDraft() = onFlushDraft()
 }
 
 /** 编辑页的版面常量。 */

@@ -9,9 +9,14 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+        P0-2（2026-11-12 用户确认）：关闭系统 Auto Backup，备份只走设置页导出的 .jdiary。
+        Android 的 25MB 配额无法同时装下数据库 + 图片，容易出现“有日记、图没了”的半套恢复；
+        设备迁移/恢复请使用应用内导出。
+    -->
     <application
         android:name=".JustDiaryApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"

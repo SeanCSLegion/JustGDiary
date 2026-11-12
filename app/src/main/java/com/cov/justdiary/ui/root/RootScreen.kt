@@ -82,11 +82,13 @@ fun RootScreen(modifier: Modifier = Modifier) {
     // `dayStartHour` 一变，"今天"跟着变，页面里那份 `todayKey` 不能停在旧值上。
     val settingsVersion by container.settings.version.collectAsState()
 
-    // 全屏的日记页（阅读/编辑）在标签页之上：对应 iOS 的 `.fullScreenCover`
+    // 全屏的日记页（阅读/编辑）在标签页之上：对应 iOS 的 `.fullScreenCover`。
+    //
+    // P1 导航修正（2026-11-12）：iOS 首页的「写日记 / 继续写日记」虽然函数名叫
+    // `openEditor`，实际接的是 `appState.openDiary(dayKey:)` —— 先进入**阅读态**，
+    // 再由阅读态顶栏的铅笔 / 空态按钮进编辑。Android 之前直接 `startInWrite=true`，
+    // 与 iOS 不一致；现在统一走 `openDayKey`，不再有“直接进编辑”的入口。
     var openDayKey by rememberSaveable { mutableStateOf<String?>(null) }
-    // 「写日记 / 继续写日记」直接进编辑器（对应 iOS 的 `openEditor`），
-    // 而点日期 / 点日记卡片是进阅读页（`openDiary`）。
-    var openInWrite by rememberSaveable { mutableStateOf(false) }
     // 日记数据变过之后，让各个页面自己刷一次（对应 iOS 的 `.diaryVersionChanged`）
     var dataVersion by rememberSaveable { mutableIntStateOf(0) }
 
@@ -102,9 +104,8 @@ fun RootScreen(modifier: Modifier = Modifier) {
         AdaptiveLayoutHost(modifier = modifier) {
             DiaryPageScreen(
                 dayKey = openDayKey,
-                onClose = { openDayKey = null; openInWrite = false },
+                onClose = { openDayKey = null },
                 onDataChanged = { dataVersion++ },
-                startInWrite = openInWrite,
                 settingsVersion = settingsVersion,
             )
         }
@@ -139,7 +140,6 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         dataVersion = dataVersion,
                         settingsVersion = settingsVersion,
                         onOpenDay = { openDayKey = it },
-                        onWriteDay = { openInWrite = true; openDayKey = it },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -166,7 +166,6 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         dataVersion = dataVersion,
                         settingsVersion = settingsVersion,
                         onOpenDay = { openDayKey = it },
-                        onWriteDay = { openInWrite = true; openDayKey = it },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding),
@@ -192,8 +191,6 @@ private fun TabContent(
     /** 设置版本号（设置页保存一次 +1）：各页面据此刷新自己那份"已经读进来的"设置。 */
     settingsVersion: Int,
     onOpenDay: (String) -> Unit,
-    /** 直接进编辑器（首页当日面板的「写日记」）。 */
-    onWriteDay: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -225,7 +222,8 @@ private fun TabContent(
                 onYearChange = viewModel::setVisibleYear,
                 onSelectDay = viewModel::select,
                 onOpenDay = { onOpenDay(DateUtil.dayKeyOf(it)) },
-                onWrite = { onWriteDay(DateUtil.dayKeyOf(it)) },
+                // iOS 的首页「写日记」也走 openDiary：先阅读，再在阅读态里进编辑。
+                onWrite = { onOpenDay(DateUtil.dayKeyOf(it)) },
                 imageLoader = { src -> container.mediaStore.image(src)?.asImageBitmap() },
                 // 这两个版本号一变，首页就无动画回到「今天 + 月态」（规范 §1 规则 3）
                 dataVersion = dataVersion,

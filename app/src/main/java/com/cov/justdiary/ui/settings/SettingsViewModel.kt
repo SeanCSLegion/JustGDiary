@@ -48,6 +48,15 @@ data class SettingsUiState(
     val pendingDayStartHour: Int? = null,
     /** 上面那个待确认改动会影响的日记篇数。 */
     val pendingDayStartMovedBlocks: Int = 0,
+    /**
+     * 导入备份带来的 `day_start_hour` 与当前不同，等待用户确认是否重算。
+     *
+     * 非空时界面弹确认框；确认后按备份时刻重算，取消则保留当前设置。
+     */
+    val pendingImportDayStartHour: Int? = null,
+    val pendingImportDayStartMovedBlocks: Int = 0,
+    /** 等待用户确认换日时刻期间暂存的导入统计，确认/取消后用来显示成功框。 */
+    val pendingImportDayStartStats: BackupStats? = null,
     /** 版本号（"关于"卡片）。 */
     val appVersion: String = "",
 )
@@ -350,25 +359,104 @@ class SettingsViewModel(
         val file = _state.value.pendingImport
         _state.value = _state.value.copy(importModePromptVisible = false, pendingImport = null)
         if (file == null || _state.value.busy != null) return
+        val old = settings.load()
         _state.value = _state.value.copy(busy = BusyKind.IMPORT)
         viewModelScope.launch {
             val result = runCatching { container.backupService.importBackup(file, mode) }
             file.delete()
             result.onSuccess { stats ->
-                // 恢复出来的设置要立刻生效（外观/语言都在其中）
-                val restored = settings.load()
-                _state.value = _state.value.copy(settings = restored)
-                container.reminderScheduler.rearm()
+                val restored = stats.restoredSettings
+                if (restored == null) {
+                    container.reminderScheduler.rearm()
+                    _state.value = _state.value.copy(
+                        busy = null,
+                        settings = settings.load(),
+                        alert = SettingsAlert.ImportSucceeded(stats),
+                    )
+                    return@onSuccess
+                }
+
+                val dayStartChanged = restored.dayStartHour != old.dayStartHour
+                // 先只采用“除了换日时刻之外”的设置；换日时刻要等用户确认后再重算。
+                val adopted = if (dayStartChanged) {
+                    restored.copy(dayStartHour = old.dayStartHour)
+                } else {
+                    restored
+                }
+                val outcome = runCatching { applier.applyImported(old, adopted) }
+                    .onFailure { Log.app.e("导入后应用设置失败：${it.message}") }
+                    .getOrNull()
+                if (outcome?.needsLocationPermissionRequest == true) {
+                    eventChannel.trySend(SettingsUiEvent.RequestLocationPermission)
+                }
+                _state.value = _state.value.copy(settings = settings.load())
+
+                if (dayStartChanged) {
+                    val moved = runCatching {
+                        repository.previewDayKeyChanges(restored.dayStartHour)
+                    }.getOrNull()?.movedBlocks ?: 0
+                    if (moved > 0) {
+                        // 等用户在对话框里选“重算 / 保留当前”。
+                        _state.value = _state.value.copy(
+                            busy = null,
+                            pendingImportDayStartHour = restored.dayStartHour,
+                            pendingImportDayStartMovedBlocks = moved,
+                            pendingImportDayStartStats = stats,
+                            alert = null,
+                        )
+                        return@onSuccess
+                    }
+                    // 没有片段会被移动：直接采用备份的换日时刻，不需要再问。
+                    runCatching { applier.commit(settings.load(), restored) }
+                        .onFailure { Log.app.e("导入后应用换日时刻失败：${it.message}") }
+                }
+
+                _state.value = _state.value.copy(
+                    busy = null,
+                    settings = settings.load(),
+                    alert = SettingsAlert.ImportSucceeded(stats),
+                )
             }
-            _state.value = _state.value.copy(
-                busy = null,
-                alert = result.fold(
-                    onSuccess = { SettingsAlert.ImportSucceeded(it) },
-                    onFailure = { SettingsAlert.ImportFailed },
-                ),
-            )
-            result.onFailure { Log.backup.e("导入失败：${it.message}") }
+            result.onFailure { error ->
+                Log.backup.e("导入失败：${error.message}")
+                _state.value = _state.value.copy(
+                    busy = null,
+                    alert = SettingsAlert.ImportFailed,
+                )
+            }
         }
+    }
+
+    /** 用户确认按备份的换日时刻重算现有日记。 */
+    fun confirmImportDayStart() {
+        val hour = _state.value.pendingImportDayStartHour ?: return
+        val stats = _state.value.pendingImportDayStartStats ?: return
+        val current = settings.load()
+        val target = current.copy(dayStartHour = hour.coerceIn(0, 23))
+        _state.value = _state.value.copy(
+            pendingImportDayStartHour = null,
+            pendingImportDayStartMovedBlocks = 0,
+            pendingImportDayStartStats = null,
+        )
+        viewModelScope.launch {
+            runCatching { applier.commit(current, target) }
+                .onFailure { Log.app.e("导入后重算 day_key 失败：${it.message}") }
+            _state.value = _state.value.copy(
+                settings = settings.load(),
+                alert = SettingsAlert.ImportSucceeded(stats),
+            )
+        }
+    }
+
+    /** 用户选择保留当前换日时刻；导入的数据与其它设置已经生效。 */
+    fun cancelImportDayStart() {
+        val stats = _state.value.pendingImportDayStartStats ?: return
+        _state.value = _state.value.copy(
+            pendingImportDayStartHour = null,
+            pendingImportDayStartMovedBlocks = 0,
+            pendingImportDayStartStats = null,
+            alert = SettingsAlert.ImportSucceeded(stats),
+        )
     }
 
     fun consumeAlert() {

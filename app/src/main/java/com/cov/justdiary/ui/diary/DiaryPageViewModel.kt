@@ -14,6 +14,7 @@ import com.cov.justdiary.model.EditBlock
 import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.model.LocQuality
 import com.cov.justdiary.model.LocRegion
+import com.cov.justdiary.service.EditorDraft
 import com.cov.justdiary.service.LocationFix
 import com.cov.justdiary.service.LocationResolver
 import com.cov.justdiary.service.LocationRules
@@ -70,6 +71,8 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         /** 载入到编辑器里的段落（`loadToken` 变化时重新载入）。 */
         val loadParts: List<ContentPart> = emptyList(),
         val loadToken: Int = 0,
+        /** 未保存草稿（P0-1）；非空时编辑器优先恢复它，而不是 [loadParts]。 */
+        val editorDraft: EditorDraft? = null,
         val alert: DiaryAlert? = null,
         /** 宿主应当关闭本页。 */
         val requestDismiss: Boolean = false,
@@ -193,6 +196,11 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    private val drafts = container.editorDrafts
+    private var draftSaveJob: Job? = null
+    private var pendingDraft: EditorDraft? = null
+    private var pendingDraftKey: String? = null
+
     private var searchJob: Job? = null
 
     /** 关闭分享面板后清缓存的作业（下一次分享前不必等它）。 */
@@ -220,6 +228,14 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             hitIndex = 0,
             searchText = "",
             showSearch = false,
+            editorDraft = null,
+            requestDismiss = false,
+            alert = null,
+            pendingSave = null,
+            isRead = true,
+            editingIndex = null,
+            selectMode = false,
+            selectedIds = emptySet(),
         )
         viewModelScope.launch {
             reload()
@@ -233,6 +249,88 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             settings = settings,
             todayKey = DateUtil.dayKeyForUtc(System.currentTimeMillis(), settings.dayStartHour),
         )
+    }
+
+    // ------------------------------------------------------------------ 草稿（P0-1）
+
+    /** `dayKey#blockId` / `dayKey#new`；只用于落盘键，不进 UI。 */
+    private fun draftKey(dayKey: String, blockId: Long?): String =
+        "${dayKey.ifEmpty { "-" }}#${blockId ?: "new"}"
+
+    private fun draftKeyFor(state: State = _state.value): String {
+        val blockId = state.editingIndex?.let { state.blocks.getOrNull(it)?.id }
+        return draftKey(state.actualDayKey.ifEmpty { state.dayKey }, blockId)
+    }
+
+    /**
+     * 进入编辑时读草稿；已有片段且草稿与库内容完全一致时，视为“保存过的旧草稿”清掉。
+     */
+    private fun loadDraftFor(dayKey: String, blockId: Long?): EditorDraft? {
+        val key = draftKey(dayKey, blockId)
+        val draft = drafts.load(key) ?: return null
+        if (draft.contentJson.isBlank()) {
+            drafts.clear(key)
+            return null
+        }
+        if (blockId != null) {
+            val block = _state.value.blocks.firstOrNull { it.id == blockId }
+            val same = block != null && runCatching {
+                ContentFlatten.parseContent(block.contentJson) == ContentFlatten.parseContent(draft.contentJson)
+            }.getOrDefault(false)
+            if (same) {
+                drafts.clear(key)
+                return null
+            }
+        }
+        return draft
+    }
+
+    /**
+     * 编辑器每次（防抖后）上报最新内容。先更新内存里的待写草稿，再在 IO 上落盘；
+     * 配置变更时 ViewModel 不销毁，进程被杀时由 [flushEditorDraft] 兜底。
+     */
+    fun onEditorDraftChanged(draft: EditorDraft) {
+        if (_state.value.isRead || _state.value.selectMode) return
+        val key = draftKeyFor()
+        pendingDraft = draft
+        pendingDraftKey = key
+        _state.value = _state.value.copy(editorDraft = draft)
+        draftSaveJob?.cancel()
+        draftSaveJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(DRAFT_SAVE_DEBOUNCE_MS)
+            drafts.save(key, draft)
+        }
+    }
+
+    /** Activity 进入后台前把内存里的最新草稿同步落盘（进程随时可能被回收）。 */
+    fun flushEditorDraft() {
+        val draft = pendingDraft ?: return
+        val key = pendingDraftKey ?: return
+        draftSaveJob?.cancel()
+        drafts.save(key, draft)
+    }
+
+    /** 保存 / 放弃 / 空内容退出时清掉当前草稿。 */
+    private fun clearEditorDraft(key: String = draftKeyFor()) {
+        draftSaveJob?.cancel()
+        draftSaveJob = null
+        pendingDraft = null
+        pendingDraftKey = null
+        drafts.clear(key)
+        if (_state.value.editorDraft != null) {
+            _state.value = _state.value.copy(editorDraft = null)
+        }
+    }
+
+    override fun onCleared() {
+        draftSaveJob?.cancel()
+        // 兜底：极端情况下 ON_STOP 没跑到；写文件很小，阻塞一下换不丢稿。
+        runCatching {
+            val draft = pendingDraft
+            val key = pendingDraftKey
+            if (draft != null && key != null) drafts.save(key, draft)
+        }
+        super.onCleared()
     }
     /**
      * 重新从库里读这一天（从别处返回、或收到"数据变过"的通知时）。
@@ -277,8 +375,10 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             _state.value = _state.value.copy(alert = DiaryAlert.HistoryNoAdd)
             return
         }
+        val draft = loadDraftFor(_state.value.actualDayKey, null)
         _state.value = _state.value.copy(
             loadParts = emptyList(),
+            editorDraft = draft,
             // 新建片段没有"原文"可回退；不清空的话，放弃修改会恢复上一次编辑的片段
             loadToken = _state.value.loadToken + 1,
             isRead = false,
@@ -302,9 +402,11 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         }
         val block = current.blocks[index]
         val parts = ContentFlatten.parseContent(block.contentJson)
+        val draft = loadDraftFor(current.actualDayKey, block.id)
         _state.value = current.copy(
             editingIndex = index,
             loadParts = parts,
+            editorDraft = draft,
             loadToken = current.loadToken + 1,
             isRead = false,
             startTimeUtc = block.startTimeUtc,
@@ -384,6 +486,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
      * （`DiaryViewModel.swift:216-227`）：退出编辑 / 放弃修改后先看到刚写的内容。
      */
     fun showRead() {
+        clearEditorDraft()
         _state.value = _state.value.copy(
             isRead = true,
             editingIndex = null,
@@ -401,6 +504,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
     fun performDiscardEditing() {
         // 回到"进入编辑时"的内容：把原文重新推给编辑器
+        clearEditorDraft()
         _state.value = _state.value.copy(
             alert = null,
             loadToken = _state.value.loadToken + 1,
@@ -430,6 +534,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         val current = _state.value
         if (payload.parts.isEmpty()) {
             // 空内容 = 什么都没写：新建时直接退出，编辑已有片段时回到阅读态
+            clearEditorDraft()
             if (current.isEditingExistingBlock || current.blocks.isNotEmpty()) {
                 _state.value = current.copy(isRead = true, editingIndex = null)
             } else {
@@ -455,6 +560,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
                     _state.value = _state.value.copy(alert = DiaryAlert.SaveFailed)
                     return@launch
                 }
+                clearEditorDraft()
                 reload()
             }
             return
@@ -573,6 +679,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
                 actualDayKey = dayKey,
                 todayKey = DateUtil.dayKeyForUtc(System.currentTimeMillis(), dayStartHour),
             )
+            clearEditorDraft()
             reload()
         }
     }
@@ -913,6 +1020,9 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
         /** 「仍然保存」→ 跨日弹窗之间的停顿（iOS 是 `Task.sleep(0.3)`）。 */
         const val CROSS_DAY_PROMPT_DELAY_MS = 300L
+
+        /** 草稿落盘防抖；编辑页每 250ms 最多写一次文件。 */
+        const val DRAFT_SAVE_DEBOUNCE_MS = 250L
 
         /** 没有位置时写库的空地区（与 `LocQuality.none` 一起表达"无位置"）。 */
         private val EMPTY_REGION = LocRegion(

@@ -108,12 +108,58 @@ object ContentPartStyle {
 /** 图片路径工具，移植自 iOS `ImagePathUtil`。 */
 object ImagePathUtil {
 
-    /** `x.jpg` → `images/x.jpg`；已经是 `images/…` 的原样返回。 */
+    /**
+     * 归一图片键：**永远只保留最后一段文件名**，并拼上 `images/`。
+     *
+     * 这是安全边界，不是单纯的格式化：
+     * - 备份/旧库里可能出现 `images/../../databases/just_diary.db`；
+     * - 如果原样保留，`File(imagesDir, "…")` 会解析到 `images/` 之外，
+     *   删除/导出时就会碰到数据库或设置文件。
+     *
+     * 非法文件名（`.`/`..`、含 `/` `\` NUL）统一折成 [INVALID_IMAGE_NAME]，
+     * 让它只指向一个不存在的占位文件，而不是逃出目录。
+     */
     fun normalizeSrcKey(src: String): String {
-        if (src.startsWith(IMAGE_DIR_PREFIX)) return src
         val basename = src.substringAfterLast('/')
-        return IMAGE_DIR_PREFIX + basename
+        return IMAGE_DIR_PREFIX + if (isSafeImageFileName(basename)) basename else INVALID_IMAGE_NAME
     }
+
+    /**
+     * 导入/库内 `src` 的严格校验：必须是 `images/<safe-name>`。
+     *
+     * 与 [normalizeSrcKey] 的区别：这里**不做修复**，调用方拿到 false 应当拒绝整包。
+     */
+    fun isValidStoredSrc(src: String): Boolean {
+        if (!src.startsWith(IMAGE_DIR_PREFIX)) return false
+        return isSafeImageFileName(src.removePrefix(IMAGE_DIR_PREFIX))
+    }
+
+    /**
+     * 导入旧库/旧备份时的兼容校验：允许省略 `images/` 前缀（v1 的 `"a.jpg"`），
+     * 但只允许**一个安全文件名**；`../`、绝对路径、嵌套目录仍然拒绝。
+     */
+    fun isValidImportSrc(src: String): Boolean {
+        val candidate = if (src.startsWith(IMAGE_DIR_PREFIX)) src else IMAGE_DIR_PREFIX + src
+        return isValidStoredSrc(candidate)
+    }
+
+    /** 一个纯文件名是否安全（不含目录分隔符、不是 `.`/`..`、不含 NUL）。 */
+    fun isSafeImageFileName(name: String): Boolean {
+        if (name.isEmpty() || name == "." || name == "..") return false
+        if (name.startsWith(".")) return false
+        if (name.contains('/') || name.contains('\\') || name.contains('\u0000')) return false
+        return true
+    }
+
+    /**
+     * `target` 是否严格位于 [root] 目录内（用 canonical path 判断，防 `..` / 符号链接）。
+     *
+     * 只用于防御性检查；调用方仍应只从白名单生成本地文件名。
+     */
+    fun isInside(root: java.io.File, target: java.io.File): Boolean = runCatching {
+        val rootPath = root.canonicalFile.path + java.io.File.separator
+        target.canonicalFile.path.startsWith(rootPath)
+    }.getOrDefault(false)
 
     /**
      * 把存储内容重写成当前格式，并把图片路径归一（`"x.jpg"` → `"images/x.jpg"`）。
@@ -137,6 +183,9 @@ object ImagePathUtil {
 
     const val IMAGE_DIR_PREFIX: String = "images/"
     const val IMAGE_DIR_NAME: String = "images"
+
+    /** 非法文件名的占位键；不会对应任何真实文件。 */
+    const val INVALID_IMAGE_NAME: String = "invalid_image"
 }
 
 /** 扁平化与编解码。 */

@@ -116,7 +116,7 @@ bash build.sh 02-home                                     # 单块
 | SDK | minSdk **33** / targetSdk 36 / compileSdk 37 |
 | 第三方 UI 库 | **零**。含不引 `material-icons-extended` |
 | 数据库 | `SQLiteOpenHelper` + 裸 SQL，**不用 Room**（表结构要与 iOS 逐字一致） |
-| 跨端互通 | 表名 / 列名 / 字符串取值 / `content_json` 字节 / zip 布局 / `settingsJson` 的 10 个键，一律不改 |
+| 跨端互通 | 表名 / 列名 / 字符串取值 / `content_json` 字节 / zip 布局 / `settingsJson` 的 12 个键，一律不改 |
 | 字号 | **从不落库**。`content_json` 只存语义样式（`title` / `heading` / `body` / `quote`）与行内标志 |
 | `start_time_utc` | 即使「自动记录时间」关闭也**照常写入**（`day_key` / `created_utc` / 排序依赖它）。该开关是**纯显示开关** |
 | `region1` | 「记录新位置」与「回填历史」两条路径规则**故意不同**，不要统一 |

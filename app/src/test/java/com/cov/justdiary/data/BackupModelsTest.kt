@@ -190,6 +190,34 @@ class BackupModelsTest {
     }
 
     @Test
+    fun `missing keys in an old backup keep the current settings`() {
+        val current = AppSettings(
+            dayStartHour = 4,
+            themeMode = AppSettings.THEME_DARK,
+            appLanguage = AppSettings.LANGUAGE_ZH,
+            shareLocPrecision = LocPrecision.province,
+            defaultLocPrecision = LocPrecision.city,
+        )
+        val old = json.decodeFromString(
+            AppSettingsJson.serializer(),
+            """{"day_start_hour":6}""",
+        )
+
+        // 只把备份里真实出现的 show 出来；其余保留当前值，不能用 DTO 的默认值覆盖。
+        val restored = old.toSettings(current, setOf("day_start_hour"))
+        assertEquals(6, restored.dayStartHour)
+        assertEquals(AppSettings.THEME_DARK, restored.themeMode)
+        assertEquals(AppSettings.LANGUAGE_ZH, restored.appLanguage)
+        assertEquals(LocPrecision.province, restored.shareLocPrecision)
+        assertEquals(LocPrecision.city, restored.defaultLocPrecision)
+
+        // 全部键都“出现”时才按备份覆盖（导出/新备份走这条）。
+        val full = old.toSettings(current, AppSettingsJson.BUSINESS_KEYS)
+        assertEquals(LocPrecision.district, full.shareLocPrecision)
+        assertEquals(LocPrecision.auto, full.defaultLocPrecision)
+    }
+
+    @Test
     fun `unknown settings keys are ignored`() {
         val parsed = json.decodeFromString(
             AppSettingsJson.serializer(),

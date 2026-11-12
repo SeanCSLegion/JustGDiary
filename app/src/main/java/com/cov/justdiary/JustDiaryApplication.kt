@@ -19,6 +19,8 @@ class JustDiaryApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(applicationContext)
+        // P0-1：顺手清掉超过 14 天的旧草稿；失败不影响启动。
+        runCatching { container.editorDrafts.clearStale() }
         Log.app.i("JustDiaryApplication created")
     }
 }

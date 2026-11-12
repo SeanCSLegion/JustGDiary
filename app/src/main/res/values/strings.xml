@@ -94,6 +94,10 @@
     <string name="settings_import_busy">Importing backup…</string>
     <string name="settings_import_success_title">Import complete</string>
     <string name="settings_import_success_msg">Added %1$d days, skipped %2$d, overwritten %3$d (%4$d blocks, %5$d images).</string>
+    <string name="settings_import_day_start_title">Recalculate day boundaries?</string>
+    <string name="settings_import_day_start_msg">The backup uses %1$d:00 as the start of a new day; this device uses %2$d:00. Recalculating will move %3$d blocks to another day. Recalculate now?</string>
+    <string name="settings_import_day_start_apply">Recalculate</string>
+    <string name="settings_import_day_start_keep">Keep current</string>
     <string name="settings_import_failed_title">Import failed</string>
     <string name="settings_import_failed_msg">The backup file is invalid or the import failed. Please try again.</string>
     <string name="settings_settings_restored">App settings were restored as well.</string>

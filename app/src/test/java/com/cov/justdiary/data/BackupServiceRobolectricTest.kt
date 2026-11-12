@@ -208,7 +208,7 @@ class BackupServiceRobolectricTest {
     }
 
     @Test
-    fun `import restores settings when the package carries them`(): Unit = runBlocking {
+    fun `import returns restored settings for the caller to apply`(): Unit = runBlocking {
         repository.prepare()
         writeDay("2026-09-14", "带设置导出")
         settings.save(
@@ -222,8 +222,10 @@ class BackupServiceRobolectricTest {
 
         val stats = backupService.importBackup(packageFile, ImportMode.OVERWRITE)
         assertTrue("备份里带了设置，应当一并恢复", stats.settingsRestored)
-        assertEquals(6, settings.load().dayStartHour)
-        assertEquals(AppSettings.THEME_DARK, settings.load().themeMode)
+        assertEquals("服务层把解析后的设置交回给 UI", 6, stats.restoredSettings?.dayStartHour)
+        assertEquals(AppSettings.THEME_DARK, stats.restoredSettings?.themeMode)
+        // P0-3：服务层不直接写设置 —— 换日时刻需要先问用户，外观副作用由 ViewModel/Applier 执行。
+        assertEquals("服务层不应直接改本机设置", 4, settings.load().dayStartHour)
         packageFile.delete()
     }
 

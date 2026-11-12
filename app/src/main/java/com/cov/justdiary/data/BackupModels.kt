@@ -1,5 +1,6 @@
 package com.cov.justdiary.data
 
+import com.cov.justdiary.model.AppSettings
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -48,6 +49,13 @@ data class BackupStats(
     val importedBlocks: Int = 0,
     val importedImages: Int = 0,
     val settingsRestored: Boolean = false,
+    /**
+     * 备份里解析出来的完整设置；`null` 表示包内没有设置或解析失败。
+     *
+     * 调用方（`SettingsViewModel`）用它执行语言/主题/提醒等副作用；
+     * [settingsRestored] 只表示“有没有恢复设置”，不要只凭它判断。
+     */
+    val restoredSettings: AppSettings? = null,
 )
 
 /** 导入方式。iOS 侧是字符串 `"skip"` / 其它（视为覆盖）。 */

@@ -121,6 +121,40 @@ class AppSettingsApplier(
     }
 
     /**
+     * 导入备份后应用设置（P0-3）。
+     *
+     * 与 [commit] 的差异：
+     * - **不做** `day_start_hour` 重算（由设置页先问用户，再单独走 [commit]）；
+     * - **不做** 历史地区回填（导入的备份已经有地区列；避免一次导入触发大量网络请求）；
+     * - 语言放在最后应用：`setApplicationLocales` 会重建 Activity，先让它把前面
+     *   `settings.save` / 夜间模式 / 提醒排期都跑完。
+     */
+    suspend fun applyImported(old: AppSettings, new: AppSettings): SettingsApplyOutcome {
+        settings.save(new)
+        var needsLocationPermission = false
+        if (old.themeMode != new.themeMode) {
+            applyNightMode(new.themeMode)
+        }
+        if (old.appLanguage != new.appLanguage ||
+            old.remindEnabled != new.remindEnabled ||
+            old.remindHour != new.remindHour ||
+            old.remindMinute != new.remindMinute
+        ) {
+            runCatching { reminderScheduler.rearm() }
+                .onFailure { Log.app.w("导入后重排提醒失败：${it.message}") }
+        }
+        if (!old.autoLoc && new.autoLoc) {
+            needsLocationPermission = true
+        }
+        if (old.appLanguage != new.appLanguage) {
+            // 必须最后：它会重建 Activity，前面任何副作用都来不及跑。
+            applyLanguage(new.appLanguage)
+        }
+        settings.invalidate()
+        return SettingsApplyOutcome(needsLocationPermissionRequest = needsLocationPermission)
+    }
+
+    /**
      * 回填历史片段的地区列。
      *
      * 没有授权就直接跳过：iOS 也是在 `requestPermission()` 之后**立刻**发起回填（存在竞态，

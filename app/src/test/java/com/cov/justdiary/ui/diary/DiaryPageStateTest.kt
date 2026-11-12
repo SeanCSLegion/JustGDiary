@@ -5,6 +5,7 @@ import com.cov.justdiary.app.AppContainer
 import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.data.DiaryTopBarState
 import com.cov.justdiary.data.db.JustDiarySchema
+import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.model.ContentPartStyle
@@ -12,6 +13,7 @@ import com.cov.justdiary.model.DateUtil
 import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.model.LocQuality
 import com.cov.justdiary.model.LocRegion
+import com.cov.justdiary.service.EditorDraft
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -541,6 +543,85 @@ class DiaryPageStateTest {
         assertNull(state.alert)
         assertTrue("空内容 = 没写：整页关掉", state.requestDismiss)
         runBlocking { assertNull(container.repository.getDiaryByDay(todayKey())) }
+    }
+
+    // ------------------------------------------------------------------ 草稿（P0-1）
+
+    @Test
+    fun `new block draft is restored when the view model is recreated`() {
+        val key = "${todayKey()}#new"
+        val content = ContentFlatten.serializeContent(parts("草稿正文"))
+        container.editorDrafts.save(
+            key,
+            EditorDraft(
+                contentJson = content,
+                startTimeUtc = System.currentTimeMillis() - 60_000,
+                lineIndex = 0,
+                selectionStart = 4,
+                selectionEnd = 4,
+                endLineIndex = 0,
+            ),
+        )
+
+        openTodayInWrite()
+        assertEquals("首次进入应从草稿恢复", content, viewModel.state.value.editorDraft?.contentJson)
+
+        // 模拟 Activity 重建 / 进程恢复：同一个容器、新的 ViewModel。
+        val recreated = DiaryPageViewModel(container)
+        recreated.open(todayKey(), startInWrite = true)
+        val state = runBlocking {
+            withTimeout(10_000) { recreated.state.first { !it.isRead && it.loadToken > 0 } }
+        }
+        assertEquals("重建后仍应恢复草稿", content, state.editorDraft?.contentJson)
+
+        container.editorDrafts.clear(key)
+    }
+
+    @Test
+    fun `editing an existing block restores its draft`() {
+        seedToday()
+        openToday()
+        val block = viewModel.state.value.blocks[0]
+        val key = "${todayKey()}#${block.id}"
+        val content = ContentFlatten.serializeContent(parts("只改了一半"))
+        container.editorDrafts.save(
+            key,
+            EditorDraft(contentJson = content, startTimeUtc = block.startTimeUtc),
+        )
+
+        viewModel.enterEditBlock(0)
+
+        assertEquals(content, viewModel.state.value.editorDraft?.contentJson)
+        assertEquals("载入的是原文，不是草稿", ContentFlatten.parseContent(block.contentJson), viewModel.state.value.loadParts)
+        container.editorDrafts.clear(key)
+    }
+
+    @Test
+    fun `saving a new block clears its draft`() {
+        container.settings.save(AppSettings(autoLoc = false))
+        openTodayInWrite()
+        val key = "${todayKey()}#new"
+        container.editorDrafts.save(
+            key,
+            EditorDraft(
+                contentJson = ContentFlatten.serializeContent(parts("临时")),
+                startTimeUtc = System.currentTimeMillis(),
+            ),
+        )
+
+        viewModel.save(
+            EditorSavePayload(
+                parts = parts("保存后的正文"),
+                startTimeUtc = System.currentTimeMillis(),
+            ),
+        )
+        awaitState { state ->
+            state.isRead && state.blocks.any {
+                ContentFlatten.parseContent(it.contentJson).firstOrNull()?.text == "保存后的正文"
+            }
+        }
+
+        assertNull("保存成功后草稿必须清掉，否则下次会恢复旧内容", container.editorDrafts.load(key))
     }
 
     // ------------------------------------------------------------------ 待办

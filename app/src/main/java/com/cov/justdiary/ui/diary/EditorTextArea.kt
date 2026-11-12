@@ -453,12 +453,15 @@ internal class DiaryEditText(context: android.content.Context) : AppCompatEditTe
  * 同时持有"模型"（[lines]）与"平台文本的版本号"（[revision]），
  * 并用 [suppressWatcher] 隔断"回写文本 → 触发 watcher → 又改模型"的回环。
  */
-class EditorTextState(initialLines: List<EditorLine>) {
+class EditorTextState(
+    initialLines: List<EditorLine>,
+    initialSelection: EditorSelection = EditorSelection.NONE,
+) {
 
     var lines: List<EditorLine> by mutableStateOf(initialLines)
         private set
 
-    var selection: EditorSelection by mutableStateOf(EditorSelection.NONE)
+    var selection: EditorSelection by mutableStateOf(initialSelection.coerceTo(initialLines))
         private set
 
     /**

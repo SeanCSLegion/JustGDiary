@@ -653,6 +653,10 @@ class DiaryRepository(
                 val mainDb = helper.writableDatabase
                 val backupDb = SQLiteDatabase.openDatabase(backupDbPath, null, SQLiteDatabase.OPEN_READONLY)
                 try {
+                    // P0-0：在写入任何一天之前校验备份库里的图片路径。
+                    // 只校验 manifest 不够 —— 恶意 src 可能只藏在 content_json 里，
+                    // 导入后会在编辑/删除时被 resolveImagePath(...).delete() 用到。
+                    validateBackupImageSources(backupDb)
                     val columns = tableColumnsOf(backupDb, JustDiarySchema.TABLE_EDIT_BLOCK)
                     val hasRegion = "region1" in columns
                     val hasQuality = "loc_quality" in columns
@@ -777,6 +781,23 @@ class DiaryRepository(
         }
         emitChange()
         return stats
+    }
+
+    /** 导入前置校验：备份库中每个 `content_json.src` 都必须是 `images/<safe-name>`。 */
+    private fun validateBackupImageSources(backupDb: SQLiteDatabase) {
+        backupDb.rawQuery("SELECT content_json FROM edit_block;", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                val raw = cursor.getString(0) ?: continue
+                val srcs = runCatching { ImagePathUtil.collectImageSrcs(raw) }.getOrElse {
+                    throw BackupException.InvalidManifest("备份里有无法解析的 content_json：${it.message}")
+                }
+                for (src in srcs) {
+                    if (!ImagePathUtil.isValidImportSrc(src)) {
+                        throw BackupException.InvalidManifest("备份包含非法图片路径：$src")
+                    }
+                }
+            }
+        }
     }
 
     private fun readBackupBlocks(
