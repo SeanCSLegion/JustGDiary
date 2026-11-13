@@ -28,7 +28,9 @@
 6. **iOS 最近 17 个提交里需要跟的 3 件事已全部落地**：图片按原分辨率落盘、年历两个小几何、日历无障碍；引用回车也已按“一律跟随 iOS”改回续引用（P1-4）。P1-7 / P1-9 / P1-11 / P1-13 / P1-14 / P1-15 / P1-16 同轮完成，详见 `docs/migration-progress.md` R36。
 7. **P2 数据/性能小问题已收口（R38）**：P2-6b 全部、P2-5 孤儿图片/存储用量、编辑 vs 阅读首条像素基线已完成。
 8. **后续只剩两件大改**：P2-3 morph 性能与 P2-6 大文件拆分（各自需要单独一轮测量/重构）；P2-11/12/13 无障碍与真机走查暂不做。发布链路已在 R37 准备好。
-9. **发布链路已准备（R37）**：版本号走 `version.properties`、release 签名可注入、R8/资源压缩已开、CI 与 `androidTest` 已落地；签名 release APK 4.2MB / AAB 6.0MB 已冒烟。剩下的是真实签名 secrets、Play Console 上架与可选的 baseline profile / macrobenchmark。
+9. **发布链路已准备（R37）**：版本号走 `version.properties`、release 签名可注入、R8/资源压缩已开、CI 与 `androidTest` 已落地；签名 release APK 4.1MB / AAB 6.0MB 已冒烟。剩下的是真实签名 secrets、Play Console 上架与可选的 baseline profile / macrobenchmark。
+
+> 用户可见行为的现状稿见 [`docs/app-current-state.md`](docs/app-current-state.md)（随每次行为变更更新）。
 
 ---
 

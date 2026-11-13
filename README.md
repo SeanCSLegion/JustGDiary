@@ -3,8 +3,8 @@
 日记应用 **[JustADiary](../JustADiary)** 的 Android 版本。数据层与 iOS 版**严格互通**：同一套表名/列名/字符串取值/`content_json`/备份包格式，`.jdiary` 备份可以双向互导。
 
 > **当前状态：M0–M9 的代码工作已完成，并已在模拟器上实测通过一轮界面返工**
-> （详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)，
-> 界面规范见 [`docs/design-spec.md`](docs/design-spec.md)）。
+> （当前功能/交互现状见 **[`docs/app-current-state.md`](docs/app-current-state.md)**；
+> 详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)）。
 > `./gradlew clean assembleDebug testDebugUnitTest` 通过，**636 个 JVM 单测**全绿，
 > 另有 2 个脚本做跨端与 SQL 的独立校验。首页已按 Material 3 重新设计并在
 > Pixel 10 Pro AVD 上验证（竖屏 / 横屏分栏 / 深色 / TalkBack 语义，
@@ -164,7 +164,8 @@ JustGDiary/
 
 | 文件 | 内容 |
 | --- | --- |
-| [`docs/ui-design-plan.md`](docs/ui-design-plan.md) | **界面设计方案 v2（权威）** —— 三态首页、逐屏规范、设计令牌、动效几何、缺陷清单与实施顺序。改界面前先读这一篇 |
+| [`docs/app-current-state.md`](docs/app-current-state.md) | **当前应用现状稿（用户可见行为的唯一事实来源）** —— 按界面分类的功能/布局/交互/状态/限制，随每次行为变更更新 |
+| [`docs/ui-design-plan.md`](docs/ui-design-plan.md) | 界面设计方案 v2（历史设计意图；与现状稿冲突时以现状稿为准） |
 | [`docs/design-spec.md`](docs/design-spec.md) | 首轮界面规范与上机缺陷清单（**部分条款已被 v2 取代**，见 v2 附录 B） |
 | [`docs/ios-reference/`](docs/ios-reference) | iOS 侧逐条数值提取（含 `file:line`），供对照实现 |
 | [`docs/android-migration-plan.md`](docs/android-migration-plan.md) | 迁移方案（含所有已确认的决策与理由、逐页迁移清单、风险清单） |
