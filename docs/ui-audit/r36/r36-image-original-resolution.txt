@@ -1,0 +1,7 @@
+Photo Picker source screenshot: 1280x2856
+Imported file:
+total 360
+-rw------- 1 u0_a231 u0_a231 363515 2026-11-13 19:48 img_1794570492025.jpg
+
+Pulled file dimensions:
+(1280, 2856)

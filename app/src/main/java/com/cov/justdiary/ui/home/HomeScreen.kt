@@ -427,6 +427,23 @@ fun HomeScreen(
 
     fun jumpYears(delta: Int) = stepMonth(delta * 12)
 
+    /**
+     * 无障碍动作「前一天 / 后一天」（P1-3）。
+     *
+     * 选中日前后移动；跨月时月份标题与连续流一起过去（与 `carrySelectionInto` 不同，
+     * 这里**不动**当月的日号 —— 用户明确点了"后一天"，就选那一天）。
+     */
+    fun stepDay(delta: Int) {
+        val current = DateUtil.parseDayKey(selectedKey) ?: return
+        val next = current.plusDays(delta.toLong())
+        selectedKey = DateUtil.dayKeyOf(next)
+        val nextMonth = CalendarGrid.monthKeyOf(next)
+        if (nextMonth != monthKey) {
+            monthKey = nextMonth
+            jumpToMonth(nextMonth, animated = true)
+        }
+    }
+
     /** 年态的翻年（手写分页器的收尾）：只换 `monthKey`，不碰流的滚动位置。 */
     fun pageMonth(delta: Int) {
         val keys = CalendarGrid.MONTH_KEYS
@@ -598,6 +615,8 @@ fun HomeScreen(
     val a11yNextMonth = stringResource(R.string.a11y_next_month)
     val a11yPrevYear = stringResource(R.string.a11y_prev_year)
     val a11yNextYear = stringResource(R.string.a11y_next_year)
+    val a11yPrevDay = stringResource(R.string.a11y_prev_day)
+    val a11yNextDay = stringResource(R.string.a11y_next_day)
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val availableH = maxHeight.value
@@ -761,6 +780,8 @@ fun HomeScreen(
                 CustomAccessibilityAction(a11yNextMonth) { stepMonth(1); true },
                 CustomAccessibilityAction(a11yPrevYear) { jumpYears(-1); true },
                 CustomAccessibilityAction(a11yNextYear) { jumpYears(1); true },
+                CustomAccessibilityAction(a11yPrevDay) { stepDay(-1); true },
+                CustomAccessibilityAction(a11yNextDay) { stepDay(1); true },
             )
         }
 

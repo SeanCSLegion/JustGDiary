@@ -50,8 +50,27 @@
                 <data
                     android:scheme="justdiary"
                     android:host="editor" />
+                <!-- P1-9：快捷方式「搜索日记」 -->
+                <data
+                    android:scheme="justdiary"
+                    android:host="search" />
             </intent-filter>
+
+            <!-- P1-9：长按图标的两个静态快捷方式（写今天 / 搜索日记） -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- P1-7：时区 / 系统时间变化后重排提醒（WorkManager 的延迟按旧时钟算） -->
+        <receiver
+            android:name=".service.ReminderTimeChangeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+            </intent-filter>
+        </receiver>
 
         <!-- 分享长图与备份包：把私有目录里的文件暴露成可授权的 content:// URI -->
         <provider

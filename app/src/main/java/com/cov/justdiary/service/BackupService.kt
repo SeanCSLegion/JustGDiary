@@ -178,6 +178,8 @@ class BackupService(
                 // 先校验 manifest 里的图片映射，任何可疑路径都整包拒绝（P0-0）。
                 val srcMap = validatedImageEntries(zip, manifest)
                 val copied = mutableMapOf<String, String>()
+                // P1-15：本次导入新落盘的图片。DB 事务失败时整批删掉，不留"半套图片"。
+                val createdImages = mutableListOf<File>()
                 var importedImages = 0
 
                 val copyImage: (String) -> String = { rawSrc ->
@@ -190,23 +192,42 @@ class BackupService(
                         var result = key
                         if (entryName != null) {
                             val ext = imageExtension(entryName)
-                            val newName = "imp_${stamp}_${importedImages + 1}.$ext"
-                            val target = File(imagesDir, newName)
-                            if (!ImagePathUtil.isInside(imagesDir, target)) {
-                                throw BackupException.InvalidManifest("图片目标路径越界：$newName")
+                            // 自增序号 + 存在性检查：同名旧文件绝不被覆盖（备份可重复导入）。
+                            var slot = importedImages + 1
+                            var target = File(imagesDir, "imp_${stamp}_$slot.$ext")
+                            while (target.exists()) {
+                                slot += 1
+                                target = File(imagesDir, "imp_${stamp}_$slot.$ext")
                             }
+                            if (!ImagePathUtil.isInside(imagesDir, target)) {
+                                throw BackupException.InvalidManifest("图片目标路径越界：${target.name}")
+                            }
+                            // 先登记再解：`extractTo` 中途抛异常时也在这批清理名单里。
+                            createdImages += target
                             if (zip.extractTo(entryName, target)) {
                                 importedImages += 1
-                                result = ImagePathUtil.IMAGE_DIR_PREFIX + newName
+                                result = ImagePathUtil.IMAGE_DIR_PREFIX + target.name
                                 copied[key] = result
+                            } else {
+                                target.delete()
+                                createdImages.remove(target)
                             }
                         }
                         result
                     }
                 }
 
-                var stats = repository.mergeBackupDatabase(backupDb.absolutePath, mode, copyImage)
-                stats = stats.copy(importedImages = importedImages)
+                val merged = try {
+                    repository.mergeBackupDatabase(backupDb.absolutePath, mode, copyImage)
+                } catch (error: Throwable) {
+                    // 整个 DB 合并在一个事务里（P1-15），回滚后这些图片已经没有任何引用。
+                    createdImages.forEach { image ->
+                        runCatching { image.delete() }
+                            .onFailure { Log.backup.w("清理未提交的导入图片失败：${image.name}") }
+                    }
+                    throw error
+                }
+                var stats = merged.copy(importedImages = importedImages)
 
                 if (manifest.settingsJson.isNotEmpty()) {
                     val current = settings.load()

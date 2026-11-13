@@ -19,6 +19,10 @@ class JustDiaryApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(applicationContext)
+        // P1-12：只在这里（Activity 创建前）对齐一次 AppCompat 的 DayNight，
+        // 让冷启动 / 语言重建的起始窗口背景与用户主题一致；运行期切主题不再重建。
+        runCatching { container.appSettingsApplier.applyInitialNightMode() }
+            .onFailure { Log.app.w("初始化窗口主题失败：${it.message}") }
         // P0-1：顺手清掉超过 14 天的旧草稿；失败不影响启动。
         runCatching { container.editorDrafts.clearStale() }
         Log.app.i("JustDiaryApplication created")

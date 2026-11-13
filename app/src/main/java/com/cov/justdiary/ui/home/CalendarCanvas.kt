@@ -205,8 +205,8 @@ fun YearCanvas(
                 val dayFont = CalendarLayout.miniDayFont(grid.w / 7f, grid.h / CalendarLayout.MONTH_ROWS)
                 val dayFontSize = DynamicTypeMetrics.calendarSp(dayFont.dp, density.fontScale)
                 val rows = CalendarGrid.displayedWeeks(monthFirst, weekStart)
-                // 「今天」的实心圆：半径按格子的短边取，封顶保证不碰到上下两行
-                val todayRadius = minOf(cellW, cellH) * 0.42f
+                // 选中 / 今天的实心圆：半径按格子的短边取（P1-2 与月视图同一档比例）
+                val todayRadius = CalendarLayout.yearDayCircleRadius(cellW, cellH)
 
                 // 只跳过"网格"，卡片标题照画（它是"我在哪个月"的锚点）
                 if (gridHidden) continue@monthLoop
@@ -258,7 +258,8 @@ fun YearCanvas(
                         // 有日记：日号下方 2dp 短横线（宽 = min(20, cellW × 0.5)，与月格同一条尺子）
                         if (hasDiary) {
                             val markW = minOf(20f, cellW * 0.5f)
-                            val markY = cy + todayRadius * 0.86f
+                            // 挂在**日号行盒底**，而不是圆半径上 —— 放大圆不会把标记带远。
+                            val markY = CalendarLayout.yearDiaryMarkTop(cy, layout.size.height.toFloat())
                             drawRoundRect(
                                 color = if (isSelected) onPrimary else primary,
                                 topLeft = Offset(cx - markW / 2f, markY),

@@ -1,5 +1,8 @@
 package com.cov.justdiary.ui.home
 
+import android.content.Context
+import android.view.accessibility.AccessibilityManager
+import com.cov.justdiary.R
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -12,6 +15,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,6 +31,7 @@ import androidx.compose.ui.text.drawText
 import com.cov.justdiary.service.DateFormats
 import java.util.Locale
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -56,7 +62,9 @@ import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
@@ -1030,7 +1038,7 @@ private fun MonthFlowBlock(
  * 应该做成"只在无障碍开启时挂上那些节点"，而不是常驻。
  */
 @Composable
-private fun BlockCanvas(
+internal fun BlockCanvas(
     block: MonthFlowLayout.Block,
     weeks: List<List<LocalDate>>,
     metrics: CalendarLayout.DayMetrics,
@@ -1047,6 +1055,8 @@ private fun BlockCanvas(
     val measurer = rememberTextMeasurer(cacheSize = BLOCK_TEXT_CACHE)
     val textLayouts = MorphTextLayouts.shared
     val scheme = MaterialTheme.colorScheme
+    // P1-3：只有无障碍开启时才挂逐日语义节点；正常模式继续走 Canvas（不引入 300 个布局节点）。
+    val accessibilityEnabled = rememberAccessibilityEnabled()
 
     Box(
         modifier = modifier
@@ -1055,24 +1065,31 @@ private fun BlockCanvas(
             // 整块既画不出来也收不到手势（实测点日期没反应）。
             .width((metrics.cellW * 7f).dp)
             .height((block.rowCount * rowH).dp)
-            // 命中：一格一格的坐标换算，避免为 42 个日期各建一个可点节点。
-            // 起手 2dp 内不消费事件，日期格的点击与月流的拖动互不打架。
-            .pointerInput(block.key, weeks, metrics.cellW, metrics.cellH) {
-                detectTapGestures { pos ->
-                    val row = (pos.y / (metrics.cellH * density.density)).toInt()
-                    val col = (pos.x / (metrics.cellW * density.density)).toInt()
-                    val week = weeks.getOrNull(row) ?: return@detectTapGestures
-                    if (col !in week.indices) return@detectTapGestures
-                    val date = week[col]
-                    // 只有当月日期可点（相邻月在本路径里不画）
-                    if (date.year != block.monthFirst.year ||
-                        date.monthValue != block.monthFirst.monthValue
-                    ) {
-                        return@detectTapGestures
+            .then(
+                if (accessibilityEnabled) {
+                    Modifier
+                } else {
+                    // 命中：一格一格的坐标换算，避免为 42 个日期各建一个可点节点。
+                    // 起手 2dp 内不消费事件，日期格的点击与月流的拖动互不打架。
+                    // 无障碍模式下由下面那层逐日节点接管点击，避免同一次点按被处理两遍。
+                    Modifier.pointerInput(block.key, weeks, metrics.cellW, metrics.cellH) {
+                        detectTapGestures { pos ->
+                            val row = (pos.y / (metrics.cellH * density.density)).toInt()
+                            val col = (pos.x / (metrics.cellW * density.density)).toInt()
+                            val week = weeks.getOrNull(row) ?: return@detectTapGestures
+                            if (col !in week.indices) return@detectTapGestures
+                            val date = week[col]
+                            // 只有当月日期可点（相邻月在本路径里不画）
+                            if (date.year != block.monthFirst.year ||
+                                date.monthValue != block.monthFirst.monthValue
+                            ) {
+                                return@detectTapGestures
+                            }
+                            onDayTap(date, row)
+                        }
                     }
-                    onDayTap(date, row)
-                }
-            },
+                },
+            ),
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             // 临时探针：这一块"我们自己画一遍"到底要多久（区分"首次挂载"与"稳态"）
@@ -1146,7 +1163,120 @@ private fun BlockCanvas(
                 misses = textLayouts.misses - probeMissBase,
             )
         }
+        if (accessibilityEnabled) {
+            CalendarDayA11yLayer(
+                block = block,
+                weeks = weeks,
+                metrics = metrics,
+                selectedKey = selectedKey,
+                todayKey = todayKey,
+                flags = flags,
+                onDayTap = onDayTap,
+            )
+        }
     }
+}
+
+/**
+ * 无障碍开启时，在一个月份块上叠 35–42 个**透明**的逐日节点。
+ *
+ * 复用周视图那一套 [CalendarDayCell]（`drawVisuals = false`）：节点的
+ * `contentDescription`（日期 · 今天/选中 · 有日记/无日记）、`Role.Button`、点击动作
+ * 与周视图完全同源；视觉仍是下面那张 Canvas。只在该模式下付出节点成本。
+ */
+@Composable
+private fun CalendarDayA11yLayer(
+    block: MonthFlowLayout.Block,
+    weeks: List<List<java.time.LocalDate>>,
+    metrics: CalendarLayout.DayMetrics,
+    selectedKey: String,
+    todayKey: String,
+    flags: Set<String>,
+    onDayTap: (java.time.LocalDate, Int) -> Unit,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    val todayLabel = stringResource(R.string.index_today)
+    val selectedLabel = stringResource(R.string.index_selected)
+    val hasDiaryLabel = stringResource(R.string.index_has_diary)
+    val noDiaryLabel = stringResource(R.string.index_no_diary)
+    val dayFontSize = DynamicTypeMetrics.calendarSp(metrics.dayFont.dp, fontScale)
+    val lunarFontSize = DynamicTypeMetrics.calendarSp(metrics.lunarFont.dp, fontScale)
+    val circleDiameter = metrics.circleDiameter.dp
+    val diaryMarkWidth = minOf(20f, metrics.cellW * 0.5f).dp
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        weeks.forEachIndexed { row, week ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(metrics.cellH.dp),
+            ) {
+                week.forEach { date ->
+                    val inMonth = date.year == block.monthFirst.year &&
+                        date.monthValue == block.monthFirst.monthValue
+                    if (!inMonth) {
+                        // 相邻月日期不在本块的点击路径里（与 Canvas 的绘制规则一致）
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight())
+                        return@forEach
+                    }
+                    val dayKey = DateUtil.dayKeyOf(date)
+                    CalendarDayCell(
+                        date = date,
+                        dayKey = dayKey,
+                        drawVisuals = false,
+                        showLunar = metrics.lunarAlpha > 0.01f,
+                        isSelected = dayKey == selectedKey,
+                        isToday = dayKey == todayKey,
+                        hasDiary = flags.contains(dayKey),
+                        todayKey = todayKey,
+                        dayFontSize = dayFontSize,
+                        lunarFontSize = lunarFontSize,
+                        circleDiameter = circleDiameter,
+                        diaryMarkWidth = diaryMarkWidth,
+                        enabled = true,
+                        todayLabel = todayLabel,
+                        selectedLabel = selectedLabel,
+                        hasDiaryLabel = hasDiaryLabel,
+                        noDiaryLabel = noDiaryLabel,
+                        onClick = { onDayTap(date, row) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 读 `AccessibilityManager.isEnabled`，并在系统开关变化时重组。
+ *
+ * Compose 的 `LocalAccessibilityManager` 只暴露了"推荐超时时长"，没有 `isEnabled`，
+ * 所以这里直接听平台的两个回调（无障碍服务 / 触摸探索）。
+ */
+@Composable
+private fun rememberAccessibilityEnabled(): Boolean {
+    val context = LocalContext.current
+    val manager = remember(context) {
+        context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    }
+    var enabled by remember(manager) { mutableStateOf(manager?.isEnabled == true) }
+    DisposableEffect(manager) {
+        if (manager == null) return@DisposableEffect onDispose { }
+        val stateListener = AccessibilityManager.AccessibilityStateChangeListener { isEnabled ->
+            enabled = isEnabled
+        }
+        val touchListener = AccessibilityManager.TouchExplorationStateChangeListener {
+            // 触摸探索开关不改变 isEnabled，但可能单独切换（TalkBack 刚开/刚关）
+            enabled = manager.isEnabled
+        }
+        manager.addAccessibilityStateChangeListener(stateListener)
+        manager.addTouchExplorationStateChangeListener(touchListener)
+        onDispose {
+            manager.removeAccessibilityStateChangeListener(stateListener)
+            manager.removeTouchExplorationStateChangeListener(touchListener)
+        }
+    }
+    return enabled
 }
 
 /** 空闲时"向两侧各补挂一块"的节奏（ms）。太密会把几块的重录挤在连续几帧里。 */

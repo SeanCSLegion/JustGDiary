@@ -5,7 +5,7 @@
 > **当前状态：M0–M9 的代码工作已完成，并已在模拟器上实测通过一轮界面返工**
 > （详细的分里程碑记录见 [`docs/migration-progress.md`](docs/migration-progress.md)，
 > 界面规范见 [`docs/design-spec.md`](docs/design-spec.md)）。
-> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**614 个 JVM 单测**全绿，
+> `./gradlew clean assembleDebug testDebugUnitTest` 通过，**630 个 JVM 单测**全绿，
 > 另有 2 个脚本做跨端与 SQL 的独立校验。首页已按 Material 3 重新设计并在
 > Pixel 10 Pro AVD 上验证（竖屏 / 横屏分栏 / 深色 / TalkBack 语义，
 > 证据见 `docs/design-spec.md` §8）。
@@ -89,7 +89,7 @@
 ```bash
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"   # 本机无系统 JDK
 
-./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 614 个 JVM 单测（含 19 个 Robolectric 类 / 160 条运行时用例）
+./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 630 个 JVM 单测（含 25 个 Robolectric 类 / 180 条运行时用例）
 
 # 两个独立校验脚本
 python3 tools/verify_sqlite_schema.py    # 从 Kotlin 源码抽出 DDL，用宿主 sqlite3 真跑一遍（18 条断言）
@@ -120,7 +120,7 @@ JustGDiary/
 
 1. **纯逻辑下沉，平台细节注入**。日历数学、分享长图版式、编辑模型、足迹聚合、搜索筛选、
    提醒排期、设置副作用、版面判定，全部是不依赖 Android/Compose 的纯函数或纯数据，
-   因此可以在 JVM 上逐条断言（这也是 614 个测试里绝大多数能存在的原因）。
+   因此可以在 JVM 上逐条断言（这也是 630 个测试里绝大多数能存在的原因）。
    平台相关的部分（`Geocoder`、`Spannable`、`WorkManager`、SAF、Canvas 绘制）放在 `service/` 与外层 `ui/`。
 2. **跨端契约冻结**。表名/列名/字符串取值/`content_json` 字节/zip 布局/`settingsJson` 的 12 个键
    都不允许"顺手改干净"：`.jdiary` 必须双向互通。为此专门用真实 iOS 源码编译出的产物当测试夹具
@@ -132,7 +132,7 @@ JustGDiary/
 **已验证**（都有可复现的命令）
 
 - 编译：`clean assembleDebug` 通过；
-- 单元测试：614 条全绿，覆盖日历/morph 数学、编辑模型与编辑器状态机、`content_json` 与 iOS 的字节级一致、
+- 单元测试：630 条全绿，覆盖日历/morph 数学、编辑模型与编辑器状态机、`content_json` 与 iOS 的字节级一致、
   跨端 zip 布局、搜索筛选、足迹聚合、提醒排期、设置副作用、版面判定的临界值、内联图片尺寸规则；
 - **运行时**（Robolectric）：真开一次 SQLite 跑完 v0→v1→v3 迁移链、写入/读回/编辑/删除/搜索、
   `day_key` 重算幂等、`EditorLine` ↔ `Spannable` 往返不丢图、导出→导入的 SKIP/OVERWRITE 两种模式；

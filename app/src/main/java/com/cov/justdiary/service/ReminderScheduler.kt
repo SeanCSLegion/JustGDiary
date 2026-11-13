@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,6 +18,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.cov.justdiary.R
+import com.cov.justdiary.app.MainActivity
 import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.model.DateUtil
 import java.time.LocalDateTime
@@ -119,6 +121,9 @@ class ReminderScheduler(
     }
 }
 
+/** 通知 / 动作共用的 PendingIntent requestCode。 */
+private const val REQUEST_OPEN_TODAY = 7
+
 /**
  * 投递每日提醒的 Worker。
  *
@@ -155,32 +160,39 @@ class DailyReminderWorker(
         val scheduler = (context as? com.cov.justdiary.JustDiaryApplication)?.container?.reminderScheduler
         scheduler?.ensureChannel()
 
-        // 点通知直接打开应用（M9 可以带 dayKey 直达当天编辑页）
-        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        val pending = intent?.let {
-            PendingIntent.getActivity(
-                context,
-                0,
-                it,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-        }
-
-        val notification = NotificationCompat.Builder(context, ReminderScheduler.CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(context.getString(R.string.reminder_title))
-            .setContentText(context.getString(R.string.reminder_content))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .apply { pending?.let { setContentIntent(it) } }
-            .build()
-
         runCatching {
-            NotificationManagerCompat.from(context).notify(ReminderSchedule.IDENTIFIER.hashCode(), notification)
+            NotificationManagerCompat.from(context)
+                .notify(ReminderSchedule.IDENTIFIER.hashCode(), buildReminderNotification(context))
         }.onFailure { Log.app.w("投递提醒通知失败：${it.message}") }
     }
+}
 
-    companion object {
-        const val UNUSED_INTENT_ACTION = "com.cov.justdiary.REMIND"
-    }
+/**
+ * P1-7：构建提醒通知（独立出来便于 Robolectric 断言小图标 / 动作 / 深链）。
+ *
+ * 点通知 / 动作「写日记」都直达**当天**阅读页；不写死 dayKey，打开时按当时的
+ * `dayStartHour` 重算，跨午夜也正确。
+ */
+internal fun buildReminderNotification(context: Context): android.app.Notification {
+    val appContext = context.applicationContext
+    val pending = PendingIntent.getActivity(
+        appContext,
+        REQUEST_OPEN_TODAY,
+        Intent(Intent.ACTION_VIEW, Uri.parse("justdiary://editor"), appContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val writeLabel = appContext.getString(R.string.reminder_action_write)
+
+    return NotificationCompat.Builder(appContext, ReminderScheduler.CHANNEL_ID)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setColor(ContextCompat.getColor(appContext, R.color.ic_launcher_background))
+        .setContentTitle(appContext.getString(R.string.reminder_title))
+        .setContentText(appContext.getString(R.string.reminder_content))
+        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        .setAutoCancel(true)
+        .setContentIntent(pending)
+        .addAction(R.drawable.ic_notification, writeLabel, pending)
+        .build()
 }

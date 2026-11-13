@@ -25,9 +25,12 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -164,9 +167,8 @@ fun EditorScreen(
         } ?: EditorSelection.NONE
     }
     val state = remember(loadToken) { EditorTextState(restoredLines, restoredSelection) }
-    val history = remember(loadToken) { EditorHistory(initial = originalLines) }
     val effectiveStartTimeUtc = initialDraft?.startTimeUtc ?: startTimeUtc
-    val dirty = hasChanges(state, originalLines, history)
+    val dirty = hasChanges(state, originalLines)
 
     // 草稿快照：内容 + 选区 + 新片段的时间。只在上报时序列化，不在每次重组做。
     fun currentDraft(): EditorDraft = EditorDraft(
@@ -201,21 +203,37 @@ fun EditorScreen(
     val focusManager = LocalFocusManager.current
     var editText by remember { mutableStateOf<AppCompatEditText?>(null) }
 
+    // P1-11：插图不是瞬时动作（大图解码 + 重新编码可能几百毫秒）。失败要有提示，
+    // 导入中要有一个**不挡键盘、不抢焦点**的轻量进度。
+    var importingImage by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val imageFailedText = stringResource(R.string.editor_image_failed_msg)
+    val importingText = stringResource(R.string.editor_image_importing)
+
     // 图片选择：Photo Picker（无需存储权限）
     val pickImage = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                // 调用方用 MediaStore 把图片导入应用目录（最长边 2048 / JPEG 85）
-                val imported = onImportImage(uri) ?: return@launch
-                // 插图 + **把光标移到图片下面那一行**（iOS `insertImage` 同一行为）：
-                // 否则插图之后接着打字会打在图片上面。
-                state.insertImage(
-                    src = imported.src,
-                    width = imported.width,
-                    height = imported.height,
-                )
+                importingImage = true
+                try {
+                    // 调用方用 MediaStore 把图片导入应用目录（原分辨率 / JPEG q0.95）
+                    val imported = onImportImage(uri)
+                    if (imported == null) {
+                        snackbarHostState.showSnackbar(imageFailedText)
+                        return@launch
+                    }
+                    // 插图 + **把光标移到图片下面那一行**（iOS `insertImage` 同一行为）：
+                    // 否则插图之后接着打字会打在图片上面。
+                    state.insertImage(
+                        src = imported.src,
+                        width = imported.width,
+                        height = imported.height,
+                    )
+                } finally {
+                    importingImage = false
+                }
             }
         }
     }
@@ -389,6 +407,36 @@ fun EditorScreen(
                         precisionMenuOpen = false
                         onRefreshLocation()
                     },
+                )
+            }
+        }
+
+        // 插图失败 / 提示（不阻塞键盘）
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = MenuBarOffset),
+        )
+        // 导入中的轻量进度：贴在格式栏上方，不抢焦点、不挡 IME
+        if (importingImage) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = MenuBarOffset)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text(
+                    text = importingText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -662,8 +710,7 @@ private fun dismissKeyboard(
 private fun hasChanges(
     state: EditorTextState,
     initialLines: List<EditorLine>,
-    history: EditorHistory,
-): Boolean = state.lines != initialLines || history.canUndo
+): Boolean = state.lines != initialLines
 
 /**
  * 保存载荷：内容 + **这一刻的起始时刻**。

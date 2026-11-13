@@ -302,7 +302,7 @@ private const val LUNAR_PROBE_TEXT = "初一"
  * 与纯数学层同源；原来写死 40dp，行高一变就会和相邻格相碰。
  */
 @Composable
-private fun CalendarDayCell(
+internal fun CalendarDayCell(
     date: LocalDate,
     /** `YYYY-MM-DD`，由调用方算好（一屏 180 格，重复计算 4 次很贵）。 */
     dayKey: String,

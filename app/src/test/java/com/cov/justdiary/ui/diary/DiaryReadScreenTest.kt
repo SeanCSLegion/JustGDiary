@@ -85,13 +85,13 @@ class DiaryReadScreenTest {
     @Test
     fun `a block card reads as one element with edit and delete custom actions`() {
         var edited: Int? = null
-        var toggled: Int? = null
+        var deleted: Int? = null
         rule.setContent {
             DiaryReadScreen(
                 dayTitle = "9月15日 周二",
                 blocks = listOf(block(id = 7L)),
                 onEditBlock = { edited = it },
-                onToggleSelect = { toggled = it },
+                onDeleteBlock = { deleted = it },
             )
         }
 
@@ -104,20 +104,23 @@ class DiaryReadScreenTest {
         actions.first { it.label == str(R.string.read_action_edit) }.action()
         assertEquals(0, edited)
         actions.first { it.label == str(R.string.delete) }.action()
-        assertEquals(0, toggled)
+        assertEquals("删除动作要真的删这一条，而不是默默加选中", 0, deleted)
     }
 
     @Test
     fun `todo rows toggle without entering the editor`() {
         var edited: Int? = null
-        var toggled: Pair<Int, Int>? = null
+        var toggled: Triple<Int, Int, Int>? = null
         rule.setContent {
             DiaryReadScreen(
                 dayTitle = "9月15日 周二",
                 blocks = listOf(
                     block(
                         id = 9L,
+                        // P1-14：正文在前、待办在后。旧实现会猜"第一个 items 段"，
+                        // 这里故意把待办放到 partIndex = 1。
                         parts = listOf(
+                            ContentPart(style = ContentPartStyle.body, text = "今天要办的事"),
                             ContentPart(
                                 style = ContentPartStyle.todo,
                                 items = listOf("买牛奶", "取快递"),
@@ -127,16 +130,18 @@ class DiaryReadScreenTest {
                     ),
                 ),
                 onEditBlock = { edited = it },
-                onToggleTodo = { blockIndex, itemIndex -> toggled = blockIndex to itemIndex },
+                onToggleTodo = { blockIndex, partIndex, itemIndex ->
+                    toggled = Triple(blockIndex, partIndex, itemIndex)
+                },
             )
         }
 
         rule.onNodeWithText("买牛奶").performClick()
-        assertEquals(0 to 0, toggled)
+        assertEquals(Triple(0, 1, 0), toggled)
         assertEquals("勾待办不该进编辑", null, edited)
 
         rule.onNodeWithText("取快递").performClick()
-        assertEquals(0 to 1, toggled)
+        assertEquals(Triple(0, 1, 1), toggled)
     }
 
     @Test

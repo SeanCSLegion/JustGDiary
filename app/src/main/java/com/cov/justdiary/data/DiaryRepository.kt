@@ -666,7 +666,13 @@ class DiaryRepository(
                     var skippedDays = 0
                     var overwrittenDays = 0
                     var importedBlocks = 0
+                    // 被 OVERWRITE 替换掉的旧片段引用的图片：事务提交后统一清（见函数末尾）。
+                    val removedImageSrcs = mutableListOf<String>()
 
+                    // P1-15：整个库合并放进**一个事务**。此前是"逐天事务"，第 2 天失败时
+                    // 第 1 天已经提交，用户看到"导入失败"但数据已经变了一半。
+                    mainDb.beginTransactionNonExclusive()
+                    try {
                     backupDb.rawQuery(JustDiarySchema.SELECT_BACKUP_DIARIES, null).use { diaryCursor ->
                         while (diaryCursor.moveToNext()) {
                             val dayKey = diaryCursor.stringOrNull("day_key") ?: ""
@@ -690,9 +696,8 @@ class DiaryRepository(
                                 hasCountryCode = hasCountryCode,
                             )
 
-                            mainDb.beginTransactionNonExclusive()
-                            try {
                                 if (existingId != null) {
+                                    removedImageSrcs += imageSrcsOfDiary(mainDb, existingId)
                                     mainDb.execSQL(JustDiarySchema.DELETE_BLOCKS_OF_DIARY, arrayOf<Any?>(existingId))
                                     mainDb.execSQL(JustDiarySchema.DELETE_DIARY_BY_ID, arrayOf<Any?>(existingId))
                                     mainDb.execSQL(JustDiarySchema.DELETE_DIARY_FLAG, arrayOf<Any?>(dayKey))
@@ -757,16 +762,20 @@ class DiaryRepository(
                                         if (c.moveToFirst()) upsertFtsEntry(mainDb, c.getLong(0), c.getString(1) ?: "")
                                     }
                                 }
-                                mainDb.setTransactionSuccessful()
-                            } finally {
-                                mainDb.endTransaction()
-                            }
                         }
                     }
 
                     mainDb.execSQL(JustDiarySchema.CLEAR_DIARY_FLAGS)
                     mainDb.execSQL(JustDiarySchema.REBUILD_DIARY_FLAGS)
                     rebuildSearchIndex(mainDb)
+                    mainDb.setTransactionSuccessful()
+                    } finally {
+                        mainDb.endTransaction()
+                    }
+
+                    // 事务已提交：被覆盖片段留下的旧图终于可以删了。删除放在事务**之后**，
+                    // 避免"事务回滚了、文件却已经被删"（P2-6b 的同类问题）。
+                    deleteImagesIfUnreferenced(mainDb, removedImageSrcs)
 
                     BackupStats(
                         importedDays = importedDays,
@@ -782,6 +791,19 @@ class DiaryRepository(
         emitChange()
         return stats
     }
+
+    /** 某一天全部片段的 `content_json` 里引用到的图片键（OVERWRITE 前用来清理旧图）。 */
+    private fun imageSrcsOfDiary(db: SQLiteDatabase, diaryId: Long): List<String> =
+        db.rawQuery(
+            "SELECT content_json FROM edit_block WHERE diary_id = ?;",
+            arrayOf(diaryId.toString()),
+        ).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    addAll(ImagePathUtil.collectImageSrcs(c.getString(0) ?: "[]"))
+                }
+            }
+        }
 
     /** 导入前置校验：备份库中每个 `content_json.src` 都必须是 `images/<safe-name>`。 */
     private fun validateBackupImageSources(backupDb: SQLiteDatabase) {

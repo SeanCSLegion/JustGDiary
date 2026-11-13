@@ -252,4 +252,23 @@
     <string name="settings_share_loc">Location in shared image</string>
     <string name="settings_share_loc_sub">No exact place or street</string>
     <string name="settings_share_loc_hidden">Hide</string>
+
+    <!-- 2026-11-13：P1 平台项新增文案 -->
+    <string name="a11y_prev_day">Previous day</string>
+    <string name="a11y_next_day">Next day</string>
+    <string name="notification_rationale_title">Turn on reminders</string>
+    <string name="notification_rationale_msg">Allow notifications so the journal can remind you on days you haven\'t written. You can change this later in Settings.</string>
+    <string name="notification_rationale_allow">Allow</string>
+    <string name="notification_rationale_not_now">Not now</string>
+    <string name="reminder_action_write">Write</string>
+    <string name="shortcut_write_short">Write today</string>
+    <string name="shortcut_write_long">Write today\'s journal</string>
+    <string name="shortcut_search_short">Search</string>
+    <string name="shortcut_search_long">Search journal</string>
+    <string name="startup_error_title">Couldn\'t open your journal</string>
+    <string name="startup_error_msg">Your entries may still be safe. Please retry before reinstalling the app. If this keeps happening, restore from a .jdiary backup.</string>
+    <string name="startup_error_detail_show">Show details</string>
+    <string name="startup_error_detail_hide">Hide details</string>
+    <string name="startup_error_retry">Retry</string>
+    <string name="editor_image_importing">Loading image…</string>
 </resources>

@@ -21,7 +21,7 @@
 | `Views/Home/DragPagePager.swift` | 105 | `ui/home/HomeScreen.kt`（`pagerModifier`） | ⚠️ morph 中未禁用输入 |
 | `Views/Diary/DiaryPageView.swift` | 683 | `ui/diary/{DiaryPageScreen,DiaryReadScreen}.kt` | ❌ 回调链断裂（见 §4） |
 | `Views/Diary/RichTextView.swift` | 388 | `ui/diary/{EditorScreen,EditorTextArea,FontToolbar}.kt` | ⚠️ 段落菜单多一项、缺横滑 |
-| `Views/Diary/RichTextEngine.swift` | 1335 | `ui/diary/{EditorModel,EditorHistory,EditorSelection}.kt` + `model/ContentPart.kt` | ✅ 完成（golden 字节级断言） |
+| `Views/Diary/RichTextEngine.swift` | 1335 | `ui/diary/{EditorModel,EditorSelection}.kt`（撤销/重做确认不做，`EditorHistory` 已删除） + `model/ContentPart.kt` | ✅ 完成（golden 字节级断言） |
 | `Views/Diary/ReadTextView.swift` | 196 | `ui/diary/DiaryReadScreen.kt` | ⚠️ 正文列未限宽 |
 | `Views/Diary/MediaViews.swift` | 187 | `ui/diary/DiaryReadScreen.kt`（图片） | ❌ 缺全屏预览 |
 | `Views/Diary/ShareSheetView.swift` | 183 | `ui/diary/DiaryPageScreen.kt`（分享） | ❌ 无面板，直接拉起 Sharesheet |

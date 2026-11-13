@@ -331,14 +331,10 @@ fun DiaryPageScreen(
                         currentHit = currentHit(state)?.let {
                             DiarySearch.Match(it.partIndex, it.itemIndex, it.start, it.end)
                         },
-                        onToggleTodo = { blockIndex, itemIndex ->
+                        onToggleTodo = { blockIndex, partIndex, itemIndex ->
                             state.blocks.getOrNull(blockIndex)?.let { block ->
-                                // `DiaryReadScreen` 给的是"这一天里的第几个片段 + 待办项下标"
-                                viewModel.toggleTodo(
-                                    block.id,
-                                    partIndexOfFirstItems(block.contentJson),
-                                    itemIndex,
-                                )
+                                // P1-14：段落下标由阅读层一路带上来，不再猜"第一个 items 段"。
+                                viewModel.toggleTodo(block.id, partIndex, itemIndex)
                             }
                         },
                         // 点整卡 → 编辑；长按 → 多选（规范 §2.4/§2.8）——
@@ -349,6 +345,9 @@ fun DiaryPageScreen(
                         },
                         onToggleSelect = { index ->
                             state.blocks.getOrNull(index)?.let { viewModel.toggleSelection(it.id) }
+                        },
+                        onDeleteBlock = { index ->
+                            state.blocks.getOrNull(index)?.let { viewModel.confirmDeleteBlock(it.id) }
                         },
                         selectMode = state.selectMode,
                         selectedIds = state.selectedIds,
@@ -391,7 +390,10 @@ fun DiaryPageScreen(
                     onSave = viewModel::save,
                     onImportImage = { uri ->
                         viewModel.importImage(uri)?.let { src ->
-                            val bitmap = container.mediaStore.image(src)
+                            // P1-11/P2-1：回读尺寸也要在 IO 上做，别让大图解码卡住主线程。
+                            val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                container.mediaStore.image(src)
+                            }
                             ImportedImage(
                                 src = src,
                                 width = bitmap?.width?.toDouble(),
@@ -470,15 +472,6 @@ private fun editorLocationState(state: DiaryPageViewModel.State): LocationRules.
         else -> LocationRules.EditorLocationState.LocateFailed
     }
 }
-
-/**
- * 找出 `content_json` 里第一个"列表/待办"段的下标。
- *
- * `DiaryReadScreen` 的 `onToggleTodo(blockIndex, itemIndex)` 只回了待办项下标，
- * 而写库需要段落下标，因此在这里定位。
- */
-private fun partIndexOfFirstItems(contentJson: String): Int =
-    ContentFlatten.parseContent(contentJson).indexOfFirst { !it.items.isNullOrEmpty() }.coerceAtLeast(0)
 
 @Composable
 private fun DiaryAlertDialog(

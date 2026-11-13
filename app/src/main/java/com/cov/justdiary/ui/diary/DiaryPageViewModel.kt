@@ -64,6 +64,13 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         val editingIndex: Int? = null,
         val selectMode: Boolean = false,
         val selectedIds: Set<Long> = emptySet(),
+        /**
+         * 待删除的片段 id（确认框期间有效）。
+         *
+         * 读页的「删除」无障碍动作只针对一条，不应该先把界面切进"已选择 1 项"；
+         * 多选删除也走这里，两种入口共用同一个确认框与执行路径。
+         */
+        val pendingDeleteIds: List<Long> = emptyList(),
         val location: LocationRules.LocationSnapshot? = null,
         val locating: Boolean = false,
         val startTimeUtc: Long = System.currentTimeMillis(),
@@ -437,14 +444,42 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
     /** 多选态下点"删除"：先确认。 */
     fun confirmDeleteSelected() {
-        val count = _state.value.selectedIds.size
-        if (count == 0) return
-        _state.value = _state.value.copy(alert = DiaryAlert.DeleteConfirm(count))
+        val ids = _state.value.selectedIds.toList()
+        if (ids.isEmpty()) return
+        _state.value = _state.value.copy(
+            alert = DiaryAlert.DeleteConfirm(ids.size),
+            pendingDeleteIds = ids,
+        )
+    }
+
+    /**
+     * 读页卡片的「删除」无障碍动作：只删这一条（P1-13）。
+     *
+     * 不进入多选态 —— TalkBack 用户执行动作后应当直接看到确认框，而不是界面上多出
+     * 一个看不见的选中项。
+     */
+    fun confirmDeleteBlock(blockId: Long) {
+        val current = _state.value
+        if (!current.canEditToday && !current.settings.allowHistoryEdit) {
+            _state.value = current.copy(alert = DiaryAlert.ReadOnly)
+            return
+        }
+        _state.value = current.copy(
+            alert = DiaryAlert.DeleteConfirm(1),
+            pendingDeleteIds = listOf(blockId),
+        )
     }
 
     fun performDeleteSelected() {
-        val ids = _state.value.selectedIds.toList()
-        _state.value = _state.value.copy(alert = null)
+        // 正常路径是 `confirmDeleteSelected` / `confirmDeleteBlock` 先填好 pending；
+        // 直接调用（测试 / 旧的内部调用）时退回当前多选集合，保持原有语义。
+        val ids = _state.value.pendingDeleteIds.ifEmpty { _state.value.selectedIds.toList() }
+        _state.value = _state.value.copy(
+            alert = null,
+            pendingDeleteIds = emptyList(),
+            selectMode = false,
+            selectedIds = emptySet(),
+        )
         if (ids.isEmpty()) return
         viewModelScope.launch {
             runCatching { container.repository.deleteBlocks(ids) }
@@ -520,7 +555,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun consumeAlert() {
-        _state.value = _state.value.copy(alert = null)
+        _state.value = _state.value.copy(alert = null, pendingDeleteIds = emptyList())
     }
 
     fun consumeShareImage() {

@@ -21,7 +21,7 @@ import org.junit.Test
  * | E1/E2 不能用绘制字号反解块样式 | 模型里**根本没有**字号输入；[setBlockStyle] 设什么读什么 |
  * | E3 段落操作必须倒序 | [setBlockStyle] 改为按区间重建；对照测试证明逐下标正序会错位 |
  * | E4 IME 组合区必须跳过 | [FormatGate] 的相交判定 |
- * | E5 全量替换摧毁撤销栈 | [EditorHistory] 的 push/undo/redo |
+ * | E5 全量替换摧毁撤销栈 | 已确认**不做**撤销/重做；回滚只有"放弃修改"（见 `EditorScreen`） |
  */
 class EditorModelTest {
 
@@ -931,15 +931,46 @@ class EditorModelTest {
     }
 
     /**
-     * 规则 3 的正文一半 + 用户 2026-10-01 定的引用：**列表 / 待办 / 标题回车之后不取消**，
-     * 而**引用回车即结束**（新行回到正文）。
+     * 规则 3 的正文一半 + 2026-11-12 确认的引用口径：**列表 / 待办 / 标题 / 引用
+     * 回车之后都不取消**；引用只在"空引用行再回车"时结束（见 `blocksNewline`）。
      */
     @Test
-    fun `rule 3 markers and titles survive the newline but the quote ends`() {
-        // 有内容的引用行回车 → 新行是**正文**（用户 2026-10-01：回车之后取消引用状态）
+    fun `three enters on a quote produce quote quote body`() {
+        // 第一行引用有内容 → 回车新行继续引用
+        var lines = listOf(EditorLine(text = "引用一", blockStyle = ContentPartStyle.quote))
+        lines = EditorModel.repairAfterEnter(lines + EditorLine(text = ""), previous = lines)
+        // 在第二行继续输入，再回车 → 还是引用
+        lines = lines.toMutableList().also { it[1] = it[1].copy(text = "引用二") }
+        lines = EditorModel.repairAfterEnter(lines + EditorLine(text = ""), previous = lines)
+        assertEquals(
+            listOf(ContentPartStyle.quote, ContentPartStyle.quote, ContentPartStyle.quote),
+            lines.map { it.blockStyle },
+        )
+        // 第三行是空的引用行：回车被吃掉，本行结束引用 → quote,quote,body
+        assertTrue("空引用行要吃掉回车", EditorModel.blocksNewline(lines, 2))
+        lines = EditorModel.endQuoteOnBlockedNewline(lines, 2)
+        assertEquals(
+            listOf(ContentPartStyle.quote, ContentPartStyle.quote, ContentPartStyle.body),
+            lines.map { it.blockStyle },
+        )
+    }
+
+    @Test
+    fun `rule 3 markers titles and quotes all survive the newline`() {
+        // 有内容的引用行回车 → 新行**继续引用**（与 iOS HEAD 同口径：quote,quote,body）
         val quoteBefore = listOf(EditorLine(text = "引用一句", blockStyle = ContentPartStyle.quote))
         val quoteAfter = EditorModel.repairAfterEnter(quoteBefore + EditorLine(text = ""), previous = quoteBefore)
-        assertEquals(ContentPartStyle.body, quoteAfter[1].blockStyle)
+        assertEquals(ContentPartStyle.quote, quoteAfter[1].blockStyle)
+        // 第二轮：新的空引用行上面仍是引用，但这一行是空的 —— 模型层给正文（平台层会先吃掉这次回车）
+        val secondBefore = listOf(
+            EditorLine(text = "引用一句", blockStyle = ContentPartStyle.quote),
+            EditorLine(text = "引用第二句", blockStyle = ContentPartStyle.quote),
+        )
+        val secondAfter = EditorModel.repairAfterEnter(
+            secondBefore + EditorLine(text = ""),
+            previous = secondBefore,
+        )
+        assertEquals(ContentPartStyle.quote, secondAfter[2].blockStyle)
 
         // 有内容的大标题行回车 → 新行还是大标题（iOS：段落属性随换行延续）
         val titleBefore = listOf(EditorLine(text = "标题", blockStyle = ContentPartStyle.title))

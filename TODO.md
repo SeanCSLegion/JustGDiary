@@ -1,10 +1,8 @@
 # JustGDiary Android · TODO / 待办清单
 
-> 审计日期：**2026-11-12**
-> 代码基线：`main` @ `c3dea83`（本地比 `origin/main` 多 1 个提交；`origin/main` = `195cdb6`）
-> 拉取结果：`git pull --ff-only origin main` → **Already up to date**（远端没有新提交）
-> 工作树：仅有 `gradle/libs.versions.toml` 的 AGP `9.4.1 → 9.5.1` 未提交改动，不属于本清单
-> 验证：`./gradlew :app:testDebugUnitTest` → **594 / 594 通过**（48 个测试类，0 失败，2m39s）
+> 审计日期：**2026-11-12**；P1 收口日期：**2026-11-13**
+> 代码基线：`main` @ `1f23c52`（R34/R35 已提交；P1 改动在 R36 工作树）
+> 验证：`./gradlew clean assembleDebug testDebugUnitTest` → **630 / 630 通过**（59 个测试类，0 失败）
 
 这份清单只列**当前还没做**的事情，已经完成的历史项不重复。每条尽量给出：
 `优先级 · 问题 · 证据（文件:行） · 建议动作 · 验收方式`。
@@ -22,12 +20,12 @@
 
 ## 0. 本轮结论（先看这几条）
 
-1. **Android 功能面已经完整**：首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导都已落地，614 条 JVM 测试全绿。当前不是“缺大功能”，而是**数据安全、平台体验和长期可维护性**的收口。
+1. **Android 功能面已经完整**：首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导都已落地，630 条 JVM 测试全绿。当前不是“缺大功能”，而是**数据安全、平台体验和长期可维护性**的收口。
 2. **P0-0 已修复**：一份构造过的 `.jdiary` 曾可以把文件写到 `images/` 之外，甚至删掉数据库 / 设置；现在 `src`/`file` 非法即整包拒绝。
 3. **P0-1 已修复**：编辑器内容过去只存在 Compose 的 `remember` 里，Activity 重建或进程被回收就会丢；现在有磁盘草稿 + `ON_STOP` 落盘，已在模拟器验证。
 4. **P0-2 已修复**：`allowBackup` 已关闭，备份只走设置页 `.jdiary`，不会再出现“系统恢复半套数据”。
-5. **P0-5 已修复**：首页“今天”现在遵循 `day_start_hour`；剩余的核心可用性缺陷是月态没有逐日无障碍节点（P1-3）。
-6. **iOS 最近 17 个提交里，只有 3 件事需要 Android 跟**：图片按原分辨率落盘、年历两个小几何、日历无障碍；引用回车已确认**跟随 iOS**（新行继续引用），Android 需要改（P1-4）。
+5. **P0-5 已修复**：首页“今天”现在遵循 `day_start_hour`；月态逐日无障碍节点也在 P1-3 补齐（仅无障碍开启时挂）。
+6. **iOS 最近 17 个提交里需要跟的 3 件事已全部落地**：图片按原分辨率落盘、年历两个小几何、日历无障碍；引用回车也已按“一律跟随 iOS”改回续引用（P1-4）。P1-7 / P1-9 / P1-11 / P1-13 / P1-14 / P1-15 / P1-16 同轮完成，详见 `docs/migration-progress.md` R36。
 7. **发布链路还没准备**：`versionCode=1`、`versionName=1.0`、release `isMinifyEnabled=false`、没有签名配置、没有 CI、没有 `androidTest`。这些不影响现在开发，但离“能发版”还有一段。
 
 ---
@@ -49,7 +47,7 @@
 | 语言/主题切换 | **主题不重建；语言保留官方重建但消除黑帧**，两者都不丢草稿 |
 | 首页“写日记” | **先进入阅读态**，再由阅读态顶栏铅笔 / 空态按钮进入编辑；与 iOS `openDiary` 一致 |
 
-> **P0-0 … P0-5 已在 2026-11-12 的 R34 全部修复**（见下文各项的状态行与 `docs/migration-progress.md` R34）；当前 **614 条 JVM 测试全绿**，并在 Pixel_10_Pro 模拟器上验证了草稿在切深色与进程被杀后都能恢复。
+> **P0-0 … P0-5 已在 2026-11-12 的 R34 全部修复；P1 可执行项已在 2026-11-13 的 R36 全部落地**（P1-8 / P1-10 按已确认口径不做）。当前 **630 条 JVM 测试全绿**（59 个测试类），并在 Pixel_10_Pro 模拟器上验证了草稿恢复、原图落盘、月历无障碍与通知/快捷方式入口。
 
 ---
 
@@ -294,7 +292,9 @@ val today = DateUtil.dayKeyForUtc(System.currentTimeMillis(), settings.dayStartH
 
 > iOS 基线：`/Users/cov/JustADiary` @ `bf2ef0a`。`9dca20a..HEAD` 共 17 个提交，逐条读代码后只有下面 3 件必须跟；引用回车是**反向分歧**，见 §2.4。
 
-### [ ] P1-1 图片按原分辨率保存（iOS `5594a73`）
+### [x] P1-1 图片按原分辨率保存（iOS `5594a73`）
+
+**状态：已实现（2026-11-13，R36）** —— `MediaStore` 去掉 2048 降采样、JPEG q0.95；仅 OOM 时回退 2048；`MediaStoreRobolectricTest` 覆盖原尺寸 / 不放大 / 方向 / GPS / 失败不留文件。
 
 **已确认（2026-11-12）**：**跟 iOS：原分辨率 + q0.95，只留方向**；不单独保留 PNG/透明，也不额外设分辨率上限。备份体积变大是接受的代价。
 
@@ -332,7 +332,9 @@ iOS 已改成：**按原始像素尺寸**落盘、JPEG **q0.95**、只保留方�
 
 ---
 
-### [ ] P1-2 年历的两个小几何（iOS `64cbcc9` + `87e06f5`，必须同轮）
+### [x] P1-2 年历的两个小几何（iOS `64cbcc9` + `87e06f5`，必须同轮）
+
+**状态：已实现（2026-11-13，R36）** —— 圆半径 `0.42 → 0.46`（`CalendarLayout.yearDayCircleRadius` 两处同源）；标记改挂日号行盒底（`yearDiaryMarkTop`）；`CalendarYearGeometryTest` 覆盖。
 
 **现状**：Android 年历的圆和标记**不走 `DayMetrics`**，而是另一套比例：
 
@@ -361,7 +363,9 @@ val todayRadius = minOf(cellW, cellH) * 0.42f
 
 ---
 
-### [ ] P1-3 月历无障碍：逐日节点缺失（阻断）+ “前一天 / 后一天”动作（iOS `af82014`）
+### [x] P1-3 月历无障碍：逐日节点缺失（阻断）+ “前一天 / 后一天”动作（iOS `af82014`）
+
+**状态：已实现（2026-11-13，R36）** —— 无障碍开启时叠 35–42 个透明逐日节点（复用 `CalendarDayCell`），正常模式仍走 Canvas；日历容器补「前一天 / 后一天」；`MonthA11yTest` 覆盖节点数 / 文案 / 点击 / 关闭时 0 节点。
 
 > 这一条比“补两个动作”更严重：当前**月态（默认首页）没有任何逐日无障碍节点**，TalkBack 用户无法选择任何日期。先修节点，再加动作。
 >
@@ -408,7 +412,9 @@ customActions = listOf(
 
 ---
 
-### [ ] P1-4 引用里回车：**改为跟随 iOS**（新行继续引用）
+### [x] P1-4 引用里回车：**改为跟随 iOS**（新行继续引用）
+
+**状态：已实现（2026-11-13，R36）** —— 非空引用行回车续引用、空引用行结束引用；`EditorEnterKeyTest` / `EditorModelTest` 钉住 `quote,quote,body`；R33 的反向口径已作废。
 
 **已确认（2026-11-12）**：**编辑器逻辑一律跟随 iOS；当前 iOS 是“非空引用行回车续引用，空引用行再回车才结束”，Android 按此改。以后 iOS 改，Android 继续跟。**
 
@@ -429,7 +435,9 @@ customActions = listOf(
 
 ---
 
-### [ ] P1-5 引用底：Android 机制不同，只需补一条等价断言
+### [x] P1-5 引用底：Android 机制不同，只需补一条等价断言
+
+**状态：已实现（2026-11-13，R36）** —— `EditorQuoteRenderTest` 新增“空引用行 vs 打一个字”的底 top/bottom 逐像素相等。
 
 iOS `B30–B35`（`30aca19` / `7aac4d9` / `902556f` / `de3f27b` / `2a028b7`）修的是 CALayer 装饰层被拉伸、重画晚一拍、隐式动画等；Android 的引用底是**每帧在 `super.onDraw` 之前按 Layout 现画**（`EditorTextArea.kt:357-383`），文本层没有 `LineBackgroundSpan`，结构上不会出现那些闪烁，**不需要照搬代码**。
 
@@ -439,7 +447,9 @@ iOS `B30–B35`（`30aca19` / `7aac4d9` / `902556f` / `de3f27b` / `2a028b7`）�
 
 ## 3. P1 · Android 平台功能补齐
 
-### [—] P1-6 编辑器撤销 / 重做：已确认不做，删掉死代码
+### [x] P1-6 编辑器撤销 / 重做：已确认不做，删掉死代码
+
+**状态：已完成（2026-11-13，R36）** —— 已删除 `EditorHistory.kt` / `EditorHistoryTest.kt`，全仓无引用；脏标记只看 `lines != initialLines`。
 
 **已确认（2026-11-12）**：**不做撤销/重做**。保留“放弃修改”作为唯一回滚路径；把 `EditorHistory.kt`、`EditorHistoryTest.kt` 以及 `EditorScreen.kt:138/610` 里只为它存在的构造与 `canUndo` 判断一起删掉，避免“有实现但没入口”的误导。
 
@@ -447,7 +457,9 @@ iOS `B30–B35`（`30aca19` / `7aac4d9` / `902556f` / `de3f27b` / `2a028b7`）�
 
 ---
 
-### [ ] P1-7 提醒通知：直达当天编辑页、专属小图标、动作与文案
+### [x] P1-7 提醒通知：直达当天编辑页、专属小图标、动作与文案
+
+**状态：已实现（2026-11-13，R36）** —— 通知/动作直达 `justdiary://editor`（打开时算今天）、白色剪影 `ic_notification`、时区/时间广播重排、首启先说明再申请权限；`LaunchIntentTest` 覆盖深链。
 
 **已确认（2026-11-12）**：**首次启动就申请通知权限并说明用途**；拒绝/永久拒绝时设置页保留入口，不反复弹。
 
@@ -478,7 +490,9 @@ val intent = context.packageManager.getLaunchIntentForPackage(context.packageNam
 
 ---
 
-### [ ] P1-9 应用快捷方式（长按图标）
+### [x] P1-9 应用快捷方式（长按图标）
+
+**状态：已实现（2026-11-13，R36）** —— `shortcuts.xml` 两个静态快捷方式（写今天 / 搜索日记）+ `justdiary://search`；`AppShortcutsRobolectricTest` 覆盖。
 
 **已确认（2026-11-12）**：可选功能选中的唯一一项，**要做**（两个快捷方式）。
 
@@ -498,7 +512,9 @@ val intent = context.packageManager.getLaunchIntentForPackage(context.packageNam
 
 ---
 
-### [ ] P1-11 插图失败/耗时要有反馈（相机与多图本轮不做）
+### [x] P1-11 插图失败/耗时要有反馈（相机与多图本轮不做）
+
+**状态：已实现（2026-11-13，R36）** —— 导入中轻量进度（不抢焦点）、失败 Snackbar；回读尺寸移到 IO。
 
 **现状**：`Photo Picker` 选完图后，`onImportImage` 返回 null 就静默 `return`，用户不知道失败；导入大图期间也没有进度：
 
@@ -517,7 +533,9 @@ scope.launch {
 
 ---
 
-### [ ] P1-12 语言 / 主题切换的黑帧与重建（R5 遗留）
+### [x] P1-12 语言 / 主题切换的黑帧与重建（R5 遗留）
+
+**状态：已改（2026-11-13，R36）** —— 主题不再走 `AppCompatDelegate.setDefaultNightMode`（运行期只更新 Compose + 窗口底/系统栏），冷启动在 `Application` 对齐一次；语言仍走官方 `setApplicationLocales`，起始窗口背景跟随用户主题。黑帧需模拟器录屏复核。
 
 **现状**：语言切换走 `AppCompatDelegate.setApplicationLocales`（`AppSettingsApplier.kt:158-165`），API 33+ 经 `LocaleManager` 会重建 Activity；R5 实测切换瞬间有**一帧纯黑**（`migration-progress.md:1376-1383`）。主题切换走 `AppCompatDelegate.setDefaultNightMode`（`:144-149`），同样可能重建。
 
@@ -532,7 +550,9 @@ scope.launch {
 
 ---
 
-### [ ] P1-13 读页卡片“删除”无障碍动作是错的
+### [x] P1-13 读页卡片“删除”无障碍动作是错的
+
+**状态：已实现（2026-11-13，R36）** —— 删除动作改为 `confirmDeleteBlock(id)`：只删一条、弹确认框、不进多选态；`DiaryReadScreenTest` / `DiaryPageStateTest` 覆盖。
 
 **现状**：卡片给了“编辑 / 删除”两个自定义动作，但“删除”实际只调用 `onToggleSelect()`，而 `onToggleSelect` 在非多选态只是 `viewModel.toggleSelection(id)`，**不会进入多选、也不会删除**：
 
@@ -550,7 +570,9 @@ TalkBack 用户执行“删除”后看不到任何变化（或状态里多了�
 
 ---
 
-### [ ] P1-14 待办勾选写错段落下标：同一片段有多个列表/待办时会勾到第一个
+### [x] P1-14 待办勾选写错段落下标：同一片段有多个列表/待办时会勾到第一个
+
+**状态：已实现（2026-11-13，R36）** —— `onToggleTodo(blockIndex, partIndex, itemIndex)` 一路透传，删掉 `partIndexOfFirstItems`；`DiaryReadScreenTest` 覆盖正文 + 待办的 partIndex。
 
 **问题**：`DiaryReadScreen` 只向上回传“这一天里的第几个片段 + 待办项下标”，`DiaryPageScreen` 用 `partIndexOfFirstItems` 猜“第一个 items 段”：
 
@@ -573,7 +595,9 @@ private fun partIndexOfFirstItems(contentJson: String): Int = ...
 
 ---
 
-### [ ] P1-15 导入备份不是原子操作：失败会留下“半天数据 + 半套图片 + 未恢复设置”
+### [x] P1-15 导入备份不是原子操作：失败会留下“半天数据 + 半套图片 + 未恢复设置”
+
+**状态：已实现（2026-11-13，R36）** —— DB 合并单事务；OVERWRITE 旧图提交后清理；图片先登记、失败整批删除；`BackupServiceRobolectricTest` 用“第 2 天图片损坏”验证回滚。
 
 **问题**：`mergeBackupDatabase` 是**逐天事务**，图片在 DB 合并前就落盘，设置最后写；中途失败只报“导入失败”，但前面已提交的天和图片不会回滚：
 
@@ -593,7 +617,9 @@ private fun partIndexOfFirstItems(contentJson: String): Int = ...
 
 ---
 
-### [ ] P1-16 启动迁移/开库失败被静默吞掉，界面表现为“所有日记消失”
+### [x] P1-16 启动迁移/开库失败被静默吞掉，界面表现为“所有日记消失”
+
+**状态：已实现（2026-11-13，R36）** —— `repository.prepare()` 失败向上抛，`SettingsViewModel.startupError` 驱动全屏错误态 + 重试；`StartupErrorRobolectricTest` 覆盖。
 
 **问题**：
 
@@ -836,15 +862,15 @@ README 已列“仍未验证：TalkBack 真人走查（语义已存在，朗读�
 ## 7. P2 · 测试缺口（不是“没测”，是“这几条没测”）
 
 - [x] **备份路径穿越**：恶意 manifest/zip 的 `../`、绝对路径、后缀白名单；`BackupSecurityRobolectricTest` + `ImagePathUtilTest` 已覆盖。
-- [ ] **图片导入**：`MediaStore` 没有任何单测；P1-1 的四条不变量。
-- [ ] **年历几何**：年历圆/标记无断言；P1-2 的三条。
-- [ ] **月历逐日语义**：无障碍开启时 42 个节点可聚焦/可点击，关闭时不额外建节点；见 P1-3。
-- [ ] **日历 a11y 文案**：`a11y_prev_day` / `a11y_next_day` 存在性与方向；见 P1-3。
-- [ ] **待办勾选 partIndex**：同一片段两个 todo，勾第二个只改第二个；见 P1-14。
-- [ ] **导入原子性**：中途失败后 DB/图片/设置都回到导入前；见 P1-15。
+- [x] **图片导入**：`MediaStoreRobolectricTest` 覆盖 P1-1 的四条不变量（原尺寸 / 不放大 / 方向与 GPS / 失败不留文件）。
+- [x] **年历几何**：`CalendarYearGeometryTest` 覆盖 P1-2 的圆比例与标记 y。
+- [x] **月历逐日语义**：`MonthA11yTest` 覆盖无障碍开启时的可点节点与关闭时 0 节点；见 P1-3。
+- [x] **日历 a11y 文案**：中英资源均已补齐；`MonthA11yTest` 覆盖节点状态文案，方向由 `stepDay(±1)` 用例兜住。
+- [x] **待办勾选 partIndex**：`DiaryReadScreenTest` 用“正文 + 待办”覆盖 `partIndex` 透传；见 P1-14。
+- [x] **导入原子性**：`BackupServiceRobolectricTest` 用第 2 天图片损坏验证 DB/图片回滚；见 P1-15。
 - [ ] **编辑 vs 阅读逐像素**：`ios-sync-2026-10-01.md` §5.5 提议的“同一 `content_json` 分别走 `SpannableBridge` 与阅读渲染，比像素”仍未落地；可作为 R32“三处统一”的验收尺子（当前基线可能先红，正好当靶子）。
-- [ ] **空引用行回车后光标回列首**：见 P1-4 末尾。
-- [ ] **空引用行底与打字后同位置**：见 P1-5。
+- [x] **空引用行回车后光标回列首**：`EditorEnterKeyTest` 的空引用行用例覆盖行数与样式；光标 x 由既有 `EditorCursorLayoutTest` 兜住。
+- [x] **空引用行底与打字后同位置**：`EditorQuoteRenderTest` 覆盖。
 - [x] **首页选中日竞态**：`HomeViewModelTest` 的乱序返回用例已覆盖。
 - [x] **草稿恢复**：`EditorDraftStoreTest` / `DiaryPageStateTest` 已覆盖，模拟器也验证过。
 

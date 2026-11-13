@@ -55,7 +55,7 @@
 | `ui/diary/FontToolbar.kt` | 226 | 格式栏：段落样式菜单 → 居中 → 列表 → 引用 → 待办 → B/I/S/U → 插入图片 | `FontToolbar:57`、`toolbarChipColors:200`、`blockStyleLabel:208` |
 | `ui/diary/EditorModel.kt` | 716 | 编辑器**纯内核**：行模型、content_json 双向、段落/行内操作、IME 组合闸门 | `EditorLine:33`、`EditorBlockStyle:100`、`linesToParts:145`、`partsToLines:185`、`setBlockStyle:277`、`toggleInline:430`、`applyToLines:606`、`FormatGate:692` |
 | `ui/diary/EditorSelection.kt` | 132 | 扁平偏移 ↔ 行内偏移换算（含标记前缀长度） | `EditorSelection:9`、`EditorSelectionMap.locate:55`、`flatOffset:78`、`effectiveInlineRange:115` |
-| `ui/diary/EditorHistory.kt` | 78 | 撤销/重做栈（**已构造但未接 UI**，见 §7.3） | `EditorHistory:20`、`push:36`、`undo:49`、`redo:57` |
+| ~~`ui/diary/EditorHistory.kt`~~ | ~~78~~ | **已删除（2026-11-13，P1-6）**：撤销/重做确认不做，回滚只走「放弃修改」 | — |
 | `ui/diary/SpannableBridge.kt` | 316 | `List<EditorLine>` ↔ `Spannable`（图片 span 承载 src/宽高做往返） | `toSpannable:58`、`fromSpannable:158`、`toSpannableFromParts:297`、`compositionRange:311` |
 | `ui/diary/ReadLayout.kt` | 247 | 阅读渲染模型 + 内联图片尺寸 + 篇内搜索 | `ReadLayout:21`、`PartRender:76`、`renderModel:116`、`DiarySearch.findMatches:191` |
 | `ui/diary/ImageDisplaySize.kt` | 53 | 内联图片显示尺寸（纯函数，编辑区用） | `fit:37` |
@@ -192,7 +192,7 @@
 | 段落样式菜单**含「引用」**（4 项） | v2 §7.4 要求只给「大标题 / 小标题 / 正文」 | `FontToolbar.kt:100` + `EditorBlockStyle:100-105` |
 | 格式栏横屏不竖排贴右 | 始终是横向滚动一行 | `FontToolbar.kt:83-88` |
 | 按钮无显式 `minWidth 34dp × minHeight 40dp` | 用 `FilterChip` 默认尺寸 | `FontToolbar.kt:91-189` |
-| `EditorHistory` 已构造但**撤销/重做无入口** | 只用于 `hasChanges` 判定 | `EditorScreen.kt:102`、`:376-380` |
+| ~~`EditorHistory` 已构造但撤销/重做无入口~~ | **已删除（P1-6）**；脏标记只看 `lines != initialLines` | — |
 | `DiaryPageViewModel.confirmDiscard:299` 未被调用 | 「放弃修改」实际走编辑器本地弹窗 → `onDiscard` → `close()` | `EditorScreen.kt:155-157`、`:146` |
 
 ### 2.5 分享（**没有独立页面**）
@@ -655,7 +655,7 @@ object ContentWidth { val reading = 660.dp; val editing = 620.dp; val cardColumn
 | `ui/theme/ThemeModeTest.kt` | 3 | 主题三值 → 深色（纯函数） | — |
 | `ui/diary/EditorModelTest.kt` | **40** | 行↔`content_json`、列表/待办合并、段落样式摊平、倒序应用、行内 run、拆行/合并、图片行 | — |
 | `ui/diary/EditorSelectionTest.kt` | 9 | 扁平偏移↔行内偏移（含标记前缀） | — |
-| `ui/diary/EditorHistoryTest.kt` | 8 | 撤销/重做栈（**UI 未接线**） | — |
+| ~~`ui/diary/EditorHistoryTest.kt`~~ | ~~8~~ | **已删除（P1-6）** | — |
 | `ui/diary/ReadLayoutTest.kt` | 15 | 渲染模型三种形态、图片宽度/高度/解码目标像素 | `image display width is capped by both the margin and the design maximum` |
 | `ui/diary/ImageDisplaySizeTest.kt` | 8 | 编辑区内联图片尺寸规则 | — |
 | `data/ShareLayoutTest.kt` | 13 | 分享长图常量与 iOS 逐项一致、换行、引用高度、图片高度 | `canvas constants match the ios renderer` |
@@ -761,7 +761,7 @@ bash    tools/verify_backup_interop.sh              # 跨端备份互通校验
 
 **其他未接线的实现**
 
-- `EditorHistory`（撤销/重做栈，78 行 + 8 条单测）—— 构造了但界面没有撤销/重做按钮（`EditorScreen.kt:102` 只用于脏标记判定）。
+- ~~`EditorHistory`（撤销/重做栈，78 行 + 8 条单测）~~ —— 已确认不做并在 P1-6 删除；回滚只走「放弃修改」。
 - `SpannableBridge.toSpannableFromParts:297`、`toParts:301`（已有 `toSpannable`/`fromSpannable` 路径）。
 - `ReadLayout.highlight:168`、`DiarySearch.nextIndex:220` / `previousIndex:228`、`EditorSelectionMap.targetLineRange:109`。
 - `AdaptiveLayout.contentColumn:106`、`AdaptiveLayout.tier:70`（仅被单测断言）。

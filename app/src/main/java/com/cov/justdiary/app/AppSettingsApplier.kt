@@ -65,15 +65,29 @@ class AppSettingsApplier(
      */
     suspend fun bootstrap() {
         val current = settings.load()
-        applyNightMode(current.themeMode)
+        // P1-12：主题**不再走 `AppCompatDelegate.setDefaultNightMode`**（它会重建 Activity，
+        // 切主题瞬间有一帧黑屏）。Compose 的 `JustDiaryTheme(themeMode=…)` 已经足够；
+        // 进程启动时的窗口主题由 [applyInitialNightMode] 在 `Application.onCreate` 里定一次。
         applyLanguage(current.appLanguage)
-        runCatching { repository.prepare() }
-            .onFailure { Log.app.e("prepare 失败：${it.message}") }
+        // P1-16：开库/迁移失败**必须向上抛**，由 `SettingsViewModel` 转成启动错误态。
+        // 以前这里 `runCatching` 吞掉，界面表现为"所有日记消失"，用户可能误操作覆盖。
+        repository.prepare()
         runCatching { repository.ensureSearchIndex() }
             .onFailure { Log.app.e("搜索索引准备失败：${it.message}") }
         reminderScheduler.ensureChannel()
         runCatching { reminderScheduler.rearm() }
             .onFailure { Log.app.e("提醒排期失败：${it.message}") }
+    }
+
+    /**
+     * 进程启动时把 AppCompat 的 DayNight 对齐到用户主题。
+     *
+     * 只在这一刻调用（Activity 还没创建，不会触发重建）：之后用户在设置里切主题只走
+     * Compose 状态，窗口背景由 `MainActivity` 的 `SideEffect` 同步。下一次冷启动时
+     * 这里再把系统窗口主题对齐一次，启动/语言切换的起始窗口就不会是旧主题的底色。
+     */
+    fun applyInitialNightMode() {
+        applyNightMode(settings.load().themeMode)
     }
 
     /**
@@ -98,8 +112,16 @@ class AppSettingsApplier(
 
         for (effect in SettingsEffects.effectsOf(old, new)) {
             when (effect) {
-                SettingsEffect.ApplyNightMode -> applyNightMode(new.themeMode)
-                SettingsEffect.SwitchLanguage -> applyLanguage(new.appLanguage)
+                // P1-12：主题由 Compose 直接驱动，不再调 AppCompatDelegate（避免 Activity 重建）。
+                // 这个 effect 仍然保留：它标出"界面配色变了"，执行层刻意 no-op。
+                SettingsEffect.ApplyNightMode -> Unit
+                SettingsEffect.SwitchLanguage -> {
+                    // 语言切换本来就会重建 Activity；重建前先把 AppCompat 的 DayNight 对齐到
+                    // 用户主题，让**起始窗口**（theme 的 windowBackground）与当前界面同色，
+                    // 而不是按旧的系统深色/浅色闪一帧。运行期单纯切主题仍然不会走到这里。
+                    applyNightMode(new.themeMode)
+                    applyLanguage(new.appLanguage)
+                }
                 SettingsEffect.RecomputeDayKeys ->
                     conflicts = runCatching { repository.recomputeDayKeys(new.dayStartHour) }
                         .onFailure { Log.app.e("重算 day_key 失败：${it.message}") }
@@ -132,9 +154,7 @@ class AppSettingsApplier(
     suspend fun applyImported(old: AppSettings, new: AppSettings): SettingsApplyOutcome {
         settings.save(new)
         var needsLocationPermission = false
-        if (old.themeMode != new.themeMode) {
-            applyNightMode(new.themeMode)
-        }
+        // P1-12：主题不再重建 Activity；语言仍走官方 `setApplicationLocales`。
         if (old.appLanguage != new.appLanguage ||
             old.remindEnabled != new.remindEnabled ||
             old.remindHour != new.remindHour ||
@@ -148,6 +168,8 @@ class AppSettingsApplier(
         }
         if (old.appLanguage != new.appLanguage) {
             // 必须最后：它会重建 Activity，前面任何副作用都来不及跑。
+            // 重建前对齐窗口主题（同 `commit`），避免起始窗口用旧主题的底色闪一帧。
+            applyNightMode(new.themeMode)
             applyLanguage(new.appLanguage)
         }
         settings.invalidate()

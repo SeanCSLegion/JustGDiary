@@ -133,9 +133,11 @@ fun DiaryReadScreen(
     currentHitBlockId: Long? = null,
     /** 当前命中（`当前序号` 指向的那一处）：它用更强的高亮，和其余命中区分开。 */
     currentHit: DiarySearch.Match? = null,
-    onToggleTodo: (Int, Int) -> Unit = { _, _ -> },
+    onToggleTodo: (Int, Int, Int) -> Unit = { _, _, _ -> },
     onEditBlock: (Int) -> Unit = {},
     onLongPressBlock: (Int) -> Unit = {},
+    /** 读页卡片的「删除」无障碍动作：直接针对**这一条**，不经过多选。 */
+    onDeleteBlock: (Int) -> Unit = {},
     selectMode: Boolean = false,
     selectedIds: Set<Long> = emptySet(),
     onToggleSelect: (Int) -> Unit = {},
@@ -205,7 +207,10 @@ fun DiaryReadScreen(
                     onEdit = { onEditBlock(index) },
                     onLongPress = { onLongPressBlock(index) },
                     onToggleSelect = { onToggleSelect(index) },
-                    onToggleTodo = { itemIndex -> onToggleTodo(index, itemIndex) },
+                    onDelete = { onDeleteBlock(index) },
+                    onToggleTodo = { partIndex, itemIndex ->
+                        onToggleTodo(index, partIndex, itemIndex)
+                    },
                     imageLoader = imageLoader,
                     // 只有"当前命中所在的那张卡"才把某一处画成当前命中
                     currentHit = currentHit.takeIf { block.id == currentHitBlockId },
@@ -350,7 +355,8 @@ private fun DiaryBlockCard(
     onEdit: () -> Unit,
     onLongPress: () -> Unit,
     onToggleSelect: () -> Unit,
-    onToggleTodo: (Int) -> Unit,
+    onDelete: () -> Unit,
+    onToggleTodo: (Int, Int) -> Unit,
     imageLoader: (ContentPart) -> ImageBitmap?,
     currentHit: DiarySearch.Match?,
 ) {
@@ -374,7 +380,9 @@ private fun DiaryBlockCard(
             // 整卡一条语义 + 「编辑 / 删除」两个自定义动作（规范 §5）
             customActions = listOf(
                 CustomAccessibilityAction(editLabel) { onEdit(); true },
-                CustomAccessibilityAction(deleteLabel) { onToggleSelect(); true },
+                // P1-13：这里过去调的是 onToggleSelect —— 非多选态只会默默加一个选中项，
+                // 看不到任何变化。现在直接走单条删除（宿主弹「删除这一条？」确认）。
+                CustomAccessibilityAction(deleteLabel) { onDelete(); true },
             )
         },
     ) {
@@ -458,7 +466,7 @@ private fun ReadPart(
     partIndex: Int,
     matches: List<DiarySearch.Match>,
     currentHit: DiarySearch.Match?,
-    onToggleTodo: (Int) -> Unit,
+    onToggleTodo: (Int, Int) -> Unit,
     imageLoader: (ContentPart) -> ImageBitmap?,
 ) {
     when (val render = ReadLayout.renderModel(listOf(part)).firstOrNull()) {
@@ -480,7 +488,7 @@ private fun ReadPart(
                         text = item,
                         done = done,
                         highlights = DiarySearch.highlights(matches, partIndex, index, currentHit),
-                        onToggle = { onToggleTodo(index) },
+                        onToggle = { onToggleTodo(partIndex, index) },
                     )
                 } else {
                     BulletRow(

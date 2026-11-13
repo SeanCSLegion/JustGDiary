@@ -223,6 +223,36 @@ class DiaryPageStateTest {
         assertEquals(listOf(ids[1]), state.blocks.map { it.id })
     }
 
+    /**
+     * P1-13：读页卡片的「删除」无障碍动作只删**这一条**。
+     *
+     * 它不该先把界面切到"已选择 1 项"的多选态 —— TalkBack 用户执行动作后应当直接看到
+     * 确认框；确认后只少了那一条。
+     */
+    @Test
+    fun `the card delete accessibility action targets exactly one block`() {
+        seedToday()
+        openToday()
+        val ids = viewModel.state.value.blocks.map { it.id }
+
+        viewModel.confirmDeleteBlock(ids[1])
+
+        val pending = viewModel.state.value
+        assertFalse("不进入多选态", pending.selectMode)
+        assertTrue("选中集合也不该被动到", pending.selectedIds.isEmpty())
+        assertEquals(
+            "确认框只该针对被点的那一条",
+            DiaryPageViewModel.DiaryAlert.DeleteConfirm(1),
+            pending.alert,
+        )
+        assertEquals(listOf(ids[1]), pending.pendingDeleteIds)
+
+        viewModel.performDeleteSelected()
+        val after = awaitState { it.blocks.size == 1 }
+        assertEquals(listOf(ids[0]), after.blocks.map { it.id })
+        assertFalse(after.selectMode)
+    }
+
     @Test
     fun `deleting every block keeps the page open on the empty state`() {
         seedToday()

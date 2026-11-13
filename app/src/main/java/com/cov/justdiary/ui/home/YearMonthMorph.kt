@@ -601,7 +601,7 @@ internal fun DrawScope.drawDayCell(
     // 两边端点是**两套不同的排版模型**，必须按 `t` 插值，否则交班那一帧会跳：
     //  · 月侧（t=1）：`CalendarDayCell` —— Column[圆, 农历, 标记] 居中 + 3dp，农历 −6dp；
     //  · 年侧（t=0）：`YearCanvas` 的迷你月 —— 日号**直接居中在格子里**，
-    //    圆半径 = `min(格宽, 格高) × 0.42`，标记挂在圆下方 0.86×半径处，选中/有日记加粗。
+    //    圆半径 = `min(格宽, 格高) × 0.46`，标记挂在日号行盒底，选中/有日记加粗。
     // ---- 排版（**直接算在这里**，不经中间层）----
     //
     // 用户 2026-09-27 拍板：选中圆里装「日号 + 有日记标记 + 农历」，三样作为**一组**居中；
@@ -635,13 +635,34 @@ internal fun DrawScope.drawDayCell(
     val monthCircleCy = groupTopDp + groupH / 2f
     val miniCircleCy = rowYDp + metrics.cellH / 2f
     val miniBlend = CalendarLayout.clamp01(1f - t)
-    val cellCenterY = miniCircleCy * density
     val cx = originX + CalendarLayout.cellCenterX(col, metrics.cellW) * density
     val circleCy = CalendarLayout.lerp(monthCircleCy * density, miniCircleCy * density, miniBlend)
     // 日号跟着**同一族**的排版走（月侧 = 组心、年侧 = 格心），morph 时与圆同步
     val dayCy = CalendarLayout.lerp(dayCenterDp * density, miniCircleCy * density, miniBlend)
-    val miniRadius = minOf(metrics.cellW, metrics.cellH) * 0.42f * density
+    val miniRadius = CalendarLayout.yearDayCircleRadius(metrics.cellW, metrics.cellH) * density
     val radius = CalendarLayout.lerp(metrics.circleDiameter / 2f * density, miniRadius, miniBlend)
+
+    val textColor = when {
+        isSelected -> onPrimary
+        isToday -> primary
+        isFuture -> onSurfaceVariant
+        else -> onSurface
+    }
+    // 字重：月格模型一律常重；年历迷你月把"选中 / 有日记"加粗 —— 同样按 `t` 插值。
+    val weight = if ((isSelected || flags.contains(key)) && miniBlend > 0.01f) {
+        FontWeight(CalendarLayout.lerp(400f, 700f, miniBlend).roundToInt().coerceIn(1, 1000))
+    } else {
+        FontWeight.Normal
+    }
+    // 日号先量出来：年历标记的 y 要挂在**日号行盒底**，而不是圆半径上（P1-2）。
+    // ⚠️ 字号必须量化再测量（见下面的说明）。
+    val num = textLayouts.layout(
+        measurer = measurer,
+        text = day.dayOfMonth.toString(),
+        fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.dayFont).dp, fontScale),
+        fontWeight = weight,
+        color = textColor,
+    )
 
     when {
         isSelected -> drawCircle(
@@ -657,18 +678,6 @@ internal fun DrawScope.drawDayCell(
         )
     }
 
-    val textColor = when {
-        isSelected -> onPrimary
-        isToday -> primary
-        isFuture -> onSurfaceVariant
-        else -> onSurface
-    }
-    // 字重：月格模型一律常重；年历迷你月把"选中 / 有日记"加粗 —— 同样按 `t` 插值。
-    val weight = if ((isSelected || flags.contains(key)) && miniBlend > 0.01f) {
-        FontWeight(CalendarLayout.lerp(400f, 700f, miniBlend).roundToInt().coerceIn(1, 1000))
-    } else {
-        FontWeight.Normal
-    }
     // ⚠️ 字号**必须量化**再测量：`TextMeasurer` 的缓存键里含 `TextStyle`，而 morph 期间
     // `metrics.dayFont` 是逐帧连续插值的 —— 不量化就每帧全 miss，每格每帧都要重新整形
     //（31 格 × 2 次 ≈ 60 次/帧，实测占 2~5ms）。量化到 0.5dp 后同一档字号复用同一条缓存，
@@ -676,13 +685,6 @@ internal fun DrawScope.drawDayCell(
     // 日号的横向中心：默认格心；"农历靠右"模式下挪到偏左（0.30 格宽）
     // 左边给日号：`0.24 格宽` —— 与右边农历之间留出约 4dp 的缝（56dp 格宽下实测刚好不撞）
     val dayX = if (lunarRightAligned) originX + metrics.cellW * 0.24f * density else cx
-    val num = textLayouts.layout(
-        measurer = measurer,
-        text = day.dayOfMonth.toString(),
-        fontSize = DynamicTypeMetrics.calendarSp(quantizeFont(metrics.dayFont).dp, fontScale),
-        fontWeight = weight,
-        color = textColor,
-    )
     drawText(
         textLayoutResult = num,
         topLeft = Offset(
@@ -719,7 +721,7 @@ internal fun DrawScope.drawDayCell(
     }
     if (flags.contains(key)) {
         val markW = minOf(20f, metrics.cellW * 0.5f)
-        val miniMarkTop = cellCenterY + miniRadius * 0.86f
+        val miniMarkTop = CalendarLayout.yearDiaryMarkTop(dayCy, num.size.height.toFloat())
         val markTop = CalendarLayout.lerp(markTopDp * density, miniMarkTop, miniBlend)
         drawRoundRect(
             color = (if (isSelected) onPrimary else primary).copy(alpha = alpha),

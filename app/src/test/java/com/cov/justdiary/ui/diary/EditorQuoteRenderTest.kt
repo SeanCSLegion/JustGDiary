@@ -257,6 +257,31 @@ class EditorQuoteRenderTest {
         assertEquals(listOf(""), SpannableBridge.fromSpannable(spanned).map { it.text })
     }
 
+    /**
+     * P1-5：空引用行与"打一个字之后"的引用底必须占**同一组行**。
+     *
+     * iOS 用两条用例守这一条（空着时的底 / 打一个字之后的底）；Android 原来只断言了
+     * "顶部有底、下面没有"。这里逐行扫中心像素，直接比较 top / bottom。
+     */
+    @Test
+    fun `an empty quote line and a typed quote line have the same box rows`() {
+        fun boxRows(lines: List<EditorLine>): IntRange {
+            val r = render(lines)
+            val rows = (0 until height).filter { isBox(r.pixel(width / 2, it)) }
+            assertTrue("没画出引用底：$lines", rows.isNotEmpty())
+            return rows.first()..rows.last()
+        }
+
+        val empty = boxRows(
+            listOf(EditorLine(text = "bbbb"), EditorLine(text = "", blockStyle = ContentPartStyle.quote)),
+        )
+        val typed = boxRows(
+            listOf(EditorLine(text = "bbbb"), EditorLine(text = "引", blockStyle = ContentPartStyle.quote)),
+        )
+        assertEquals("引用底的上沿", empty.first, typed.first)
+        assertEquals("引用底的下沿", empty.last, typed.last)
+    }
+
     @Test
     fun `without a quote style nothing is drawn`() {
         val r = render(

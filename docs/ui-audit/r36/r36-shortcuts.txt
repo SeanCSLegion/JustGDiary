@@ -1,0 +1,29 @@
+ShortcutInfo {id=write_today, flags=0x1a4 [ImManIc-rStr]
+  packageName=com.cov.justdiary
+  activity=ComponentInfo{com.cov.justdiary/com.cov.justdiary.app.MainActivity}
+  shortLabel=Write today, resId=2131558779[shortcut_write_short]
+  longLabel=Write today's journal, resId=2131558778[shortcut_write_long]
+  disabledMessage=null, resId=0[null]
+  disabledReason=[Not disabled]
+  categories=null
+  persons=null
+  icon=null
+  rank=0, timestamp=1794570335951
+  intents=[Intent { act=android.intent.action.VIEW dat=justdiary://editor/... flg=0x1000c000 cmp=com.cov.justdiary/.app.MainActivity }/null]
+  extras=null
+  iconRes=2131165300[drawable/ic_shortcut_write], bitmapPath=null, iconUri=null}
+ShortcutInfo {id=search_diary, flags=0x1a4 [ImManIc-rStr]
+  packageName=com.cov.justdiary
+  activity=ComponentInfo{com.cov.justdiary/com.cov.justdiary.app.MainActivity}
+  shortLabel=Search, resId=2131558777[shortcut_search_short]
+  longLabel=Search journal, resId=2131558776[shortcut_search_long]
+  disabledMessage=null, resId=0[null]
+  disabledReason=[Not disabled]
+  categories=null
+  persons=null
+  icon=null
+  rank=1, timestamp=1794570335951
+  intents=[Intent { act=android.intent.action.VIEW dat=justdiary://search/... flg=0x1000c000 cmp=com.cov.justdiary/.app.MainActivity }/null]
+  extras=null
+  iconRes=2131165299[drawable/ic_shortcut_search], bitmapPath=null, iconUri=null}
+Success

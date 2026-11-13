@@ -498,27 +498,26 @@ object EditorModel {
      * | 列表 / 待办项**有内容**时回车 | 新行继承同种标记（继续加一项），待办默认未勾选 |
      * | 列表 / 待办项**空**时回车 | **结束列表**：上一行去掉标记，新行是普通空行（iOS 同） |
      * | 大 / 小标题回车 | **新行继承同一样式** —— 规则 3 的"回车之后也不取消格式，直到用户取消格式" |
-     * | **引用**回车 | **新行回到正文**（引用不延续）—— 见下面的"用户 2026-10-01 的口径" |
+     * | **引用**回车 | **有内容 → 新行继续引用；空引用行 → 结束引用**（与 iOS HEAD 同口径） |
      * | 居中的正文回车 | 新行**不继承居中**（居中只作用于"本行"，见下面的 ⚠️） |
      * | 正文回车 | 新行还是正文（= 没有样式要延续，行为与以前一致） |
      *
      * 三种"新行"都只继承**上一行**的状态，因此只对"新出现、且内容为空"的行生效 ——
      * 粘贴 / 删除 / 普通输入都不受影响。
      *
-     * ## 引用：回车即退出（用户 2026-10-01 定稿，D10 再次改写）
+     * ## 引用：非空续引用，空行结束（2026-11-13 改为跟随 iOS HEAD）
      *
-     * 用户原话：*"当开启引用后，输入回车换行之后，如果引用状态没有输入内容的话，就取消本次引用，
-     * 光标位置重置。如果有输入内容，回车到新行也需要取消引用状态。"*
+     * 用户 2026-11-12 确认：**引用回车一律跟随 iOS**。iOS 现在的口径是
+     * `RichTextEngine.handleReturn`：非空引用行回车 → 新行继续引用；空引用行再回车才结束。
+     * 落库形态因此是 `quote,quote,body`（iOS UI 测试断言）。
      *
-     * 于是引用的两条出口都是回车：
+     * 此前 Android 是"有内容回车 → 新行回正文"（用户 2026-10-01 的旧口径），现已按
+     * "跟 iOS" 的统一决策改掉：
      *
-     * - **本行还是空的**：回车被 [blocksNewline] 吃掉，本行变回正文
-     *   （[endQuoteOnBlockedNewline]）—— 不新增行，光标回到列的最左边；
-     * - **本行有内容**：平台正常换行，**新行是正文**（就是这里的 `above.blockStyle == quote`
-     *   分支）。已经打好的那段仍然是引用（它是一整段引用文字），只是"引用"到这里结束。
-     *
-     * 这样"引用只覆盖用户真正引用的那几行"，不必再点一次「引用」按钮退出；iOS 侧随后按同一口径改
-     * （此前的 iOS `RichTextEngine.handleReturn` 是非空引用行继续引用，本仓库早先也照抄了它）。
+     * - **本行有内容**：平台正常换行，新行**继续引用**（就是这里的 `above.blockStyle == quote`
+     *   且 `above.text` 非空的分支）。
+     * - **本行是空的引用行**：回车被 [blocksNewline] 吃掉，本行变回正文
+     *   （[endQuoteOnBlockedNewline]）—— 不新增行，光标回到列的最左边，引用到此结束。
      *
      * 居中空行的回车在**更早一步**就被 [blocksNewline] 吃掉了（规则 4），走不到这里；
      * 万一走到（例如粘贴带进来的换行），也是"新行继承居中"，与 iOS 的
@@ -543,8 +542,11 @@ object EditorModel {
                 above.marker != null ->
                     result[index] = line.copy(marker = above.marker, done = false)
 
-                // 引用回车 → **新行回到正文**（引用不延续，见上面的"引用：回车即退出"）。
-                // 上一行是空的引用行时走不到这里（那次回车被 `blocksNewline` 吃掉了）。
+                // 引用回车 → **新行继续引用**（跟 iOS HEAD）。空引用行会被
+                // `blocksNewline` 先吃掉，走不到这里；万一走到也按"结束引用"处理。
+                above.blockStyle == ContentPartStyle.quote && above.text.isNotEmpty() ->
+                    result[index] = line.copy(blockStyle = ContentPartStyle.quote, align = null)
+
                 above.blockStyle == ContentPartStyle.quote ->
                     result[index] = line.copy(blockStyle = ContentPartStyle.body, align = null)
 

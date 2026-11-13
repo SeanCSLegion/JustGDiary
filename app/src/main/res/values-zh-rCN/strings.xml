@@ -241,4 +241,23 @@
     <string name="settings_share_loc">分享位置精度</string>
     <string name="settings_share_loc_sub">精确地点与街道不分享</string>
     <string name="settings_share_loc_hidden">隐藏</string>
+
+    <!-- 2026-11-13：P1 平台项新增文案 -->
+    <string name="a11y_prev_day">前一天</string>
+    <string name="a11y_next_day">后一天</string>
+    <string name="notification_rationale_title">开启每日提醒</string>
+    <string name="notification_rationale_msg">允许通知后，日记会在当天还没写时提醒你。之后也可以随时在设置里修改。</string>
+    <string name="notification_rationale_allow">允许</string>
+    <string name="notification_rationale_not_now">暂不</string>
+    <string name="reminder_action_write">写日记</string>
+    <string name="shortcut_write_short">写今天</string>
+    <string name="shortcut_write_long">写今天的日记</string>
+    <string name="shortcut_search_short">搜索</string>
+    <string name="shortcut_search_long">搜索日记</string>
+    <string name="startup_error_title">无法打开日记本</string>
+    <string name="startup_error_msg">你的日记可能仍然安全。请先重试，不要急着卸载；如果一直失败，可以用 .jdiary 备份恢复。</string>
+    <string name="startup_error_detail_show">查看详情</string>
+    <string name="startup_error_detail_hide">隐藏详情</string>
+    <string name="startup_error_retry">重试</string>
+    <string name="editor_image_importing">正在读取图片…</string>
 </resources>

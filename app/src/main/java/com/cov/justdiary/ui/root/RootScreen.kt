@@ -100,6 +100,24 @@ fun RootScreen(modifier: Modifier = Modifier) {
         LaunchIntent.clear()
     }
 
+    // 通知 / 快捷方式「写今天」：不带 dayKey，按当前 dayStartHour 现算（跨午夜也正确）。
+    val openTodayRequest by LaunchIntent.openToday.collectAsState()
+    LaunchedEffect(openTodayRequest) {
+        if (openTodayRequest <= 0) return@LaunchedEffect
+        val settings = container.settings.load()
+        openDayKey = DateUtil.dayKeyForUtc(System.currentTimeMillis(), settings.dayStartHour)
+        LaunchIntent.clearOpenToday()
+    }
+
+    // 快捷方式「搜索日记」：切到搜索标签（不打开日记页）。
+    val searchRequest by LaunchIntent.search.collectAsState()
+    LaunchedEffect(searchRequest) {
+        if (searchRequest <= 0) return@LaunchedEffect
+        openDayKey = null
+        selectedName = AppTab.Search.name
+        LaunchIntent.clearSearch()
+    }
+
     if (openDayKey != null) {
         AdaptiveLayoutHost(modifier = modifier) {
             DiaryPageScreen(

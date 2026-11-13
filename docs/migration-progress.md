@@ -3899,6 +3899,9 @@ E JustDiary.backup: 渲染分享图失败：Software rendering doesn't support h
 
 ## R33 · 引用：光标位置（两处）+ 回车结束引用（2026-10-01 晚，真机 MEIZU 21 / Android 16）
 
+> **2026-11-13 更新**：本节"有内容引用行回车 → 新行回正文"的口径已被用户 2026-11-12 的
+> 最终决策推翻（**一律跟随 iOS**）。实现与文档见 **R36**；本节保留为历史记录。
+
 用户真机反馈两条（承接 R32 第 8 节，那一条只修好了一半）：
 
 > "第一，光标位置不对，一开始对，输入内容之后也会不对。第二，现在引用开启之后输入回车，
@@ -4118,3 +4121,48 @@ x=120 且引用底只剩它那一行（87 行像素）；大标题段首回车 �
 没有 `EditText`；再点顶栏铅笔 → 编辑页出现 `EditText`。与 iOS 路径一致。
 
 **测试**：现有 614 条全绿；本次只改导航接线，未新增测试。
+
+
+---
+
+## R36 · P1 批量落地：iOS 同步 + Android 平台体验（2026-11-13）
+
+用户 2026-11-12 确认"P1 可以继续做"后，本轮把 `TODO.md` 中所有仍可执行的 P1 一次改完，
+再集中跑测试；P1-6（撤销/重做）按已确认口径删死代码，P1-8 / P1-10 仍不做。
+
+### 1. 与 iOS 同步
+
+| 项 | 改动 | 测试 |
+| --- | --- | --- |
+| P1-1 原图落盘 | `MediaStore.importImage` 去掉 2048 降采样，JPEG q0.95；仅 `OutOfMemoryError` 时回退 2048；输出只含像素（方向已烘进像素、无 GPS） | `MediaStoreRobolectricTest`（3000×2000 不缩、800×600 不放大、方向/GPS、失败不留半张） |
+| P1-2 年历几何 | 迷你月圆半径 `0.42 → 0.46`（两处同源 `CalendarLayout.yearDayCircleRadius`）；"有日记"标记从 `cy + 0.86r` 改为**日号行盒底** `CalendarLayout.yearDiaryMarkTop` | `CalendarYearGeometryTest` |
+| P1-3 月历 a11y | 连续月历流在**无障碍开启时**叠 35–42 个透明逐日节点（复用周视图 `CalendarDayCell` 的语义/点击），正常模式仍走 Canvas；日历容器补「前一天 / 后一天」动作，跨月同步 `monthKey` + 流跳转 | `MonthA11yTest`（11 月 30 个可点节点、今天/有日记文案、点击回调、关闭时 0 节点）；资源断言 |
+| P1-4 引用回车 | 非空引用行回车 → 新行**继续引用**；空引用行回车 → 吃掉按键并结束引用（`quote,quote,body`）。R33 的反向口径作废 | `EditorEnterKeyTest` / `EditorModelTest` |
+| P1-5 引用底 | 补"空引用行 vs 打一个字"底 top/bottom 逐像素相等 | `EditorQuoteRenderTest` |
+
+### 2. Android 平台功能
+
+| 项 | 改动 | 测试 |
+| --- | --- | --- |
+| P1-6 删撤销死代码 | 删除 `EditorHistory.kt` / `EditorHistoryTest.kt`；脏标记只看 `lines != initialLines` | 全仓无 `EditorHistory` 引用 |
+| P1-7 通知 | 点通知 / 动作「写日记」用 `justdiary://editor`（不写 dayKey，打开时按 `dayStartHour` 算今天）；新增白色剪影 `ic_notification`；时区/时间变化广播 `ReminderTimeChangeReceiver` 重排；首启先说明再申请通知权限 | `LaunchIntentTest` / `ReminderNotificationRobolectricTest`；模拟器首启弹窗已验证 |
+| P1-9 快捷方式 | `res/xml/shortcuts.xml` 两个静态快捷方式（写今天 / 搜索日记）+ 两个图标；Manifest meta-data；`justdiary://search` 深链 | `AppShortcutsRobolectricTest` |
+| P1-11 插图反馈 | 导入中显示轻量进度（不抢焦点/不挡 IME）；失败 Snackbar「无法读取这张图片」；回读尺寸放 IO | 编译通过；模拟器插入 1280×2856 截图，落盘尺寸与内容原样（无缩放） |
+| P1-12 主题/语言 | 主题不再走 `AppCompatDelegate.setDefaultNightMode`（运行期只更新 Compose + 窗口底/系统栏），冷启动在 `Application` 对齐一次；语言仍走官方 `setApplicationLocales`，重建前把 DayNight 对齐到用户主题再切换 | 模拟器：深色系统下切 Light，logcat 无 `Relaunch`；中→英只有 1 次官方重建，重建后仍停在设置页 |
+| P1-13 读页删除动作 | 卡片「删除」自定义动作改为 `confirmDeleteBlock(id)`：只针对一条、弹确认框、不进多选态 | `DiaryReadScreenTest` / `DiaryPageStateTest` |
+| P1-14 待办 partIndex | `onToggleTodo(blockIndex, partIndex, itemIndex)` 一路透传；删掉 `partIndexOfFirstItems` 猜测 | `DiaryReadScreenTest` |
+| P1-15 导入原子性 | 整个 DB 合并放进**一个事务**；OVERWRITE 的旧图在提交后按引用清理；导入图片先登记、DB 失败整批删除；重名 `imp_` 不覆盖 | `BackupServiceRobolectricTest` 第 2 天损坏用例 |
+| P1-16 启动错误态 | `repository.prepare()` 失败向上抛；`SettingsViewModel.startupError` 驱动全屏「无法打开日记本 + 重试」，不再展示空日记本 | `StartupErrorRobolectricTest` |
+
+### 3. 验证
+
+- `./gradlew clean assembleDebug testDebugUnitTest`：**630 条 JVM 测试全绿**（59 个测试类；本轮新增 16 条 / 11 个类）。
+- `python3 tools/verify_sqlite_schema.py`、`bash tools/verify_backup_interop.sh`：见本轮提交前输出。
+- 模拟器（Pixel_10_Pro，API 36）：
+  - P1-7 首启通知说明弹窗出现；`cmd shortcut get-shortcuts` 确认两个快捷方式；
+  - P1-9 两个静态快捷方式均注册，`justdiary://search` 冷/热启动都切到搜索标签；
+  - P1-11 从 Photo Picker 插入 1280×2856 截图，`files/images/img_*.jpg` 仍为 1280×2856（旧实现会缩到 2048 长边）；
+  - P1-12 深色系统下切 Light 无 Activity 重建；切语言只重建 1 次且保留当前标签页；
+  - P1-3 uiautomator dump 打开无障碍通道时，月态出现 11 月 30 个 + 预挂 12 月 20 个逐日节点（中文文案含「今天 / 已选中 / 无日记」）；
+  - P1-16 把数据库换成同名目录后启动，显示「无法打开日记本 + 重试」；恢复数据库后正常。
+- 证据：`docs/ui-audit/r36/`。

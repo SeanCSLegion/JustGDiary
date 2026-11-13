@@ -369,7 +369,7 @@ So the adapter must:
 ### Risk register for adopting (a) on 1.12.1
 
 1. **Feature flag** `isBasicTextFieldStyledTextEnabled` is documented as *temporary* with TODO b/494340211; if a future release flips or removes it, `getSpanStyles` **silently returns `emptyList()`** — a style-loss bug that unit tests on JVM would not catch (it needs an instrumented/Compose test). Add a startup assertion + a golden round-trip test.
-2. **`undoState` is experimental** and every programmatic `edit {}` becomes an undo entry — call `undoState.clearHistory()` after toolbar-driven formatting, or keep the existing `EditorHistoryTest`-covered model-level undo as the source of truth.
+2. **`undoState` is experimental** and every programmatic `edit {}` becomes an undo entry — call `undoState.clearHistory()` after toolbar-driven formatting, or keep the model-level **放弃修改** snapshot as the only rollback path（撤销/重做已确认不做，`EditorHistory` 已删除）.
 3. **No `AnnotatedString` bridge** — budget real time for step 2 above.
 4. **IME composing + styles is unverified** (§4.3) — test with GBoard CJK input before committing.
 5. `TrackedRange` must never be stored; `getSpanStyles` returns raw, un-normalized ranges.

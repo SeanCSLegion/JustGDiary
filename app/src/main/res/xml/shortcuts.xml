@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- P1-9：长按桌面图标的两个静态快捷方式。深链不带 dayKey，打开时按当天重算。 -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_write"
+        android:shortcutId="write_today"
+        android:shortcutLongLabel="@string/shortcut_write_long"
+        android:shortcutShortLabel="@string/shortcut_write_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="justdiary://editor"
+            android:targetClass="com.cov.justdiary.app.MainActivity"
+            android:targetPackage="com.cov.justdiary" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_search"
+        android:shortcutId="search_diary"
+        android:shortcutLongLabel="@string/shortcut_search_long"
+        android:shortcutShortLabel="@string/shortcut_search_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="justdiary://search"
+            android:targetClass="com.cov.justdiary.app.MainActivity"
+            android:targetPackage="com.cov.justdiary" />
+    </shortcut>
+</shortcuts>

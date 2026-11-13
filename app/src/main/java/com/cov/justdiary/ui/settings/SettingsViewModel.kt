@@ -59,6 +59,12 @@ data class SettingsUiState(
     val pendingImportDayStartStats: BackupStats? = null,
     /** 版本号（"关于"卡片）。 */
     val appVersion: String = "",
+    /**
+     * 启动序列失败（开库 / 迁移）。非空时界面上盖一层显式错误态，而不是展示"空日记本"。
+     *
+     * 文案由 Composable 用资源渲染；这里只收一个技术细节（异常 message）供诊断。
+     */
+    val startupError: String? = null,
 )
 
 /** 定位授权档位（文案：`settings_loc_none` / `_fuzzy` / `_exact`）。 */
@@ -127,9 +133,23 @@ class SettingsViewModel(
         )
     }
 
-    /** 进程启动序列（开库 / 迁移 / 索引 / 排提醒）。由 `MainActivity` 调一次。 */
+    /**
+     * 进程启动序列（开库 / 迁移 / 索引 / 排提醒）。由 `MainActivity` 调一次。
+     *
+     * P1-16：开库 / 迁移失败不再静默吞掉 —— 写入 [SettingsUiState.startupError]，
+     * `MainActivity` 显示"数据读取失败 + 重试"，避免用户看到空日记本后误操作。
+     */
     suspend fun bootstrap() {
-        applier.bootstrap()
+        val result = runCatching { applier.bootstrap() }
+        val error = result.exceptionOrNull()
+        if (error != null) {
+            Log.app.e("启动序列失败：${error.message}", error)
+            _state.value = _state.value.copy(
+                startupError = error.message ?: error::class.java.simpleName,
+            )
+            return
+        }
+        _state.value = _state.value.copy(startupError = null)
         refreshSettings()
         refreshStatus()
     }

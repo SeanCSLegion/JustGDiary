@@ -335,6 +335,107 @@ class BackupServiceRobolectricTest {
         assertTrue("导入的内容应当能被搜到", hits.items.isNotEmpty())
     }
 
+    /**
+     * P1-15：导入不是原子操作的反例 —— 第 2 天的图片 entry 损坏时，
+     * 第 1 天不能留在库里，已经落盘的图片也要被清掉。
+     */
+    @Test
+    fun `a failure on the second day rolls back the whole import and its images`(): Unit = runBlocking {
+        repository.prepare()
+        repository.imagesDir.mkdirs()
+        val firstImage = "img_1700000000100.jpg"
+        val secondImage = "img_1700000000200.jpg"
+        File(repository.imagesDir, firstImage).writeBytes(byteArrayOf(1, 2, 3, 4))
+        File(repository.imagesDir, secondImage).writeBytes(byteArrayOf(5, 6, 7, 8))
+        writeDayWithImage("2026-09-14", "第一天", firstImage)
+        writeDayWithImage("2026-09-15", "第二天", secondImage)
+
+        val packageFile = backupService.exportBackup(includeSettings = false)
+        // 模拟另一台设备：清空本机数据与图片
+        repository.deleteDiaryByDay("2026-09-14")
+        repository.deleteDiaryByDay("2026-09-15")
+        repository.imagesDir.deleteRecursively()
+
+        corruptZipEntry(packageFile, "images/$secondImage")
+
+        val failure = runCatching { backupService.importBackup(packageFile, ImportMode.SKIP) }
+        assertTrue("第 2 天损坏时整个导入应当失败", failure.isFailure)
+        assertNull("第 1 天不能留在库里（整天事务已回滚）", repository.getDiaryByDay("2026-09-14"))
+        assertNull("第 2 天也不能留下半套", repository.getDiaryByDay("2026-09-15"))
+        assertTrue(
+            "失败后 images/ 里不能留下已解出的那一张：${repository.imagesDir.listFiles()?.map { it.name }}",
+            repository.imagesDir.listFiles().isNullOrEmpty(),
+        )
+        packageFile.delete()
+    }
+
+    private suspend fun writeDayWithImage(dayKey: String, text: String, imageName: String) {
+        val startUtc = DateUtil.parseDayKey(dayKey)!!.atTime(12, 0)
+            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        repository.addBlock(
+            startTimeUtc = startUtc,
+            locText = "",
+            latitude = 0.0,
+            longitude = 0.0,
+            locPrecision = LocPrecision.none,
+            region = LocRegion("", "", "", "", "", LocQuality.none),
+            contentJson = ContentFlatten.serializeContent(
+                listOf(
+                    ContentPart(text = text),
+                    ContentPart(
+                        style = com.cov.justdiary.model.ContentPartStyle.image,
+                        src = "images/$imageName",
+                        w = 10.0,
+                        h = 10.0,
+                    ),
+                ),
+            ),
+            dayStartHour = 4,
+        )
+    }
+
+    /** 只破坏一个条目在 zip 里的压缩数据，中央目录的 CRC 保持原值 → 解压时校验失败。 */
+    private fun corruptZipEntry(zip: File, entryName: String) {
+        val bytes = zip.readBytes()
+        val name = entryName.toByteArray(Charsets.UTF_8)
+        var from = 0
+        while (true) {
+            val namePos = indexOf(bytes, name, from)
+            require(namePos >= 0) { "找不到 zip entry：$entryName" }
+            val header = namePos - 30
+            if (header >= 0 && readIntLE(bytes, header) == 0x04034b50) {
+                val nameLen = readShortLE(bytes, header + 26)
+                val extraLen = readShortLE(bytes, header + 28)
+                val dataStart = header + 30 + nameLen + extraLen
+                // 用 data descriptor 时本地头的压缩长度是 0，别依赖它；直接改数据段第 2 个字节。
+                // 中央目录里的 CRC 仍是旧值 → 解压时会失败。
+                val at = dataStart + 1
+                require(at < bytes.size) { "entry 数据段越界：$entryName" }
+                bytes[at] = (bytes[at].toInt() xor 0xFF).toByte()
+                zip.writeBytes(bytes)
+                return
+            }
+            from = namePos + 1
+        }
+    }
+
+    private fun indexOf(haystack: ByteArray, needle: ByteArray, from: Int): Int {
+        outer@ for (i in from..haystack.size - needle.size) {
+            for (j in needle.indices) if (haystack[i + j] != needle[j]) continue@outer
+            return i
+        }
+        return -1
+    }
+
+    private fun readIntLE(bytes: ByteArray, at: Int): Int =
+        (bytes[at].toInt() and 0xFF) or
+            ((bytes[at + 1].toInt() and 0xFF) shl 8) or
+            ((bytes[at + 2].toInt() and 0xFF) shl 16) or
+            ((bytes[at + 3].toInt() and 0xFF) shl 24)
+
+    private fun readShortLE(bytes: ByteArray, at: Int): Int =
+        (bytes[at].toInt() and 0xFF) or ((bytes[at + 1].toInt() and 0xFF) shl 8)
+
     // ------------------------------------------------------------------ 辅助
 
 

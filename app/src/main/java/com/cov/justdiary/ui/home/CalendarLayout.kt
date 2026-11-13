@@ -492,6 +492,28 @@ object CalendarLayout {
     /** 迷你月（年历）的日号字号：`clamp(min(cellW*0.95, cellH*0.5), 9, 14)`。 */
     fun miniDayFont(cellW: Float, cellH: Float): Float = clamp(min(cellW * 0.95f, cellH * 0.5f), 9f, 14f)
 
+    /**
+     * 年历迷你月的选中 / 今天圆半径比例（P1-2，2026-11-13）。
+     *
+     * 旧值 `0.42` 让年历圆恒占格宽 84%，而月 / 周 / 流约 90.5% —— iOS 用户报的
+     * "年历圆偏小"在 Android 同样存在。`0.46` 的直径 = 格宽 92%，与 iOS 93% 看齐，
+     * 相邻圆之间仍留 8% 的缝。**两处同改**：`CalendarCanvas` 与 `YearMonthMorph` 都调这里。
+     */
+    const val YEAR_DAY_CIRCLE_RADIUS_RATIO = 0.46f
+
+    /** 年历圆半径（dp）。竖直方向也受格高限制，避免碰到上下两行。 */
+    fun yearDayCircleRadius(cellW: Float, cellH: Float): Float =
+        min(cellW, cellH) * YEAR_DAY_CIRCLE_RADIUS_RATIO
+
+    /**
+     * 年历"有日记"标记的顶边 y（px）。
+     *
+     * P1-2：标记不再挂在圆半径上（那样放大圆会把标记一起带远），而是挂在**日号文本盒底**
+     * 下方 0dp 处。`dayTextHeight` 是实际测得的文本行盒高；年历 gap = 0。
+     */
+    fun yearDiaryMarkTop(dayCenterY: Float, dayTextHeight: Float): Float =
+        dayCenterY + dayTextHeight / 2f
+
     /** 迷你月度量：不显示农历、不画分隔线。 */
     fun miniMetrics(grid: Rect): DayMetrics = DayMetrics(
         cellW = grid.w / 7f,

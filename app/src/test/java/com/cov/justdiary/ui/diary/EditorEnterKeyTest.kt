@@ -180,15 +180,14 @@ class EditorEnterKeyTest {
     }
 
     /**
-     * 用户 2026-10-01 定稿的第二条：**有内容的引用行回车，新行也要回到正文**
-     * （引用不跟着换行延续）。
+     * 2026-11-12 确认：**引用回车一律跟随 iOS** —— 有内容的引用行回车，新行继续引用；
+     * 空引用行再回车才结束（`quote,quote,body`）。
      *
      * 这一条走的是平台自己的换行路径：`EditText` 插入 `\n` → `TextWatcher` →
-     * [EditorTextState.onUserText] → [EditorModel.repairAfterEnter] 把新行改成正文。
-     * 已经打好的那一行仍然是引用（它是一整段引用文字），只是引用到这里结束。
+     * [EditorTextState.onUserText] → [EditorModel.repairAfterEnter] 让新行也归引用。
      */
     @Test
-    fun `a newline after a content quote line does not continue the quote`() {
+    fun `a newline after a content quote line continues the quote`() {
         val state = EditorTextState(
             listOf(EditorLine(text = "引用", blockStyle = com.cov.justdiary.model.ContentPartStyle.quote)),
         )
@@ -212,10 +211,11 @@ class EditorEnterKeyTest {
             state.lines[0].blockStyle,
         )
         assertEquals(
-            "新行必须是正文（引用不延续）",
-            com.cov.justdiary.model.ContentPartStyle.body,
+            "新行继续引用（跟随 iOS HEAD）",
+            com.cov.justdiary.model.ContentPartStyle.quote,
             state.lines[1].blockStyle,
         )
+
     }
 
     /** 大小标题不受这条影响：回车之后仍然延续（用户 2026-09-28 规则 3）。 */
