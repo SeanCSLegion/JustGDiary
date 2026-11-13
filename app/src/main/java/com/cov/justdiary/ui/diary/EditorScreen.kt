@@ -1,5 +1,6 @@
 package com.cov.justdiary.ui.diary
 
+import android.graphics.Bitmap
 import android.net.Uri
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -39,6 +40,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +67,7 @@ import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.model.ContentPartStyle
 import com.cov.justdiary.service.EditorDraft
 import com.cov.justdiary.service.LocationRules
+import com.cov.justdiary.service.MediaStore
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.AppIcons
 import com.cov.justdiary.ui.components.AnchoredMenu
@@ -144,8 +148,8 @@ fun EditorScreen(
     onPrecisionChange: (String) -> Unit = {},
     onSave: (EditorSavePayload) -> Unit = {},
     onImportImage: suspend (Uri) -> ImportedImage? = { null },
-    /** 图片行的位图加载器（由调用方接 `MediaStore`）。 */
-    loadImage: (String) -> android.graphics.Bitmap? = { null },
+    /** 图片行的异步位图加载器（由调用方接 `MediaStore.imageAsync`）。 */
+    loadImage: suspend (String, Int) -> Bitmap? = { _, _ -> null },
     /** 是否有未保存内容（宿主用它决定返回键是否要二次确认）。 */
     onDirtyChange: (Boolean) -> Unit = {},
 ) {
@@ -167,6 +171,21 @@ fun EditorScreen(
         } ?: EditorSelection.NONE
     }
     val state = remember(loadToken) { EditorTextState(restoredLines, restoredSelection) }
+    // P2-1：图片先异步解码进内存表，再让 `EditorTextArea` 用同步 imageProvider 组 Spannable。
+    // `imageRevision` 变化时强制回写一次文本（否则图加载完成后 ImageSpan 仍是占位）。
+    val images = remember(loadToken) { mutableStateMapOf<String, Bitmap>() }
+    var imageRevision by remember(loadToken) { mutableIntStateOf(0) }
+    LaunchedEffect(loadToken) {
+        val srcs = state.lines.mapNotNull { it.imageSrc }.distinct()
+        for (src in srcs) {
+            if (src !in images) {
+                loadImage(src, MediaStore.PREVIEW_MAX_PIXEL)?.let { bitmap ->
+                    images[src] = bitmap
+                }
+            }
+        }
+        if (srcs.isNotEmpty()) imageRevision += 1
+    }
     val effectiveStartTimeUtc = initialDraft?.startTimeUtc ?: startTimeUtc
     val dirty = hasChanges(state, originalLines)
 
@@ -224,6 +243,11 @@ fun EditorScreen(
                         snackbarHostState.showSnackbar(imageFailedText)
                         return@launch
                     }
+                    // P2-1：先把图加载进内存表，再插入行；这样这次回写就有真实 ImageSpan。
+                    loadImage(imported.src, MediaStore.PREVIEW_MAX_PIXEL)?.let { bitmap ->
+                        images[imported.src] = bitmap
+                    }
+                    imageRevision += 1
                     // 插图 + **把光标移到图片下面那一行**（iOS `insertImage` 同一行为）：
                     // 否则插图之后接着打字会打在图片上面。
                     state.insertImage(
@@ -299,7 +323,8 @@ fun EditorScreen(
                         state = state,
                         placeholder = if (isNewBlock) PLACEHOLDER_NEW else PLACEHOLDER_EDIT,
                         onViewReady = { editText = it },
-                        imageProvider = loadImage,
+                        imageProvider = { src -> images[src] },
+                        imageRevision = imageRevision,
                         metricsFor = metricsFor,
                         quoteStyle = quoteStyle,
                         markerStyle = markerStyle,

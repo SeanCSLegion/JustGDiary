@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.app.AppForeground
@@ -82,8 +84,18 @@ fun DiaryPageScreen(
     val container = remember(context) {
         (context.applicationContext as JustDiaryApplication).container
     }
-    // 每天一个实例：换一天不会复用上一天的编辑状态
+    // P2-2：页面级 ViewModelStore。以前 key 每天一个但 owner 是 Activity，
+    // 翻 30 天就在 Activity 里留下 30 个 VM；关闭页面时把整个 store 清掉。
+    val pageOwner = remember(dayKey) {
+        object : ViewModelStoreOwner {
+            override val viewModelStore = ViewModelStore()
+        }
+    }
+    DisposableEffect(pageOwner) {
+        onDispose { pageOwner.viewModelStore.clear() }
+    }
     val viewModel: DiaryPageViewModel = viewModel(
+        viewModelStoreOwner = pageOwner,
         key = "diary:${dayKey.orEmpty()}",
         factory = DiaryPageViewModel.factory(container),
     )
@@ -401,7 +413,9 @@ fun DiaryPageScreen(
                             )
                         }
                     },
-                    loadImage = { src -> container.mediaStore.image(src) },
+                    loadImage = { src, maxPixel ->
+                        container.mediaStore.imageAsync(src, maxPixel)
+                    },
                     onDirtyChange = { editorDirty = it },
                 )
               }

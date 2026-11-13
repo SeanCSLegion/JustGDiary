@@ -242,7 +242,11 @@ private fun TabContent(
                 onOpenDay = { onOpenDay(DateUtil.dayKeyOf(it)) },
                 // iOS 的首页「写日记」也走 openDiary：先阅读，再在阅读态里进编辑。
                 onWrite = { onOpenDay(DateUtil.dayKeyOf(it)) },
-                imageLoader = { src -> container.mediaStore.image(src)?.asImageBitmap() },
+                // P2-1：首页当日面板是缩略图槽位，异步解码到 480px，绝不能占主线程。
+                imageLoader = { src ->
+                    container.mediaStore.imageAsync(src, com.cov.justdiary.service.MediaStore.THUMBNAIL_MAX_PIXEL)
+                        ?.asImageBitmap()
+                },
                 // 这两个版本号一变，首页就无动画回到「今天 + 月态」（规范 §1 规则 3）
                 dataVersion = dataVersion,
                 settingsVersion = settingsVersion,

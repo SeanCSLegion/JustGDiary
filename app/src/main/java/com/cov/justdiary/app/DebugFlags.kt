@@ -1,6 +1,7 @@
 package com.cov.justdiary.app
 
 import android.content.Intent
+import com.cov.justdiary.BuildConfig
 
 /**
  * 调试开关。对应 iOS 的 `-slow-morph` / `SLOW_MORPH=1` 与 `-morph-log`（方案 §6.2）。
@@ -46,6 +47,12 @@ object DebugFlags {
 
     /** 从启动 `Intent` 解析（`MainActivity` 在 `onCreate` / `onNewIntent` 调）。 */
     fun consume(intent: Intent?) {
+        // P2-9：release 里不接受任何 Intent / 环境变量开关，避免第三方用 extra 打开高频日志。
+        if (!BuildConfig.DEBUG) {
+            slowMorph = false
+            morphLog = false
+            return
+        }
         val value = resolve(
             slowMorphExtra = intent?.getBooleanExtra(EXTRA_SLOW_MORPH, false) == true,
             morphLogExtra = intent?.getBooleanExtra(EXTRA_MORPH_LOG, false) == true,

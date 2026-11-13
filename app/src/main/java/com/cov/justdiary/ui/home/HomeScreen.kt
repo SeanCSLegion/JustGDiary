@@ -54,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -175,7 +176,7 @@ fun HomeScreen(
     /** 选中日变化 → 让上层读这一天的内容。 */
     onSelectDay: (String) -> Unit = {},
     /** 内联图片加载器（接 `MediaStore`）。 */
-    imageLoader: (String) -> ImageBitmap? = { null },
+    imageLoader: suspend (String) -> ImageBitmap? = { null },
     /**
      * 数据版本（导入备份、别处改过日记）。
      *
@@ -1297,7 +1298,7 @@ private fun WeekLayer(
     selectedDate: LocalDate,
     dateFormats: DateFormats?,
     showTime: Boolean,
-    imageLoader: (String) -> ImageBitmap?,
+    imageLoader: suspend (String) -> ImageBitmap?,
     onDayClick: (LocalDate) -> Unit,
     onPageWeek: (Int) -> Unit,
     onOpenDay: () -> Unit,
@@ -1348,7 +1349,7 @@ private fun DayContentBlock(
     todayKey: String,
     dateFormats: DateFormats?,
     showTime: Boolean,
-    imageLoader: (String) -> ImageBitmap?,
+    imageLoader: suspend (String) -> ImageBitmap?,
     onOpenDay: () -> Unit,
     onWrite: () -> Unit,
     showLunar: Boolean,
@@ -1780,7 +1781,7 @@ internal fun DayPanel(
     todayKey: String,
     dateFormats: DateFormats?,
     showTime: Boolean,
-    imageLoader: (String) -> ImageBitmap?,
+    imageLoader: suspend (String) -> ImageBitmap?,
     /** 点日记卡片 / 「继续写日记」→ 进**阅读态**（iOS 的 `openDiary`）。 */
     onOpenDay: () -> Unit,
     /**
@@ -1937,7 +1938,7 @@ private fun DayBlockCard(
     block: EditBlock,
     dateFormats: DateFormats?,
     showTime: Boolean,
-    imageLoader: (String) -> ImageBitmap?,
+    imageLoader: suspend (String) -> ImageBitmap?,
     onOpenDay: () -> Unit,
 ) {
     // `auto_time` 关闭时不显示开始时间，只保留地点（与 iOS 的 `showsTime` 一致）
@@ -1982,13 +1983,17 @@ private fun DayBlockCard(
 
 /** 面板里的一个段落（只读）。 */
 @Composable
-private fun DayPanelPart(part: ContentPart, imageLoader: (String) -> ImageBitmap?) {
+private fun DayPanelPart(part: ContentPart, imageLoader: suspend (String) -> ImageBitmap?) {
     when {
         part.src != null -> {
-            val bitmap = imageLoader(part.src)
-            if (bitmap != null) {
+            // P2-1：组合期不解码；图到位前这条图片段不占位（与旧行为一致）。
+            val bitmap by produceState<ImageBitmap?>(initialValue = null, part.src) {
+                value = imageLoader(part.src)
+            }
+            val shown = bitmap
+            if (shown != null) {
                 Image(
-                    bitmap = bitmap,
+                    bitmap = shown,
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxWidth()

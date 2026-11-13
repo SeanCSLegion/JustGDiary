@@ -469,7 +469,9 @@ private fun ReadPart(
     onToggleTodo: (Int, Int) -> Unit,
     imageLoader: (ContentPart) -> ImageBitmap?,
 ) {
-    when (val render = ReadLayout.renderModel(listOf(part)).firstOrNull()) {
+    // P2-4：`renderModel` 是纯计算，按 part 记住；长日记滚动时不再每帧重跑。
+    val render = remember(part) { ReadLayout.renderModel(listOf(part)).firstOrNull() }
+    when (render) {
         is ReadLayout.PartRender.Paragraph -> ParagraphText(
             render = render,
             highlights = DiarySearch.highlights(matches, partIndex, ITEM_WHOLE_PART, currentHit),

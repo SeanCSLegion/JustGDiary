@@ -1,6 +1,7 @@
 package com.cov.justdiary.service
 
 import android.util.Log as AndroidLog
+import com.cov.justdiary.BuildConfig
 
 /**
  * 日志门面，对应 iOS `Services/Log.swift`：subsystem `com.cov.justdiary`，
@@ -23,9 +24,17 @@ object Log {
 
         private val tag: String = "$TAG_PREFIX.$name"
 
-        fun d(message: String) = AndroidLog.d(tag, message)
+        // P2-9：release 不输出 debug/info（day_key、地点、备份统计都在这一层）。
+        // warning / error 保留，方便线上定位；R8 仍会按 shrink 规则裁掉未被引用的字符串。
+        private fun debugEnabled(): Boolean = BuildConfig.DEBUG
 
-        fun i(message: String) = AndroidLog.i(tag, message)
+        fun d(message: String) {
+            if (debugEnabled()) AndroidLog.d(tag, message)
+        }
+
+        fun i(message: String) {
+            if (debugEnabled()) AndroidLog.i(tag, message)
+        }
 
         fun w(message: String) = AndroidLog.w(tag, message)
 

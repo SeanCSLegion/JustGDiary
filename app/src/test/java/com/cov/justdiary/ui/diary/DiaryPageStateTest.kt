@@ -356,7 +356,8 @@ class DiaryPageStateTest {
         scheduler.advanceTimeBy(DiaryPageViewModel.SEARCH_DEBOUNCE_MS + 50)
         scheduler.runCurrent()
 
-        val state = viewModel.state.value
+        // P2-6b：命中计算已移到 Dispatchers.Default，等它真的写回状态。
+        val state = awaitState { it.hits.size == 2 }
         // 夹具里 "深圳" 出现两次：正文一次、待办项一次
         assertEquals(2, state.hits.size)
 
@@ -384,6 +385,7 @@ class DiaryPageStateTest {
         viewModel.onSearchTextChange("深圳")
         scheduler.advanceTimeBy(DiaryPageViewModel.SEARCH_DEBOUNCE_MS + 50)
         scheduler.runCurrent()
+        awaitState { it.hits.size == 2 }
 
         viewModel.stepHit(1)
         val target = viewModel.state.value.scrollTargetBlockId

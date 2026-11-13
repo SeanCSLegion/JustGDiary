@@ -4166,3 +4166,59 @@ x=120 且引用底只剩它那一行（87 行像素）；大标题段首回车 �
   - P1-3 uiautomator dump 打开无障碍通道时，月态出现 11 月 30 个 + 预挂 12 月 20 个逐日节点（中文文案含「今天 / 已选中 / 无日记」）；
   - P1-16 把数据库换成同名目录后启动，显示「无法打开日记本 + 重试」；恢复数据库后正常。
 - 证据：`docs/ui-audit/r36/`。
+
+---
+
+## R37 · P2 发布链路 + 性能/内存第一批（2026-11-13）
+
+用户要求先做“下一轮优先顺序”的第 1、2 步：发布准备，以及 P2-1 / P2-2 / P2-4 +
+P2-6b 里设置写入、地点筛选防抖、页内搜索主线程三项；P2-11/12/13 无障碍走查本轮不做。
+
+### 1. 发布链路（P2-7 / P2-8 / P2-9 / P2-10）
+
+- **P2-7**：
+  - 根目录新增 `version.properties`，`versionCode` / `versionName` 只从这里读；
+  - `keystore.properties` 或 `JUSTDIARY_*` 环境变量提供 release 签名（文件已 gitignore）；
+  - release 开 `isMinifyEnabled = true` + `isShrinkResources = true`，`app/proguard-rules.pro`
+    补 kotlinx.serialization / WorkManager Worker / 清单入口 / 反射点 keep；
+  - 新增 `docs/release.md`。实测：签名 release APK **4.2MB**（debug 37MB）、AAB **6.0MB**；
+    冷启动正常，设置页“导出备份”能落出 `.jdiary`（验证 R8 没打断序列化）。
+- **P2-8**：新增 `.github/workflows/android.yml`：
+  - unit job：`assembleDebug` + `testDebugUnitTest` + `verify_sqlite_schema.py` + `verify_docs.py`；
+  - instrumented job：API 35 emulator 跑 `connectedDebugAndroidTest`。
+  新增 7 条 `androidTest`：SQLite 往返/搜索/删除、草稿落盘、三种深链、启动首页；
+  本机 Pixel_10_Pro（API 36）实测 **7/7 通过**。
+- **P2-9**：`Log` 的 debug/info 按 `BuildConfig.DEBUG` 抑制；`DebugFlags.consume` 在 release
+  直接关闭 Intent/环境变量开关。release 启动 logcat 已看不到 info 级启动日志。
+- **P2-10**：更新 `docs/android-design/README.md` 实施状态、`07-ios-map-and-plan.md` 历史差距说明、
+  `android-ui-inventory.md` 的 `EditorHistory` 记录；新增 `tools/verify_docs.py`，校验
+  测试计数 / P1 收口 / design README / release 配置，并接入 CI。
+
+### 2. 性能与内存（P2-1 / P2-2 / P2-4）
+
+- **P2-1**：
+  - `MediaStore.imageAsync(src, maxPixel)`，解码在 `Dispatchers.IO`；
+  - 首页当日面板走 480px 缩略图，正文/编辑器 1600px；分享预览按宽度 `inSampleSize`；
+  - 编辑器图片先异步预载到内存表，再通过 `imageRevision` 回写 `Spannable`；
+  - 缓存 150MB → **96MB**，`Application.onTrimMemory` 清空 LRU。
+- **P2-2**：`DiaryPageScreen` 用页面级 `ViewModelStoreOwner`，关闭/换日时 `clear()`；
+  不再把每天一个 `DiaryPageViewModel` 留在 Activity。
+- **P2-4**：`ReadPart` 的 `ReadLayout.renderModel` 按 `part` remember。
+
+### 3. P2-6b 三条
+
+- **设置写入串行化**：`SettingsViewModel.update` 用 `Mutex` 包住“读 old → transform → commit”，
+  快速连点两个开关不会互相覆盖；补回归测试。
+- **地点筛选取消**：`setLocSearch` / `loadLocationOptions` 共用同一个 `locSearchJob`，
+  查库改成同一协程内的 suspend 函数，旧查询会被真正取消。
+- **页内搜索移出主线程**：`recomputeHits` 在 `Dispatchers.Default` 解析 + `findMatches`，
+  回写前校验关键词未变；长日记不再卡主线程 1–2 帧。
+
+### 4. 验证
+
+- JVM：**631 / 631 通过**（59 个测试类）。
+- Android instrumented：**7 / 7 通过**（Pixel_10_Pro，API 36）。
+- `python3 tools/verify_sqlite_schema.py`：通过。
+- `python3 tools/verify_docs.py`：通过。
+- release：`assembleRelease` + `bundleRelease` 成功；APK 签名校验通过；release 启动与导出备份冒烟通过。
+- 未做：P2-11/12/13 无障碍与真机走查；P2-3 morph 性能；P2-5/P2-6 及其余 P2-6b。

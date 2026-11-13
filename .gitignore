@@ -31,6 +31,12 @@ captures/
 # !.idea/misc.xml
 # !.idea/vcs.xml
 
+# ---------- 发布签名（绝不入库） ----------
+keystore.properties
+*.jks
+*.keystore
+signing/
+
 # ---------- Android 构建产物 ----------
 *.apk
 *.aar

@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -125,6 +127,15 @@ class SettingsViewModel(
 
     private val eventChannel = Channel<SettingsUiEvent>(Channel.BUFFERED)
     val events = eventChannel.receiveAsFlow()
+
+    /**
+     * P2-6b：设置写入串行化。
+     *
+     * 原来每个 setter 在启动协程前就 `settings.load()` 出 old，再整体 `save(new)`；
+     * 快速连点两个开关时，两次 transform 可能都基于同一份旧值，最后一个覆盖前一个。
+     * 现在把"读 old → transform → commit"整段放进同一把锁，后一个一定看到前一个的结果。
+     */
+    private val writeMutex = Mutex()
 
     init {
         _state.value = _state.value.copy(
@@ -493,22 +504,24 @@ class SettingsViewModel(
         transform: (AppSettings) -> AppSettings,
         onOutcome: (com.cov.justdiary.app.SettingsApplyOutcome) -> Unit = {},
     ) {
-        val old = settings.load()
-        val new = transform(old)
-        if (new == old) {
-            _state.value = _state.value.copy(settings = old)
-            return
-        }
-        _state.value = _state.value.copy(settings = new)
         viewModelScope.launch {
-            val outcome = runCatching { applier.commit(old, new) }
-                .onFailure { Log.app.e("应用设置失败：${it.message}") }
-                .getOrDefault(com.cov.justdiary.app.SettingsApplyOutcome())
-            _state.value = _state.value.copy(settings = settings.load())
-            if (outcome.needsLocationPermissionRequest) {
-                eventChannel.trySend(SettingsUiEvent.RequestLocationPermission)
+            writeMutex.withLock {
+                val old = settings.load()
+                val new = transform(old)
+                if (new == old) {
+                    _state.value = _state.value.copy(settings = old)
+                    return@withLock
+                }
+                _state.value = _state.value.copy(settings = new)
+                val outcome = runCatching { applier.commit(old, new) }
+                    .onFailure { Log.app.e("应用设置失败：${it.message}") }
+                    .getOrDefault(com.cov.justdiary.app.SettingsApplyOutcome())
+                _state.value = _state.value.copy(settings = settings.load())
+                if (outcome.needsLocationPermissionRequest) {
+                    eventChannel.trySend(SettingsUiEvent.RequestLocationPermission)
+                }
+                onOutcome(outcome)
             }
-            onOutcome(outcome)
         }
     }
 

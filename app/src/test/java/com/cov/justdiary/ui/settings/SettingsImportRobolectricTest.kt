@@ -63,6 +63,34 @@ class SettingsImportRobolectricTest {
         container.repository.imagesDir.deleteRecursively()
     }
 
+    /**
+     * P2-6b：快速连点两个开关时，后一个必须看到前一个已经提交的值。
+     */
+    @Test
+    fun `two rapid settings updates both persist`() = runBlocking {
+        val old = container.settings.load()
+        val targetDynamic = !old.dynamicColor
+        val targetWeek = if (old.weekStart == AppSettings.WEEK_START_SUNDAY) {
+            AppSettings.WEEK_START_MONDAY
+        } else {
+            AppSettings.WEEK_START_SUNDAY
+        }
+
+        viewModel.setDynamicColor(targetDynamic)
+        viewModel.setWeekStart(targetWeek)
+
+        withTimeout(5_000) {
+            while (true) {
+                val now = container.settings.load()
+                if (now.dynamicColor == targetDynamic && now.weekStart == targetWeek) break
+                kotlinx.coroutines.delay(5)
+            }
+        }
+        val now = container.settings.load()
+        assertEquals(targetDynamic, now.dynamicColor)
+        assertEquals(targetWeek, now.weekStart)
+    }
+
     @Test
     fun `import applies settings but asks before recomputing a different day start`() = runBlocking {
         // 1. 备份：换日 6 点 + 深色 + 周日为一周开始。

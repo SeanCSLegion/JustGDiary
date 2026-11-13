@@ -27,6 +27,9 @@ import kotlin.math.roundToInt
  * | 文件名 | `img_<epochMillis>.jpg` | `DiaryViewModel.swift:492` |
  * | 内存缓存 | 200 项 / 150 MB | `MediaStore.swift:53-54` |
  *
+ * P2-1：Android 侧缓存上限收窄到 96 MB，并区分槽位尺寸（缩略图 480 / 正文 1600），
+ * 避免"40dp 的缩略图也按 1600px 解码"。
+ *
  * ## 与 iOS 的实现差异
  *
  * iOS 用 `CGImageSourceCreateThumbnailAtIndex` + `kCGImageSourceCreateThumbnailWithTransform`
@@ -34,9 +37,9 @@ import kotlin.math.roundToInt
  * minSdk 33 满足）：它同样**自动应用 EXIF 方向**并支持 `setTargetSize` 降采样，
  * 因此不需要额外引入 `androidx.exifinterface`。
  *
- * 缓存只按**字节数**限制（`LruCache` 只有一个维度）；iOS 的 200 项上限在这里
- * 由 150 MB 的字节上限近似覆盖 —— 单张图按 2048 边长算约 16 MB，200 项上限
- * 实际上不会被触及。
+ * 缓存只按**字节数**限制（`LruCache` 只有一个维度）；iOS 的 200 项上限在 Android 侧
+ * 由 96 MB 的字节上限近似覆盖（P2-1 从 150 MB 收窄）。显示链路按槽位解码
+ * （缩略图 480 / 正文 1600），因此同样内存下能装更多页。
  */
 class MediaStore(context: Context) {
 
@@ -50,6 +53,15 @@ class MediaStore(context: Context) {
     }
 
     // ------------------------------------------------------------------ 读
+
+    /**
+     * 异步取图：调用方在组合期只能走这一条（P2-1）。
+     *
+     * 真正的解码由 [image] 在 IO 上做；命中缓存时也会切回调用方上下文，
+     * 但 Compose 的 `produceState` 不关心这一点。
+     */
+    suspend fun imageAsync(src: String, maxPixel: Int = PREVIEW_MAX_PIXEL): Bitmap? =
+        withContext(Dispatchers.IO) { image(src, maxPixel) }
 
     /** 取一张已降采样的图；命中内存缓存则直接返回。 */
     fun image(src: String, maxPixel: Int = PREVIEW_MAX_PIXEL): Bitmap? {
@@ -173,6 +185,14 @@ class MediaStore(context: Context) {
 
     fun invalidateAll() = cache.evictAll()
 
+    /**
+     * 低内存回调：直接清空图片缓存。
+     *
+     * 由 `JustDiaryApplication.onTrimMemory` 调用；不在这里做"部分淘汰"——
+     * 图片都能从磁盘重新解码，清空是最简单也最不会留尾巴的策略。
+     */
+    fun trimMemory() = cache.evictAll()
+
     companion object {
         /** 插入图片的 JPEG 质量：与 iOS `5594a73` 一致（原分辨率 + q0.95）。 */
         const val JPEG_QUALITY: Int = 95
@@ -180,10 +200,14 @@ class MediaStore(context: Context) {
         /** 只在该尺寸解码抛 OOM 时使用；不参与正常落盘。 */
         const val OOM_FALLBACK_MAX_PIXEL: Int = 2048
 
+        /** 正文 / 编辑器 / 阅读态图片。 */
         const val PREVIEW_MAX_PIXEL: Int = 1600
 
-        /** iOS: `totalCostLimit = 150 * 1024 * 1024`。 */
-        const val CACHE_MAX_BYTES: Int = 150 * 1024 * 1024
+        /** 首页当日面板等缩略图槽位。 */
+        const val THUMBNAIL_MAX_PIXEL: Int = 480
+
+        /** 96 MB：低于 iOS 的 150 MB，配合"按槽位尺寸解码"控制常驻内存。 */
+        const val CACHE_MAX_BYTES: Int = 96 * 1024 * 1024
 
         /** 渲染降采样：`max(storedW, storedH) * 3`（iOS `MediaViews.swift:25`）。 */
         fun renderMaxPixel(storedWidth: Double, storedHeight: Double): Int =

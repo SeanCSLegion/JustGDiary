@@ -6,11 +6,12 @@
 >
 > 建立日期：2026-09-26 · 依据 iOS commit `0b07050`（一页时光 / JustADiary，iPhone-only，UI 已定稿）
 
-> **实施状态（2026-09-26）**：**地基 + 首页 + 设置页 + 搜索页 + 足迹页已完成**，
-> 见 [`docs/migration-progress.md`](../migration-progress.md) 的 R4 一节（5 个提交，逐屏一个）。
-> **日记页尚未开工** —— 按计划等前四屏测试通过后再做；它的差距清单在
-> [`07-ios-map-and-plan.md`](07-ios-map-and-plan.md) §3.1 的 P0-1…P0-3。
-> 上机证据：`docs/ui-audit/r4/`（18 张，含平板横竖屏、深色、锁竖屏）。
+> **实施状态（2026-11-13）**：**首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导全部完成**；
+> P0 数据安全与 P1 iOS 同步 / 平台体验已在 R34–R36 收口（见
+> [`docs/migration-progress.md`](../migration-progress.md)），当前 `630` 条 JVM 单测全绿。
+> 剩余的是 P2 性能/发布/无障碍走查，见根目录 `TODO.md`；`07-ios-map-and-plan.md` §3.1
+> 的 P0-1…P0-6 是 **R4 当时的历史差距**，现已全部修复，保留作对照。
+> 上机证据：`docs/ui-audit/`（r4 首屏、r27 日记、r33 引用、r36 P1 收口）。
 > 参考设备：手机 Pixel 10 Pro（412 × 915 dp @2.625x）、平板 1280 × 800 dp / 800 × 1280 dp
 > 设计稿：[`mockups/`](mockups)（9 块板面，含逐屏竖屏 / 横屏 / 深色）
 

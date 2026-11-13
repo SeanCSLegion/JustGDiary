@@ -21,6 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -37,6 +40,8 @@ import androidx.compose.foundation.border
 import com.cov.justdiary.R
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.theme.Spacing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -95,9 +100,15 @@ fun ShareSheetContent(
     onSaveToGallery: () -> Unit,
 ) {
     val previewSize = SharePanelLayout.previewWidthDp(LocalAdaptiveLayout.current)
-    // 预解码成 ImageBitmap：`File` 本身不能直接画，且解码要跟着"哪张图"一起记住
-    val image: ImageBitmap? = remember(imageFile?.path) {
-        imageFile?.takeIf { it.exists() }?.let { loadBitmap(it) }
+    val density = LocalDensity.current
+    val previewWidthPx = with(density) { previewSize.dp.toPx().toInt() }
+        .coerceAtLeast(SharePanelLayout.PREVIEW_MIN_DECODE_PX)
+    // P2-1：分享图可能有 1000+ px 高，预览只需要 200dp 宽；放 IO 解码并按宽度采样，
+    // 既不在组合期解码，也不把整张长图塞进内存。
+    val image by produceState<ImageBitmap?>(initialValue = null, imageFile?.path, previewWidthPx) {
+        value = imageFile
+            ?.takeIf { it.exists() }
+            ?.let { file -> withContext(Dispatchers.IO) { loadBitmap(file, previewWidthPx) } }
     }
 
     Column(
@@ -204,6 +215,9 @@ object SharePanelLayout {
     /** 渲染中区块的最小高。 */
     const val PROGRESS_MIN_HEIGHT = 220
 
+    /** 预览解码的最小宽度（低密度屏也别解得太糊）。 */
+    const val PREVIEW_MIN_DECODE_PX = 480
+
     /**
      * 预览宽度：竖屏 200dp；宽屏（内容列 ≥ 548.5dp）跟着内容列走，但不超过长图自身的
      * 720dp 逻辑宽 —— 预览比原图还宽没有意义。
@@ -214,7 +228,19 @@ object SharePanelLayout {
     }
 }
 
-/** 读长图（缓存在 `cacheDir/share/`，尺寸有限，直接整张读进内存）。 */
-private fun loadBitmap(file: File): ImageBitmap? =
-    runCatching { android.graphics.BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() }
-        .getOrNull()
+/**
+ * 读分享长图并按 [maxWidthPx] 做 inSampleSize 降采样。
+ *
+ * 长图的高度可能远大于宽度，但 `Image` 只按预览宽缩放；不采样会把整张长图
+ * 按原尺寸读进内存（P2-1 的一部分）。
+ */
+private fun loadBitmap(file: File, maxWidthPx: Int): ImageBitmap? = runCatching {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
+    var sample = 1
+    while (bounds.outWidth > 0 && bounds.outWidth / (sample * 2) >= maxWidthPx) {
+        sample *= 2
+    }
+    val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+    android.graphics.BitmapFactory.decodeFile(file.absolutePath, options)?.asImageBitmap()
+}.getOrNull()

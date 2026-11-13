@@ -1,6 +1,7 @@
 package com.cov.justdiary
 
 import android.app.Application
+import android.content.ComponentCallbacks2
 import com.cov.justdiary.app.AppContainer
 import com.cov.justdiary.service.Log
 
@@ -26,5 +27,14 @@ class JustDiaryApplication : Application() {
         // P0-1：顺手清掉超过 14 天的旧草稿；失败不影响启动。
         runCatching { container.editorDrafts.clearStale() }
         Log.app.i("JustDiaryApplication created")
+    }
+
+    /** P2-1：系统内存紧张时清掉图片 LRU（图都能从磁盘重新解码）。 */
+    @Suppress("DEPRECATION") // ComponentCallbacks2 的内存档位常量在新 SDK 标记废弃，但值仍有效
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            container.mediaStore.trimMemory()
+        }
     }
 }

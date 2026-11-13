@@ -56,6 +56,8 @@ fun EditorTextArea(
     bodyTextStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     /** 图片行的位图加载器；null 时用透明占位（`src` 仍会穿过往返，不会丢图）。 */
     imageProvider: ((String) -> android.graphics.Bitmap?)? = null,
+    /** 图片异步加载完成后的版本号；变化时回写一次文本，让 ImageSpan 从占位换成真图。 */
+    imageRevision: Int = 0,
     /** 段落样式 → 字号/行高/段距（px）；编辑器与阅读态共用同一把尺子。 */
     metricsFor: ((String) -> SpannableBridge.BlockMetrics?)? = null,
     /** 引用段的外观（底色/圆角/内边距/竖条）；由界面层从主题解析，与阅读态同参数。 */
@@ -240,9 +242,10 @@ fun EditorTextArea(
                 val stamp = view.tag as? EditorViewStamp
                 val needsRewrite = stamp == null ||
                     stamp.state !== state ||
-                    stamp.revision != state.revision
+                    stamp.revision != state.revision ||
+                    stamp.imageRevision != imageRevision
                 if (needsRewrite) {
-                    view.tag = EditorViewStamp(state, state.revision)
+                    view.tag = EditorViewStamp(state, state.revision, imageRevision)
                     val caret = EditorSelectionMap.flatOffset(
                         state.lines,
                         state.selection.lineIndex,
@@ -289,7 +292,11 @@ private fun currentSelection(text: Spanned, start: Int, end: Int): EditorSelecti
  * 两个都要：同一状态内工具栏改模型是版本号变化；换状态对象（放弃修改 / 换片段）时
  * 版本号可能**恰好相同**，只看版本号就会漏掉回写。
  */
-private class EditorViewStamp(val state: EditorTextState, val revision: Int)
+private class EditorViewStamp(
+    val state: EditorTextState,
+    val revision: Int,
+    val imageRevision: Int,
+)
 
 /**
  * 带选区回调的 `EditText`。

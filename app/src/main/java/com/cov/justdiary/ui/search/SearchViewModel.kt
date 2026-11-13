@@ -16,6 +16,7 @@ import com.cov.justdiary.model.LocOption
 import com.cov.justdiary.service.Log
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,26 +183,37 @@ SearchFilterItem.Kind.Keyword -> ui.copy(keyword = "", keywords = emptyList())
         locSearchJob?.cancel()
         locSearchJob = viewModelScope.launch {
             delay(DEBOUNCE_MS)
-            loadLocationOptions(value)
+            loadLocationOptionsNow(value)
         }
     }
 
     /** 打开地点筛选面板时拉候选（关键词为空 = 全部候选）。 */
     fun loadLocationOptions(keyword: String = "") {
-        _state.value = _state.value.copy(locLoading = true)
-        viewModelScope.launch {
-            val range = currentRange()
-            val result = runCatching {
-                container.repository.getLocationOptions(keyword, range.from, range.to)
-            }.onFailure { Log.db.w("读取地点候选失败：${it.message}") }.getOrNull()
-            // 被取消（用户又敲了一个字）时**不要**写状态：否则会用旧结果覆盖新一轮
-            ensureActive()
-            _state.value = _state.value.copy(
-                locOptions = result?.first ?: emptyList(),
-                noLocCount = result?.second ?: 0,
-                locLoading = false,
-            )
+        locSearchJob?.cancel()
+        locSearchJob = viewModelScope.launch {
+            _state.value = _state.value.copy(locLoading = true)
+            loadLocationOptionsNow(keyword)
         }
+    }
+
+    /**
+     * 真正查库。调用方负责把它放进**同一个** `locSearchJob` 里 —— 旧实现里
+     * `setLocSearch` 取消的是外层防抖协程，而 `loadLocationOptions` 又新起一个
+     * `viewModelScope.launch`，旧查询根本没被取消，晚到的结果会覆盖新结果（P2-6b）。
+     */
+    private suspend fun loadLocationOptionsNow(keyword: String) {
+        _state.value = _state.value.copy(locLoading = true)
+        val range = currentRange()
+        val result = runCatching {
+            container.repository.getLocationOptions(keyword, range.from, range.to)
+        }.onFailure { Log.db.w("读取地点候选失败：${it.message}") }.getOrNull()
+        // 被取消（用户又敲了一个字）时**不要**写状态：否则会用旧结果覆盖新一轮
+        currentCoroutineContext().ensureActive()
+        _state.value = _state.value.copy(
+            locOptions = result?.first ?: emptyList(),
+            noLocCount = result?.second ?: 0,
+            locLoading = false,
+        )
     }
 
     /** 失败后重试：清掉错误、按当前条件重查。 */

@@ -1,0 +1,7 @@
+JVM unit tests:
+  tests=631 failures=0 errors=0 classes=59
+Instrumented tests:
+  TEST-Pixel_10_Pro(AVD) - 17.xml: tests=7 failures=0 errors=0
+Artifacts:
+-rw-r--r--@ 1 cov  staff   4.2M Nov 13 20:07 app/build/outputs/apk/release/app-release.apk
+-rw-r--r--@ 1 cov  staff   6.0M Nov 13 20:07 app/build/outputs/bundle/release/app-release.aab

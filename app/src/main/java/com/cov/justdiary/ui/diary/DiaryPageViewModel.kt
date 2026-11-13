@@ -777,27 +777,35 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
      *
      * 命中数变化后下标要收回界内：删掉片段 / 改关键词后，`hitIndex` 可能指着旧位置。
      */
-    private fun recomputeHits() {
-        val keyword = _state.value.searchText
+    private suspend fun recomputeHits() {
+        val snapshot = _state.value
+        val keyword = snapshot.searchText
         if (keyword.isBlank()) {
             _state.value = _state.value.copy(hits = emptyList(), hitIndex = 0, scrollTargetBlockId = null)
             return
         }
-        val found = mutableListOf<SearchHit>()
-        for (block in _state.value.blocks) {
-            val parts = ContentFlatten.parseContent(block.contentJson)
-            DiarySearch.findMatches(parts, keyword).forEach { match ->
-                found.add(
-                    SearchHit(
-                        blockId = block.id,
-                        partIndex = match.partIndex,
-                        itemIndex = match.itemIndex,
-                        start = match.start,
-                        end = match.end,
-                    ),
-                )
+        // P2-6b：JSON 解析 + findMatches 放 Default；长日记不会再在每次防抖后卡主线程 1–2 帧。
+        val blocks = snapshot.blocks
+        val found = withContext(Dispatchers.Default) {
+            buildList {
+                for (block in blocks) {
+                    val parts = ContentFlatten.parseContent(block.contentJson)
+                    DiarySearch.findMatches(parts, keyword).forEach { match ->
+                        add(
+                            SearchHit(
+                                blockId = block.id,
+                                partIndex = match.partIndex,
+                                itemIndex = match.itemIndex,
+                                start = match.start,
+                                end = match.end,
+                            ),
+                        )
+                    }
+                }
             }
         }
+        // 计算期间用户又改了词：这一轮结果已经过期，直接丢弃（与搜索 Job 取消同义）。
+        if (_state.value.searchText != keyword) return
         val index = _state.value.hitIndex.coerceIn(0, (found.size - 1).coerceAtLeast(0))
         _state.value = _state.value.copy(hits = found, hitIndex = index)
     }

@@ -69,6 +69,11 @@ class ShareSheetTest {
             )
         }
 
+        // P2-1：预览在 IO 上解码，等它真的出现再断言。
+        rule.waitUntil(5_000) {
+            rule.onAllNodesWithContentDescription(str(R.string.share_preview_desc))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         // 副标题：文件名 + 真实像素尺寸（预览里那张图是 4 × 3）
         rule.onNodeWithText(
             str(R.string.share_sheet_meta).format(file.name, 4, 3),

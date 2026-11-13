@@ -1,9 +1,40 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     // AGP 9.0 起内置 Kotlin 支持，不再应用 org.jetbrains.kotlin.android
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// 版本号只从 version.properties 读；CI / 发版脚本改这一个文件即可（见 docs/release.md）。
+val versionProperties = Properties().apply {
+    val file = rootProject.file("version.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun versionValue(name: String, fallback: String): String =
+    versionProperties.getProperty(name)?.takeIf { it.isNotBlank() } ?: fallback
+
+// 正式签名只从 keystore.properties / 环境变量读。文件不存在时 release 仍可构建，
+// 但不会签名 —— CI 上如果没有配 secrets，`assembleRelease` 会产出 unsigned APK。
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+fun signingValue(key: String, env: String): String? =
+    keystoreProperties.getProperty(key)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(env)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("storeFile", "JUSTDIARY_STORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "JUSTDIARY_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "JUSTDIARY_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "JUSTDIARY_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.cov.justdiary"
@@ -14,11 +45,22 @@ android {
         applicationId = "com.cov.justdiary"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = versionValue("VERSION_CODE", "1").toInt()
+        versionName = versionValue("VERSION_NAME", "1.0")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         resourceConfigurations += listOf("en", "zh-rCN")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -27,7 +69,11 @@ android {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -37,6 +83,8 @@ android {
 
     buildFeatures {
         compose = true
+        // P2-9：Log / DebugFlags 依赖 BuildConfig.DEBUG 做发布期门禁
+        buildConfig = true
     }
 
     compileOptions {
@@ -117,4 +165,9 @@ dependencies {
 
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.compose.ui.test.manifest)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.espresso.core)
 }
