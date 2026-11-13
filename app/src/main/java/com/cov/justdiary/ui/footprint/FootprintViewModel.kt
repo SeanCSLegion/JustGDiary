@@ -18,8 +18,10 @@ import com.cov.justdiary.model.FootprintRow
 import com.cov.justdiary.service.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 /**
@@ -42,12 +44,17 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
         /** 用户展开的节点 id（多选，可同时展开多个分支）。 */
         val expanded: Set<String> = emptySet(),
         val loaded: Boolean = false,
+        /** P2-6b：后台聚合中。保留旧 `viewState`，界面顶部显示细进度条。 */
+        val rebuilding: Boolean = false,
     ) {
         val hasPlaces: Boolean get() = viewState.nodes.isNotEmpty()
     }
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
+
+    /** 只允许最后一次聚合回写，防止快速切筛选时旧结果覆盖新结果。 */
+    private var rebuildToken: Int = 0
 
     init {
         viewModelScope.launch { load() }
@@ -63,7 +70,7 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
             val rows = runCatching { container.repository.allFootprintRows() }
                 .onFailure { Log.db.w("读取足迹数据失败：${it.message}") }
                 .getOrDefault(emptyList())
-            _state.value = rebuild(_state.value.copy(rows = rows, loaded = true))
+            rebuildAsync(_state.value.copy(rows = rows, loaded = true))
         }
     }
 
@@ -73,17 +80,17 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
             val rows = runCatching { container.repository.allFootprintRows() }
                 .onFailure { Log.db.w("读取足迹数据失败：${it.message}") }
                 .getOrDefault(_state.value.rows)
-            _state.value = rebuild(_state.value.copy(rows = rows))
+            rebuildAsync(_state.value.copy(rows = rows))
         }
     }
 
     fun setYearFilter(year: String) {
-        _state.value = rebuild(_state.value.copy(yearFilter = year))
+        rebuildAsync(_state.value.copy(yearFilter = year))
     }
 
     /** 时间范围四档。选非自定义档时清掉自定义区间（与 iOS 的 `applyTimeKind` 一致）。 */
     fun setTimeKind(kind: TimeRangeKind) {
-        _state.value = rebuild(
+        rebuildAsync(
             _state.value.copy(
                 timeKind = kind,
                 customFrom = if (kind == TimeRangeKind.Custom) _state.value.customFrom else null,
@@ -93,7 +100,7 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun clearTimeFilter() {
-        _state.value = rebuild(
+        rebuildAsync(
             _state.value.copy(timeKind = TimeRangeKind.All, customFrom = null, customTo = null),
         )
     }
@@ -101,7 +108,7 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
     /** 应用自定义时间范围（两端先归一化，理由同 `SearchViewModel.applyCustomRange`）。 */
     fun applyCustomRange(from: String, to: String) {
         val range = DayKeyInput.normalizeRange(from, to) ?: return
-        _state.value = rebuild(
+        rebuildAsync(
             _state.value.copy(
                 timeKind = TimeRangeKind.Custom,
                 customFrom = range.first,
@@ -124,25 +131,44 @@ class FootprintViewModel(private val container: AppContainer) : ViewModel() {
         toggleExpandNode(node.id)
     }
 
-    private fun rebuild(state: State): State {
-        val range: DayKeyRange? = if (state.timeKind == TimeRangeKind.All) {
-            null
-        } else {
-            SearchFilters.dayKeyRange(
-                kind = state.timeKind,
-                today = LocalDate.now(),
-                weekStart = container.settings.load().weekStart,
-                customFrom = state.customFrom,
-                customTo = state.customTo,
+    /**
+     * P2-6b：把全量聚合放到 `Dispatchers.Default`。
+     *
+     * 旧 `viewState` 在计算期间继续显示（不闪空），顶部用 [State.rebuilding] 给细进度条；
+     * 用 [rebuildToken] 保证只有最后一次筛选能回写。
+     */
+    private fun rebuildAsync(state: State) {
+        val token = ++rebuildToken
+        _state.value = state.copy(rebuilding = true)
+        viewModelScope.launch {
+            val viewState = withContext(Dispatchers.Default) {
+                val range: DayKeyRange? = if (state.timeKind == TimeRangeKind.All) {
+                    null
+                } else {
+                    SearchFilters.dayKeyRange(
+                        kind = state.timeKind,
+                        today = LocalDate.now(),
+                        weekStart = container.settings.load().weekStart,
+                        customFrom = state.customFrom,
+                        customTo = state.customTo,
+                    )
+                }
+                FootprintViewStateBuilder.build(
+                    rows = state.rows,
+                    yearFilter = state.yearFilter,
+                    timeRange = range,
+                    order = placeOrder,
+                )
+            }
+            if (token != rebuildToken) return@launch
+            // 计算期间用户可能又展开了节点：用当前的 expanded 合并，别把新操作覆盖掉。
+            val current = _state.value
+            _state.value = current.copy(
+                viewState = viewState,
+                expanded = pruneExpanded(current.expanded, viewState.nodes),
+                rebuilding = false,
             )
         }
-        val viewState = FootprintViewStateBuilder.build(
-            rows = state.rows,
-            yearFilter = state.yearFilter,
-            timeRange = range,
-            order = placeOrder,
-        )
-        return state.copy(viewState = viewState, expanded = pruneExpanded(state.expanded, viewState.nodes))
     }
 
     /** 剪掉树里已经不存在的展开项，否则反复切筛选会让 `expanded` 无限增长。 */

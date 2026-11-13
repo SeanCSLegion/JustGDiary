@@ -4222,3 +4222,52 @@ P2-6b 里设置写入、地点筛选防抖、页内搜索主线程三项；P2-11
 - `python3 tools/verify_docs.py`：通过。
 - release：`assembleRelease` + `bundleRelease` 成功；APK 签名校验通过；release 启动与导出备份冒烟通过。
 - 未做：P2-11/12/13 无障碍与真机走查；P2-3 morph 性能；P2-5/P2-6 及其余 P2-6b。
+
+---
+
+## R38 · P2 收尾：数据/性能小问题 + 存储清理 + 编辑/阅读基线（2026-11-13）
+
+用户指定先做“前三条”：P2-6b 剩余项、P2-5 孤儿图片/存储用量、编辑 vs 阅读逐像素；
+P2-3（morph 性能）与 P2-6（大文件拆分）本轮不做，已在 `TODO.md` 写清后续入口与建议顺序。
+
+### 1. P2-6b 剩余六条
+
+- **读页解析缓存**：`DiaryPageViewModel.reload` 在 `Dispatchers.Default` 解析
+  `partsByBlock`，阅读页 `/` 页内搜索 `/` 编辑共用；`DiaryPageScreen` 不再在组合期
+  `ContentFlatten.parseContent`。
+- **足迹后台聚合**：`FootprintViewModel` 增加 `rebuildAsync` + `rebuilding`，旧 `viewState`
+  保留、顶部 2dp 进度条；`rebuildToken` 防止快速切筛选时旧结果覆盖新结果。
+- **分享临时文件**：关闭面板后延迟 30s 清理（新分享会取消任务）；`ACTION_SEND` 无接收方时
+  显示“没有可用的分享应用”。
+- **DB 事务后删图**：`DiaryRepository.write` 增加 `afterCommit`；
+  `updateBlockContent` / `deleteBlocks` 在事务提交后再删文件。
+- **死 API 清理**：删除 `DiaryRepository.changes`、`MediaStore.invalidateAll` /
+  `renderMaxPixel`、`ReadLayout.renderMaxPixel`、`ShareIntents.shareBackup`、
+  `SearchViewModel.filteredLocOptions`。
+- **依赖清理**：删除未使用的 `datastore-preferences`。
+
+### 2. P2-5 孤儿图片与存储用量
+
+- `cleanupOrphanImages(protectedSrcs)` 在启动 `bootstrap` 末尾调用；`EditorDraftStore`
+  新增 `referencedImageSources()`，草稿引用的图片不会被误删。
+- 设置页数据卡新增“存储占用”（DB 含 WAL/SHM、图片、`.jdiary` 备份）与“清理孤儿图片”，
+  清理后提示删除数量并刷新占用。
+- 新增 `StorageUsageTest`、草稿保护、`cleanupOrphanImages` 与事务后删图用例。
+
+### 3. 编辑 vs 阅读逐像素
+
+- 新增 `EditReadPixelParityTest`：正文单段分别画进 `DiaryEditText` 与 `DiaryReadScreen`，
+  比较行盒高度与像素差异；
+- 当前最小公共子集（正文、无行内样式、无标记）通过；已知抗锯齿 / M3 letterSpacing
+  仍有约 7–8% 边缘差异，用例允许 8% 作为**基线**，后续统一 letterSpacing 后再收紧；
+- 列表 / 待办 / 引用尚未纳入这条像素用例，避免把已知的标记组件差异混进同一阈值。
+
+### 4. 验证
+
+- JVM：**636 / 636 通过**（61 个测试类）。
+- `python3 tools/verify_docs.py`：通过。
+- `python3 tools/verify_sqlite_schema.py`：通过。
+- Android instrumented：**7 / 7 通过**（Pixel_10_Pro，API 36）。
+- release：`assembleRelease` + `bundleRelease` 成功；签名 APK / AAB 构建通过（R37 的签名配置未改）。
+- 模拟器：设置页显示 `Journal 103 kB · Images 0 B · Backups 0 B`，
+  “清理孤儿图片”返回“Removed 0 orphan images.”；证据 `docs/ui-audit/r38/`。

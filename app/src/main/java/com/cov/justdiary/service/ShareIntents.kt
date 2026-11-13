@@ -28,17 +28,6 @@ object ShareIntents {
         return Intent.createChooser(send, chooserTitle)
     }
 
-    /** 分享备份包（`.jdiary`，MIME 用 `application/octet-stream`）。 */
-    fun shareBackup(context: Context, backupFile: File, chooserTitle: String): Intent {
-        val uri = uriFor(context, backupFile)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = MIME_OCTET_STREAM
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        return Intent.createChooser(send, chooserTitle)
-    }
-
     /** 取得可对外授权的 `content://` URI。 */
     fun uriFor(context: Context, file: File) =
         FileProvider.getUriForFile(context, authorityOf(context), file)
@@ -48,5 +37,4 @@ object ShareIntents {
 
     const val AUTHORITY_SUFFIX = ".fileprovider"
     const val MIME_PNG = "image/png"
-    const val MIME_OCTET_STREAM = "application/octet-stream"
 }

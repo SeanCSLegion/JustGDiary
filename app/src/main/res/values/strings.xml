@@ -75,6 +75,16 @@
     <string name="settings_notif_permission_sub">Reminders won\'t arrive when off</string>
     <string name="settings_notif_off">Off</string>
 
+    <string name="settings_storage">Storage</string>
+    <string name="settings_storage_sub">Journal %1$s · Images %2$s · Backups %3$s</string>
+    <string name="settings_storage_total">Total %1$s</string>
+    <string name="settings_storage_cleanup">Clean up orphan images</string>
+    <string name="settings_storage_cleanup_sub">Remove images no longer used by any entry or draft</string>
+    <string name="settings_storage_cleaning">Cleaning…</string>
+    <string name="settings_storage_cleaned_title">Cleanup complete</string>
+    <string name="settings_storage_cleaned">Removed %1$d orphan images.</string>
+    <string name="settings_storage_clean_failed_title">Cleanup failed</string>
+    <string name="settings_storage_clean_failed_msg">Couldn\'t clean up image files. Please try again.</string>
     <string name="settings_section_data">Data</string>
     <string name="settings_export">Export all entries</string>
     <string name="settings_export_sub">Generate a .jdiary backup</string>
@@ -209,6 +219,7 @@
     <string name="share_rendering">Generating image…</string>
     <string name="share_action_share">Share…</string>
     <string name="share_action_save">Save to Photos</string>
+    <string name="share_no_app">No app available to share.</string>
     <string name="share_saved">Saved to Photos</string>
     <string name="share_save_failed">Couldn\'t save. Please try again later.</string>
     <string name="share_preview_desc">Share preview</string>

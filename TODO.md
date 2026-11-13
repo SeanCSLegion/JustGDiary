@@ -2,7 +2,7 @@
 
 > 审计日期：**2026-11-12**；P1 收口日期：**2026-11-13**
 > 代码基线：`main` @ `1f23c52`（R34/R35 已提交；P1 改动在 R36 工作树）
-> 验证：`./gradlew clean assembleDebug testDebugUnitTest` → **631 / 631 通过**（59 个测试类，0 失败）
+> 验证：`./gradlew clean assembleDebug testDebugUnitTest` → **636 / 636 通过**（61 个测试类，0 失败）
 
 这份清单只列**当前还没做**的事情，已经完成的历史项不重复。每条尽量给出：
 `优先级 · 问题 · 证据（文件:行） · 建议动作 · 验收方式`。
@@ -20,13 +20,15 @@
 
 ## 0. 本轮结论（先看这几条）
 
-1. **Android 功能面已经完整**：首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导都已落地，631 条 JVM 测试全绿。当前不是“缺大功能”，而是**数据安全、平台体验和长期可维护性**的收口。
+1. **Android 功能面已经完整**：首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导都已落地，636 条 JVM 测试全绿。当前不是“缺大功能”，而是**数据安全、平台体验和长期可维护性**的收口。
 2. **P0-0 已修复**：一份构造过的 `.jdiary` 曾可以把文件写到 `images/` 之外，甚至删掉数据库 / 设置；现在 `src`/`file` 非法即整包拒绝。
 3. **P0-1 已修复**：编辑器内容过去只存在 Compose 的 `remember` 里，Activity 重建或进程被回收就会丢；现在有磁盘草稿 + `ON_STOP` 落盘，已在模拟器验证。
 4. **P0-2 已修复**：`allowBackup` 已关闭，备份只走设置页 `.jdiary`，不会再出现“系统恢复半套数据”。
 5. **P0-5 已修复**：首页“今天”现在遵循 `day_start_hour`；月态逐日无障碍节点也在 P1-3 补齐（仅无障碍开启时挂）。
 6. **iOS 最近 17 个提交里需要跟的 3 件事已全部落地**：图片按原分辨率落盘、年历两个小几何、日历无障碍；引用回车也已按“一律跟随 iOS”改回续引用（P1-4）。P1-7 / P1-9 / P1-11 / P1-13 / P1-14 / P1-15 / P1-16 同轮完成，详见 `docs/migration-progress.md` R36。
-7. **发布链路已准备（R37）**：版本号走 `version.properties`、release 签名可注入、R8/资源压缩已开、CI 与 `androidTest` 已落地；签名 release APK 4.2MB / AAB 6.0MB 已冒烟。剩下的是真实签名 secrets、Play Console 上架与可选的 baseline profile / macrobenchmark。
+7. **P2 数据/性能小问题已收口（R38）**：P2-6b 全部、P2-5 孤儿图片/存储用量、编辑 vs 阅读首条像素基线已完成。
+8. **后续只剩两件大改**：P2-3 morph 性能与 P2-6 大文件拆分（各自需要单独一轮测量/重构）；P2-11/12/13 无障碍与真机走查暂不做。发布链路已在 R37 准备好。
+9. **发布链路已准备（R37）**：版本号走 `version.properties`、release 签名可注入、R8/资源压缩已开、CI 与 `androidTest` 已落地；签名 release APK 4.2MB / AAB 6.0MB 已冒烟。剩下的是真实签名 secrets、Play Console 上架与可选的 baseline profile / macrobenchmark。
 
 ---
 
@@ -47,7 +49,7 @@
 | 语言/主题切换 | **主题不重建；语言保留官方重建但消除黑帧**，两者都不丢草稿 |
 | 首页“写日记” | **先进入阅读态**，再由阅读态顶栏铅笔 / 空态按钮进入编辑；与 iOS `openDiary` 一致 |
 
-> **P0-0 … P0-5 已在 2026-11-12 的 R34 全部修复；P1 可执行项已在 2026-11-13 的 R36 全部落地；P2-1/2/4/7/8/9/10 已在 R37 收口**（P1-8 / P1-10 按已确认口径不做）。当前 **631 条 JVM 测试全绿**（59 个测试类），并在 Pixel_10_Pro 模拟器上验证了草稿恢复、原图落盘、月历无障碍与通知/快捷方式入口。
+> **P0-0 … P0-5 已在 2026-11-12 的 R34 全部修复；P1 可执行项已在 2026-11-13 的 R36 全部落地；P2-1/2/4/7/8/9/10 已在 R37 收口**（P1-8 / P1-10 按已确认口径不做）。当前 **636 条 JVM 测试全绿**（61 个测试类），并在 Pixel_10_Pro 模拟器上验证了草稿恢复、原图落盘、月历无障碍与通知/快捷方式入口。
 
 ---
 
@@ -328,7 +330,7 @@ iOS 已改成：**按原始像素尺寸**落盘、JPEG **q0.95**、只保留方�
 6. 备份体积会变大（16MP 0.35MB → ~1.8MB），在备份界面/文档里说明，不做静默压缩。
 7. **已确认不单独保留 PNG/透明**：跟 iOS 一样统一存 JPEG，截图/贴纸的 alpha 会变黑底，这是已知取舍；不要在本项里偷偷按 MIME 改格式，否则与 iOS 的存储形状分叉。
 
-**验收**：真机插入一张 3000×2000 照片，用 `exiftool`/`ImageDecoder` 验证落盘尺寸与元数据；编辑/阅读/分享三处显示与改动前一致；631 条测试 + 新用例全绿。
+**验收**：真机插入一张 3000×2000 照片，用 `exiftool`/`ImageDecoder` 验证落盘尺寸与元数据；编辑/阅读/分享三处显示与改动前一致；636 条测试 + 新用例全绿。
 
 ---
 
@@ -689,6 +691,13 @@ val viewModel: DiaryPageViewModel = viewModel(
 
 ### [ ] P2-3 月→周仍是 ~80fps；新月份首块录制 17–19ms
 
+> **状态（2026-11-13，R38）**：**本轮不做**，留给下一轮单独排。原因：需要真机逐帧测量，
+> 且改动会碰 morph / 挂载窗口的交班条件，不适合和功能/数据改动同轮。后续接手时按下面的
+> “建议动作”先跑基线，再只改“新挂载块只画可能可见行”这一处。
+>
+> 入口：`MonthFlow.kt` 的 `BlockCanvas` / `BlockCanvas` 的 `weeks.forEachIndexed`、
+> `MonthBlockWindow`；测量：`-morph-log` + `ScrollProf.blockDraw`，目标新块首帧 < 10ms。
+
 **证据**：`migration-progress.md:2845`（“周 → 月 是最慢的一条，约 80 fps，单帧 12.5ms，瓶颈在 CPU 绘制指令录制”）；`:3021`（“剩下 17–19ms 是新月份块第一次录制，块是 5–6 行整块录的，屏幕上通常只有 1–2 行”）。
 
 **建议动作**：
@@ -711,7 +720,9 @@ val viewModel: DiaryPageViewModel = viewModel(
 
 ---
 
-### [ ] P2-5 孤儿图片清理函数是死代码；存储用量不可见
+### [x] P2-5 孤儿图片清理函数是死代码；存储用量不可见
+
+**状态：已实现（2026-11-13，R38）** —— `cleanupOrphanImages(protectedSrcs)` 在 `bootstrap` 末尾调用，草稿引用的图片受保护；设置页新增“存储占用 / 清理孤儿图片”与结果提示；`StorageUsage` 统计 DB（含 WAL/SHM）/ 图片 / `.jdiary` 备份。新增 `StorageUsageTest`、草稿保护与删除旧图测试。
 
 **问题**：
 
@@ -733,6 +744,14 @@ suspend fun cleanupOrphanImages() { ... }
 
 ### [ ] P2-6 大文件拆分（可维护性）
 
+> **状态（2026-11-13，R38）**：**本轮不做**，留给后续专门的重构轮。它是纯搬家、不改行为，
+> 但 5 个文件都处在 UI/编辑器核心链路上，建议单独提交、按文件逐个拆，每一步都跑
+> `testDebugUnitTest` + `connectedDebugAndroidTest`，不要和功能/性能改动混在一起。
+>
+> 建议顺序：`SpannableBridge` → `EditorModel` → `MonthFlow` → `SettingsScreen` → `HomeScreen`。
+> 每个文件先抽“纯函数 / 数据模型”，最后才动 Compose 组合结构；`HomeScreen` 可以按
+> “顶栏 / 周层 / 年层 / 当日面板”切，`MonthFlow` 按“几何 / 绘制 / 手势 / 标签”切。
+
 当前最大的几个源文件：
 
 | 文件 | 行数 |
@@ -743,24 +762,26 @@ suspend fun cleanupOrphanImages() { ... }
 | `ui/settings/SettingsScreen.kt` | 1007 |
 | `ui/diary/SpannableBridge.kt` | 987 |
 
-**建议动作**：纯重构、不改行为，按“顶栏/周层/年层/当日面板”“月流绘制/手势/标签”“行模型/格式操作/回车规则”“设置卡片/对话框/行组件”拆文件；每一步用现有 631 条测试兜底。优先级低于功能项，但会显著降低后续返工成本。
+**建议动作**：纯重构、不改行为，按“顶栏/周层/年层/当日面板”“月流绘制/手势/标签”“行模型/格式操作/回车规则”“设置卡片/对话框/行组件”拆文件；每一步用现有 636 条测试兜底。优先级低于功能项，但会显著降低后续返工成本。
 
 ---
 
-### [ ] P2-6b 已确认但尚未单列的小问题（按触达模块顺手收）
+### [x] P2-6b 已确认但尚未单列的小问题（按触达模块顺手收）
 
-> R37 已收掉 3 条：设置写入串行化、地点筛选防抖、页内搜索移出主线程。其余仍待做。
+**状态：已全部收口（2026-11-13，R38）** —— R37 收掉设置写入、地点筛选、页内搜索 3 条；
+R38 收掉读页解析缓存、足迹后台聚合、分享临时文件生命周期、DB 事务后删图、死 API、
+未使用依赖 6 条；`DebugFlags` 由 P2-9 收掉。
 
 - [x] **设置写入是读-改-写，快速连点两个开关会丢一个**：**已修（R37）** —— `SettingsViewModel.update` 用 `Mutex` 串行化“读 old → transform → commit”；补连续 setter 的回归测试。原问题：`SettingsViewModel.update` 每次 `old = settings.load()`，`AppSettingsApplier.commit` 整体 `settings.save(new)`（`SettingsViewModel.kt:384-404`、`AppSettingsApplier.kt:94-101`、`SettingsStore.kt:47-66`）。改成一个串行 actor/Mutex，transform 在已提交状态上做；补“连续 setX/setY 都生效”的测试。
 - [x] **地点筛选防抖的取消无效**：**已修（R37）** —— `setLocSearch` / `loadLocationOptions` 共用同一个 `locSearchJob`，查库改为同一协程内的 suspend 函数。原问题：`locSearchJob?.cancel()` 只取消 `delay` 那一层，`loadLocationOptions` 内部又 `viewModelScope.launch` 新协程（`SearchViewModel.kt:180-205`），旧结果可能覆盖新结果。改成同一协程体内查库或用 `flatMapLatest`；补乱序返回测试。
-- [ ] **读页在组合期解析 `content_json`**：`DiaryPageScreen.kt:283-293` 每次重组 `state.blocks.map { ContentFlatten.parseContent(...) }`，页内搜索每敲一个字都会全量重解析。在 VM 加载时解析一次并缓存 `List<ReadBlock>`（与 P2-4 的 `ReadLayout.renderModel` 一起做）。
+- [x] **读页在组合期解析 `content_json`**：**已修（R38）** —— `DiaryPageViewModel.reload` 在 `Dispatchers.Default` 解析一次 `partsByBlock`，阅读页/搜索/编辑共用。原问题：`DiaryPageScreen.kt:283-293` 每次重组 `state.blocks.map { ContentFlatten.parseContent(...) }`，页内搜索每敲一个字都会全量重解析。在 VM 加载时解析一次并缓存 `List<ReadBlock>`（与 P2-4 的 `ReadLayout.renderModel` 一起做）。
 - [x] **页内搜索命中计算在主线程**：**已修（R37）** —— `recomputeHits` 在 `Dispatchers.Default` 解析 + `findMatches`，回写前校验关键词未变。原问题：`DiaryPageViewModel.kt:643-659` 在 `viewModelScope`（Main）里对每个 block `parseContent` + `findMatches`；长日记每次防抖后卡 1–2 帧。放 `Dispatchers.Default`，按 `(keyword, blocksVersion)` 缓存。
-- [ ] **足迹页全量聚合在主线程**：`FootprintViewModel.kt:127-146` 的 `rebuild` 对全部 rows 做统计 + 建树；上千条后切年份/时间档会掉帧。放 `Dispatchers.Default`，保留旧值 + loading 反馈。
-- [ ] **分享临时文件生命周期**：`dismissSharePanel` 立即 `clearShareDir()`（`DiaryPageViewModel.kt:779-786`），接收方可能还在读 `content://`；分享失败也被 `runCatching` 吞掉（`DiaryPageScreen.kt:159-164`）。延迟清理并给“没有可用的分享应用”提示。
-- [ ] **在 DB 事务内删图片**：`updateBlockContent` 事务里调 `cleanupImagesRemovedBetween`，事务回滚后 JSON 仍引用已删文件（`DiaryRepository.kt:351-353`、`:587-604`）。把文件删除移到事务提交之后（收集待删列表）。
-- [ ] **DebugFlags 在 release 可被任意 Intent 打开**：`MainActivity.kt:56-57` 会消费 `-morph-log` / `SLOW_MORPH`，第三方可用 extra 打开高频日志。给 `DebugFlags.resolve` 加 `BuildConfig.DEBUG` 门；`Log` 同样（P2-9）。
-- [ ] **死 API 清理**：`DiaryRepository.changes`（无收集点，`DiaryRepository.kt:68-69`）、`MediaStore.invalidateAll`（`MediaStore.kt:135`）、`MediaStore.renderMaxPixel`（`:146-147`）、`ShareIntents.shareBackup`（`file_paths.xml` 只暴露 `cache/share/`，调用会抛 `IllegalArgumentException`，`ShareIntents.kt:32-40`）、`filteredLocOptions`（`SearchViewModel.kt:50`）、`UNUSED_INTENT_ACTION`（`ReminderScheduler.kt:184`）。删除或接上，不要留“看起来可用”的入口。
-- [ ] **未使用的 `datastore-preferences` 依赖**：`app/build.gradle.kts:107` 引入但全仓无 `DataStore`；删除或真用起来，减少包体与攻击面。
+- [x] **足迹页全量聚合在主线程**：**已修（R38）** —— `FootprintViewModel.rebuildAsync` 在 `Dispatchers.Default` 聚合，保留旧 `viewState` + 顶部细进度条，代际号防旧结果覆盖。原问题：`FootprintViewModel.kt:127-146` 的 `rebuild` 对全部 rows 做统计 + 建树；上千条后切年份/时间档会掉帧。放 `Dispatchers.Default`，保留旧值 + loading 反馈。
+- [x] **分享临时文件生命周期**：**已修（R38）** —— 关闭面板后延迟 30s 清理（新分享会取消），`ACTION_SEND` 无接收方时 Snackbar「没有可用的分享应用」。原问题：`dismissSharePanel` 立即 `clearShareDir()`（`DiaryPageViewModel.kt:779-786`），接收方可能还在读 `content://`；分享失败也被 `runCatching` 吞掉（`DiaryPageScreen.kt:159-164`）。延迟清理并给“没有可用的分享应用”提示。
+- [x] **在 DB 事务内删图片**：**已修（R38）** —— `write` 增加 `afterCommit`，`updateBlockContent` / `deleteBlocks` 在事务提交后再删文件。原问题：`updateBlockContent` 事务里调 `cleanupImagesRemovedBetween`，事务回滚后 JSON 仍引用已删文件（`DiaryRepository.kt:351-353`、`:587-604`）。把文件删除移到事务提交之后（收集待删列表）。
+- [x] **DebugFlags 在 release 可被任意 Intent 打开**：**已修（R37，P2-9）** —— `consume` 在 release 直接关闭。原问题：`MainActivity.kt:56-57` 会消费 `-morph-log` / `SLOW_MORPH`，第三方可用 extra 打开高频日志。给 `DebugFlags.resolve` 加 `BuildConfig.DEBUG` 门；`Log` 同样（P2-9）。
+- [x] **死 API 清理**：**已修（R38）** —— 删除 `DiaryRepository.changes` / `MediaStore.invalidateAll` / `MediaStore.renderMaxPixel` / `ShareIntents.shareBackup` / `filteredLocOptions`；`UNUSED_INTENT_ACTION` 已在 R36 删除。原问题：`DiaryRepository.changes`（无收集点，`DiaryRepository.kt:68-69`）、`MediaStore.invalidateAll`（`MediaStore.kt:135`）、`MediaStore.renderMaxPixel`（`:146-147`）、`ShareIntents.shareBackup`（`file_paths.xml` 只暴露 `cache/share/`，调用会抛 `IllegalArgumentException`，`ShareIntents.kt:32-40`）、`filteredLocOptions`（`SearchViewModel.kt:50`）、`UNUSED_INTENT_ACTION`（`ReminderScheduler.kt:184`）。删除或接上，不要留“看起来可用”的入口。
+- [x] **未使用的 `datastore-preferences` 依赖**：**已修（R38）** —— 从 `build.gradle.kts` 与版本目录删除。原问题：`app/build.gradle.kts:107` 引入但全仓无 `DataStore`；删除或真用起来，减少包体与攻击面。
 
 ---
 
@@ -768,7 +789,7 @@ suspend fun cleanupOrphanImages() { ... }
 
 ### [x] P2-7 发布配置：versionCode / 签名 / R8 / 资源压缩
 
-**状态：已实现（2026-11-13，R37）** —— 新增 `version.properties`（构建读取）、`keystore.properties` / 环境变量签名、release `isMinifyEnabled=true` + `isShrinkResources=true`、R8 keep 规则与 `docs/release.md`。实测签名 release APK 4.2MB、AAB 6.0MB，冷启动/备份导出正常。
+**状态：已实现（2026-11-13，R37）** —— 新增 `version.properties`（构建读取）、`keystore.properties` / 环境变量签名、release `isMinifyEnabled=true` + `isShrinkResources=true`、R8 keep 规则与 `docs/release.md`。实测签名 release APK 4.1MB、AAB 6.0MB，冷启动/备份导出正常。
 
 **现状**：
 
@@ -793,7 +814,7 @@ release {
 4. 加 baseline profile（启动 + 首屏）与 macrobenchmark（可选但推荐）。
 5. 目标 SDK 36 / compile 37 与 Play 政策已对齐；确认 16KB page size（当前无自有 native lib，风险低）。
 
-**验收**：`./gradlew assembleRelease` 产出已签名 APK/AAB；R8 后 631 测试 + 手工冒烟全过；体积明显下降；启动无 `ClassNotFoundException`。
+**验收**：`./gradlew assembleRelease` 产出已签名 APK/AAB；R8 后 636 测试 + 手工冒烟全过；体积明显下降；启动无 `ClassNotFoundException`。
 
 ---
 
@@ -884,7 +905,7 @@ README 已列“仍未验证：TalkBack 真人走查（语义已存在，朗读�
 - [x] **日历 a11y 文案**：中英资源均已补齐；`MonthA11yTest` 覆盖节点状态文案，方向由 `stepDay(±1)` 用例兜住。
 - [x] **待办勾选 partIndex**：`DiaryReadScreenTest` 用“正文 + 待办”覆盖 `partIndex` 透传；见 P1-14。
 - [x] **导入原子性**：`BackupServiceRobolectricTest` 用第 2 天图片损坏验证 DB/图片回滚；见 P1-15。
-- [ ] **编辑 vs 阅读逐像素**：`ios-sync-2026-10-01.md` §5.5 提议的“同一 `content_json` 分别走 `SpannableBridge` 与阅读渲染，比像素”仍未落地；可作为 R32“三处统一”的验收尺子（当前基线可能先红，正好当靶子）。
+- [x] **编辑 vs 阅读逐像素**：**已落地首条基线（2026-11-13，R38）** —— `EditReadPixelParityTest` 把正文单段分别画进 `DiaryEditText` 与 `DiaryReadScreen`，比行盒高度和像素差异（当前允许 8% 抗锯齿/letterSpacing 差异，基线后会继续收紧）。原建议：`ios-sync-2026-10-01.md` §5.5 提议的“同一 `content_json` 分别走 `SpannableBridge` 与阅读渲染，比像素”仍未落地；可作为 R32“三处统一”的验收尺子（当前基线可能先红，正好当靶子）。
 - [x] **空引用行回车后光标回列首**：`EditorEnterKeyTest` 的空引用行用例覆盖行数与样式；光标 x 由既有 `EditorCursorLayoutTest` 兜住。
 - [x] **空引用行底与打字后同位置**：`EditorQuoteRenderTest` 覆盖。
 - [x] **首页选中日竞态**：`HomeViewModelTest` 的乱序返回用例已覆盖。

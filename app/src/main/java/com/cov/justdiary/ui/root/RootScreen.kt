@@ -261,6 +261,7 @@ private fun TabContent(
             FootprintScreen(
                 state = state.viewState,
                 yearFilter = state.yearFilter,
+                rebuilding = state.rebuilding,
                 // 并排由 AdaptiveLayout 统一判定（内容宽 ≥548.5dp 且 宽 > 高）
                 landscape = LocalAdaptiveLayout.current.splitsMasterDetail,
                 expanded = state.expanded,

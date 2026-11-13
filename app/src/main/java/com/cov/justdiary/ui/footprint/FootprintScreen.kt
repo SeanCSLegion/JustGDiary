@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -95,6 +96,8 @@ fun FootprintScreen(
     yearFilter: String,
     modifier: Modifier = Modifier,
     landscape: Boolean = false,
+    /** P2-6b：后台重新聚合时显示细进度条，旧内容继续可见。 */
+    rebuilding: Boolean = false,
     onYearFilterChange: (String) -> Unit = {},
     /** 时间范围四档（`TimeRangeKind`）；与年份是**交集**（规范 §2.2）。 */
     timeKind: TimeRangeKind = TimeRangeKind.All,
@@ -137,6 +140,14 @@ fun FootprintScreen(
                 )
             },
         )
+
+        if (rebuilding) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+            )
+        }
 
         // 年份胶囊：**单行横滑**（用户反馈：要可滑动，不要做成多排）。
         // 候选项只列"当前时间筛选下真的有内容"的年份，且「自定义」是无条件保底项 ——

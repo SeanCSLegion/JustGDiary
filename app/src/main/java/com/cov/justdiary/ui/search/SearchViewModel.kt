@@ -47,17 +47,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         val locLoading: Boolean = false,
         /** 索引还没建好（首屏可能出现一次）。 */
         val indexing: Boolean = false,
-    ) {
-        val filteredLocOptions: List<LocOption>
-            get() = if (locSearch.isEmpty()) {
-                locOptions
-            } else {
-                val kw = locSearch.lowercase()
-                locOptions.filter {
-                    it.country.lowercase().contains(kw) || it.region1.lowercase().contains(kw)
-                }
-            }
-    }
+    )
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -174,8 +164,8 @@ SearchFilterItem.Kind.Keyword -> ui.copy(keyword = "", keywords = emptyList())
      * 地点面板内的搜索词。
      *
      * ⚠️ 必须**真的去查库**。原来这里只把字符串存进状态，界面渲染的却是未过滤的
-     * `locOptions`，于是"搜索地点…"输入框完全没反应（`filteredLocOptions` 是死代码）。
-     * 也不能在客户端过滤：iOS 那边就是 Top20 + 弹窗内过滤，榜外的地点永远搜不到
+     * `locOptions`，于是"搜索地点…"输入框完全没反应。也不能在客户端过滤：
+     * 客户端只有 Top20，榜外的地点永远搜不到
      * （README §6 缺陷 7）。这里走 `getLocationOptions(keyword, …)` 的 SQL `LIKE`。
      */
     fun setLocSearch(value: String) {

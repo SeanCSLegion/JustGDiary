@@ -73,17 +73,6 @@ object ReadLayout {
     fun imageDisplayHeight(part: ContentPart, displayWidth: Double): Double =
         max(IMAGE_MIN_HEIGHT, imageRatio(part) * displayWidth)
 
-    /**
-     * 渲染时的解码目标像素：`max(storedW, storedH) × 3`（`MediaViews.swift:25`）。
-     * 返回 null 表示库里没记宽高，此时用预览档（1600）。
-     */
-    fun renderMaxPixel(part: ContentPart): Int? {
-        val w = part.w ?: 0.0
-        val h = part.h ?: 0.0
-        if (w <= 0 && h <= 0) return null
-        return max(1, (max(w, h) * 3).toInt())
-    }
-
     // ------------------------------------------------------------------ 渲染模型
 
     /** 一个段落渲染成什么。 */

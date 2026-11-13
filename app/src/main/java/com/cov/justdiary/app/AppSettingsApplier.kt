@@ -6,6 +6,7 @@ import androidx.core.os.LocaleListCompat
 import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.model.AppLanguage
 import com.cov.justdiary.model.AppSettings
+import com.cov.justdiary.service.EditorDraftStore
 import com.cov.justdiary.service.LocationFix
 import com.cov.justdiary.service.LocationService
 import com.cov.justdiary.service.Log
@@ -14,6 +15,8 @@ import com.cov.justdiary.service.ReminderScheduler
 import com.cov.justdiary.service.SettingsEffect
 import com.cov.justdiary.service.SettingsEffects
 import com.cov.justdiary.service.SettingsStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 设置变更的执行结果。
@@ -52,6 +55,7 @@ class AppSettingsApplier(
     private val repository: DiaryRepository,
     private val locationService: LocationService,
     private val reminderScheduler: ReminderScheduler,
+    private val drafts: EditorDraftStore,
 ) {
 
     private val appContext: Context = context.applicationContext
@@ -74,6 +78,14 @@ class AppSettingsApplier(
         repository.prepare()
         runCatching { repository.ensureSearchIndex() }
             .onFailure { Log.app.e("搜索索引准备失败：${it.message}") }
+        // P2-5：清掉不再被任何片段/草稿引用的图片。放在索引之后，启动路径上多一次
+        // 文件扫描；草稿里的图先收集出来当"受保护集合"，避免放弃修改前误删。
+        runCatching {
+            val protected = withContext(Dispatchers.IO) { drafts.referencedImageSources() }
+            repository.cleanupOrphanImages(protected)
+        }.onSuccess { deleted ->
+            if (deleted > 0) Log.db.i("启动清理孤儿图片：$deleted 张")
+        }.onFailure { Log.db.w("清理孤儿图片失败：${it.message}") }
         reminderScheduler.ensureChannel()
         runCatching { reminderScheduler.rearm() }
             .onFailure { Log.app.e("提醒排期失败：${it.message}") }

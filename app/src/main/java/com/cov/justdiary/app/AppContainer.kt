@@ -59,6 +59,13 @@ class AppContainer(context: Context) {
 
     /** 设置变更的平台侧执行器（外观 / 语言 / day_key 重算 / 回填 / 提醒重排）。 */
     val appSettingsApplier: AppSettingsApplier by lazy {
-        AppSettingsApplier(appContext, settings, repository, locationService, reminderScheduler)
+        AppSettingsApplier(
+            appContext,
+            settings,
+            repository,
+            locationService,
+            reminderScheduler,
+            editorDrafts,
+        )
     }
 }

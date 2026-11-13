@@ -1,6 +1,7 @@
 package com.cov.justdiary.service
 
 import android.content.Context
+import com.cov.justdiary.model.ImagePathUtil
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -86,6 +87,23 @@ class EditorDraftStore(
         if (key.isBlank()) return
         synchronized(lock) {
             fileFor(key).delete()
+        }
+    }
+
+    /**
+     * P2-5：草稿里引用到的图片 src。
+     *
+     * `cleanupOrphanImages()` 只扫数据库，草稿里的图片不在库里；清理前必须把这些
+     * 也当成"仍被引用"，否则用户放弃修改前草稿里的图会被误删。
+     */
+    fun referencedImageSources(): Set<String> = synchronized(lock) {
+        buildSet {
+            root.listFiles()?.forEach { file ->
+                val draft = runCatching {
+                    json.decodeFromString<EditorDraft>(file.readText())
+                }.getOrNull() ?: return@forEach
+                addAll(ImagePathUtil.collectImageSrcs(draft.contentJson))
+            }
         }
     }
 

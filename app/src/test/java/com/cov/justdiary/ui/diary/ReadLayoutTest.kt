@@ -4,7 +4,6 @@ import com.cov.justdiary.model.ContentPart
 import com.cov.justdiary.model.ContentPartStyle
 import com.cov.justdiary.model.TextRun
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -52,13 +51,6 @@ class ReadLayoutTest {
         // 极扁的图被 40 托住
         val flat = ContentPart(style = ContentPartStyle.image, src = "images/a.jpg", w = 2000.0, h = 40.0)
         assertEquals(ReadLayout.IMAGE_MIN_HEIGHT, ReadLayout.imageDisplayHeight(flat, 343.0), 1e-6)
-    }
-
-    @Test
-    fun `render max pixel is three times the longest stored side`() {
-        val part = ContentPart(style = ContentPartStyle.image, src = "i.jpg", w = 1200.0, h = 900.0)
-        assertEquals(3600, ReadLayout.renderMaxPixel(part))
-        assertNull("没有宽高时交给调用方用预览档", ReadLayout.renderMaxPixel(ContentPart(style = ContentPartStyle.image, src = "i.jpg")))
     }
 
     @Test

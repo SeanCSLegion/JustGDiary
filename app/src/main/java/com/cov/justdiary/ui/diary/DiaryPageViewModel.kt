@@ -59,6 +59,8 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         /** 实际写入的日期（跨日保存后可能与 [dayKey] 不同）。 */
         val actualDayKey: String = "",
         val blocks: List<EditBlock> = emptyList(),
+        /** P2-6b：`blocks` 的 `content_json` 只解析一次，阅读页/搜索/编辑共用。 */
+        val partsByBlock: Map<Long, List<ContentPart>> = emptyMap(),
         val isRead: Boolean = true,
         /** 正在编辑的片段下标；`null` 表示"新建片段"。 */
         val editingIndex: Int? = null,
@@ -149,6 +151,9 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
         /** 「保存失败」（`share_save_failed`）。 */
         data object SaveToGalleryFailed : DiaryMessage
+
+        /** 没有可用的分享应用（P2-6b）。 */
+        data object NoShareApp : DiaryMessage
     }
 
     /** 一次性的结果提示（文案由界面层解析，保持 ViewModel 与资源解耦）。 */
@@ -281,8 +286,10 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         }
         if (blockId != null) {
             val block = _state.value.blocks.firstOrNull { it.id == blockId }
+            val cached = _state.value.partsByBlock[blockId]
             val same = block != null && runCatching {
-                ContentFlatten.parseContent(block.contentJson) == ContentFlatten.parseContent(draft.contentJson)
+                (cached ?: ContentFlatten.parseContent(block.contentJson)) ==
+                    ContentFlatten.parseContent(draft.contentJson)
             }.getOrDefault(false)
             if (same) {
                 drafts.clear(key)
@@ -364,8 +371,13 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
                 .onFailure { Log.db.w("读取片段失败：${it.message}") }
                 .getOrDefault(emptyList())
         }
+        // P2-6b：JSON 解析放在 Default，且只解析一次；阅读页/页内搜索/编辑都读这份缓存。
+        val partsByBlock = withContext(Dispatchers.Default) {
+            blocks.associate { it.id to ContentFlatten.parseContent(it.contentJson) }
+        }
         _state.value = _state.value.copy(
             blocks = blocks,
+            partsByBlock = partsByBlock,
             isRead = if (showRead) true else _state.value.isRead,
             editingIndex = if (showRead) null else _state.value.editingIndex,
             selectMode = if (showRead) false else _state.value.selectMode,
@@ -408,7 +420,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         val block = current.blocks[index]
-        val parts = ContentFlatten.parseContent(block.contentJson)
+        val parts = current.partsByBlock[block.id] ?: ContentFlatten.parseContent(block.contentJson)
         val draft = loadDraftFor(current.actualDayKey, block.id)
         _state.value = current.copy(
             editingIndex = index,
@@ -723,8 +735,10 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
 
     /** 勾选/取消一个待办项（直接改库，不经过编辑器）。 */
     fun toggleTodo(blockId: Long, partIndex: Int, itemIndex: Int) {
-        val block = _state.value.blocks.firstOrNull { it.id == blockId } ?: return
-        val parts = ContentFlatten.parseContent(block.contentJson).toMutableList()
+        val current = _state.value
+        val block = current.blocks.firstOrNull { it.id == blockId } ?: return
+        val parts = (current.partsByBlock[blockId]
+            ?: ContentFlatten.parseContent(block.contentJson)).toMutableList()
         if (partIndex !in parts.indices) return
         val part = parts[partIndex]
         val done = (part.done ?: List(part.items?.size ?: 0) { false }).toMutableList()
@@ -789,7 +803,8 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         val found = withContext(Dispatchers.Default) {
             buildList {
                 for (block in blocks) {
-                    val parts = ContentFlatten.parseContent(block.contentJson)
+                    val parts = snapshot.partsByBlock[block.id]
+                        ?: ContentFlatten.parseContent(block.contentJson)
                     DiarySearch.findMatches(parts, keyword).forEach { match ->
                         add(
                             SearchHit(
@@ -918,6 +933,8 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun openSharePanel() {
         if (_state.value.sharePanelVisible) return
+        // 上一次关闭后的延迟清理如果还没跑，取消它：新面板马上要写新的分享图。
+        shareCleanupJob?.cancel()
         _state.value = _state.value.copy(
             sharePanelVisible = true,
             shareImageFile = null,
@@ -925,13 +942,24 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
-    /** 关面板：顺手清掉上一次的分享图（规范 §4.2）。 */
+    /**
+     * 关面板：**延迟**清掉分享图。
+     *
+     * 接收方（系统 Sharesheet / 相册）可能还在读 `content://`，立即删会让对方拿到
+     * 空文件；30 秒足够一次系统分享把文件读完。下一次分享会取消这个延迟任务。
+     */
     fun dismissSharePanel() {
         _state.value = _state.value.copy(sharePanelVisible = false, sharing = false, shareImageFile = null)
         shareCleanupJob?.cancel()
         shareCleanupJob = viewModelScope.launch {
+            delay(SHARE_CLEANUP_DELAY_MS)
             withContext(Dispatchers.IO) { container.imageShareRenderer.clearShareDir() }
         }
+    }
+
+    /** 系统里没有能处理 `ACTION_SEND` 的应用。 */
+    fun notifyNoShareApp() {
+        _state.value = _state.value.copy(message = DiaryMessage.NoShareApp)
     }
 
     /**
@@ -961,7 +989,8 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
             com.cov.justdiary.data.ShareLayout.ShareBlock(
                 time = block.startTimeUtc,
                 location = LocationResolver.shareText(block.locPrecision, regionOf(block), cap),
-                parts = ContentFlatten.parseContent(block.contentJson),
+                parts = _state.value.partsByBlock[block.id]
+                    ?: ContentFlatten.parseContent(block.contentJson),
             )
         }
         if (blocks.isEmpty()) {
@@ -1060,6 +1089,9 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     companion object {
         /** 页内搜索的防抖（iOS 为 150ms）。 */
         const val SEARCH_DEBOUNCE_MS = 150L
+
+        /** 分享面板关闭后延迟删除临时文件，避免接收方还在读。 */
+        const val SHARE_CLEANUP_DELAY_MS = 30_000L
 
         /** 「仍然保存」→ 跨日弹窗之间的停顿（iOS 是 `Task.sleep(0.3)`）。 */
         const val CROSS_DAY_PROMPT_DELAY_MS = 300L

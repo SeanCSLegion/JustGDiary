@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ripple
 import androidx.compose.material3.AlertDialog
@@ -456,6 +457,34 @@ private fun SettingsBody(
                     text = stringResource(R.string.settings_section_data),
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
+                // P2-5：存储占用 + 孤儿图片清理入口。
+                val storage = state.storage
+                ValueRow(
+                    icon = SettingsIcons.storage,
+                    title = stringResource(R.string.settings_storage),
+                    sub = stringResource(
+                        R.string.settings_storage_sub,
+                        formatBytes(storage.databaseBytes),
+                        formatBytes(storage.imagesBytes),
+                        formatBytes(storage.backupBytes),
+                    ),
+                    value = stringResource(R.string.settings_storage_total, formatBytes(storage.totalBytes)),
+                    enabled = false,
+                )
+                RowDivider()
+                ValueRow(
+                    icon = SettingsIcons.cleanup,
+                    title = stringResource(R.string.settings_storage_cleanup),
+                    sub = stringResource(R.string.settings_storage_cleanup_sub),
+                    value = if (state.cleaningStorage) {
+                        stringResource(R.string.settings_storage_cleaning)
+                    } else {
+                        ""
+                    },
+                    enabled = !state.cleaningStorage,
+                    onClick = viewModel::cleanupOrphanImages,
+                )
+                RowDivider()
                 MenuRow(
                     icon = SettingsIcons.export,
                     title = stringResource(R.string.settings_export),
@@ -937,6 +966,11 @@ private fun SettingsAlertDialog(alert: SettingsAlert, onDismiss: () -> Unit) {
 
         SettingsAlert.ExportFailed -> stringResource(R.string.settings_export_failed_msg)
         SettingsAlert.ImportFailed -> stringResource(R.string.settings_import_failed_msg)
+        is SettingsAlert.StorageCleaned ->
+            stringResource(R.string.settings_storage_cleaned, alert.deleted)
+
+        SettingsAlert.StorageCleanFailed -> stringResource(R.string.settings_storage_clean_failed_msg)
+
         is SettingsAlert.ImportSucceeded -> {
             val stats = alert.stats
             buildString {
@@ -962,6 +996,8 @@ private fun SettingsAlertDialog(alert: SettingsAlert, onDismiss: () -> Unit) {
         SettingsAlert.ExportFailed -> stringResource(R.string.settings_export_failed_title)
         SettingsAlert.ImportFailed -> stringResource(R.string.settings_import_failed_title)
         is SettingsAlert.ImportSucceeded -> stringResource(R.string.settings_import_success_title)
+        is SettingsAlert.StorageCleaned -> stringResource(R.string.settings_storage_cleaned_title)
+        SettingsAlert.StorageCleanFailed -> stringResource(R.string.settings_storage_clean_failed_title)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1019,10 +1055,17 @@ private object SettingsIcons {
     val reminder: ImageVector = AppIcons.Notifications
     val remindTime: ImageVector = AppIcons.Schedule
     val notificationPermission: ImageVector = AppIcons.Notifications
+    val storage: ImageVector = AppIcons.FormatSize
+    val cleanup: ImageVector = Icons.Filled.Delete
     val export: ImageVector = AppIcons.Upload
     val import: ImageVector = AppIcons.Download
     val about: ImageVector = AppIcons.Info
 }
+
+/** P2-5：把字节数格式化成系统短单位（KB / MB / GB）。 */
+@Composable
+private fun formatBytes(bytes: Long): String =
+    android.text.format.Formatter.formatShortFileSize(LocalContext.current, bytes)
 
 /** SAF 用的 MIME：`.jdiary` 没有注册类型，用 octet-stream 才能保住扩展名。 */
 private const val MIME_BACKUP = "application/octet-stream"

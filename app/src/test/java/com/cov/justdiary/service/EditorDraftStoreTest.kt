@@ -92,6 +92,20 @@ class EditorDraftStoreTest {
     }
 
     @Test
+    fun `draft image sources are protected from orphan cleanup`() {
+        store.save(
+            "with-image",
+            draft().copy(
+                contentJson = """{"parts":[{"style":"image","src":"images/img_a.jpg"},{"style":"body","text":"A"}],"v":2}""",
+            ),
+        )
+        store.save("plain", draft("B"))
+
+        val refs = store.referencedImageSources()
+        assertEquals(setOf("images/img_a.jpg"), refs)
+    }
+
+    @Test
     fun `stale drafts are removed`() {
         store.save("old", draft())
         val old = root.listFiles()!!.first()

@@ -183,8 +183,6 @@ class MediaStore(context: Context) {
         cache.snapshot().keys.filter { it.startsWith(prefix) }.forEach(cache::remove)
     }
 
-    fun invalidateAll() = cache.evictAll()
-
     /**
      * 低内存回调：直接清空图片缓存。
      *
@@ -208,9 +206,5 @@ class MediaStore(context: Context) {
 
         /** 96 MB：低于 iOS 的 150 MB，配合"按槽位尺寸解码"控制常驻内存。 */
         const val CACHE_MAX_BYTES: Int = 96 * 1024 * 1024
-
-        /** 渲染降采样：`max(storedW, storedH) * 3`（iOS `MediaViews.swift:25`）。 */
-        fun renderMaxPixel(storedWidth: Double, storedHeight: Double): Int =
-            (max(storedWidth, storedHeight) * 3).roundToInt().coerceAtLeast(1)
     }
 }

@@ -8,7 +8,7 @@
 
 > **实施状态（2026-11-13）**：**首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导全部完成**；
 > P0 数据安全与 P1 iOS 同步 / 平台体验已在 R34–R36 收口（见
-> [`docs/migration-progress.md`](../migration-progress.md)），当前 `630` 条 JVM 单测全绿。
+> [`docs/migration-progress.md`](../migration-progress.md)），当前 `636` 条 JVM 单测全绿。
 > 剩余的是 P2 性能/发布/无障碍走查，见根目录 `TODO.md`；`07-ios-map-and-plan.md` §3.1
 > 的 P0-1…P0-6 是 **R4 当时的历史差距**，现已全部修复，保留作对照。
 > 上机证据：`docs/ui-audit/`（r4 首屏、r27 日记、r33 引用、r36 P1 收口）。

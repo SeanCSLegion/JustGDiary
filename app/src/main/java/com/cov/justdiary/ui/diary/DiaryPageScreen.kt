@@ -190,9 +190,10 @@ fun DiaryPageScreen(
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     val shareNow2: () -> Unit = {
         state.shareImageFile?.let { file ->
-            runCatching {
+            val sent = runCatching {
                 context.startActivity(ShareIntents.shareImage(context, file, shareChooserTitle))
-            }
+            }.isSuccess
+            if (!sent) viewModel.notifyNoShareApp()
         }
     }
 
@@ -200,12 +201,14 @@ fun DiaryPageScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val savedMessage = stringResource(R.string.share_saved)
     val saveFailedMessage = stringResource(R.string.share_save_failed)
+    val noShareAppMessage = stringResource(R.string.share_no_app)
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(
             when (message) {
                 DiaryPageViewModel.DiaryMessage.SavedToGallery -> savedMessage
                 DiaryPageViewModel.DiaryMessage.SaveToGalleryFailed -> saveFailedMessage
+                DiaryPageViewModel.DiaryMessage.NoShareApp -> noShareAppMessage
             },
         )
         viewModel.consumeMessage()
@@ -332,7 +335,7 @@ fun DiaryPageScreen(
                                     ""
                                 },
                                 locText = block.locText,
-                                parts = ContentFlatten.parseContent(block.contentJson),
+                                parts = state.partsByBlock[block.id].orEmpty(),
                             )
                         },
                         modifier = Modifier.fillMaxSize(),

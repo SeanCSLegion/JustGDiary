@@ -1,0 +1,7 @@
+JVM unit tests:
+  tests=636 failures=0 errors=0 classes=61
+Instrumented tests:
+  tests=7 failures=0 errors=0
+Artifacts:
+-rw-r--r--@ 1 cov  staff   4.1M Nov 13 20:27 app/build/outputs/apk/release/app-release.apk
+-rw-r--r--@ 1 cov  staff   6.0M Nov 13 20:27 app/build/outputs/bundle/release/app-release.aab

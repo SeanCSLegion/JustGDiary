@@ -23,8 +23,6 @@ import com.cov.justdiary.service.Log
 import com.cov.justdiary.service.SearchUtil
 import com.cov.justdiary.service.SettingsStore
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -60,11 +58,6 @@ class DiaryRepository(
     private val singleThread: CoroutineContext = Dispatchers.IO.limitedParallelism(1)
     private val writeMutex = Mutex()
 
-    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
-
-    /** 日记数据发生变化（对应 iOS 的 `.diaryVersionChanged` 通知）。 */
-    val changes: SharedFlow<Unit> = _changes
-
     val imagesDir: File get() = File(appContext.filesDir, ImagePathUtil.IMAGE_DIR_NAME)
 
     /** FTS5 是否可用；不可用时搜索自动退化为 LIKE。 */
@@ -82,7 +75,6 @@ class DiaryRepository(
                 rebuildIndexIfNeeded(db)
             }
         }
-        emitChange()
     }
 
     /** 是否需要重建 FTS 索引（与 iOS `backfillIndexIfNeeded` 的判定一致）。 */
@@ -301,29 +293,35 @@ class DiaryRepository(
         contentJson: String,
         locText: String? = null,
         locPrecision: String? = null,
-    ) = write { db ->
-        val (oldJson, diaryId) = db.rawQuery(
-            JustDiarySchema.SELECT_BLOCK_JSON_AND_DIARY,
-            arrayOf(blockId.toString()),
-        ).use { c ->
-            if (c.moveToFirst()) (c.getString(0) ?: "[]") to c.getLong(1) else "[]" to 0L
-        }
+    ) {
+        write<List<String>>(
+            block = { db ->
+                val (oldJson, diaryId) = db.rawQuery(
+                    JustDiarySchema.SELECT_BLOCK_JSON_AND_DIARY,
+                    arrayOf(blockId.toString()),
+                ).use { c ->
+                    if (c.moveToFirst()) (c.getString(0) ?: "[]") to c.getLong(1) else "[]" to 0L
+                }
 
-        val now = System.currentTimeMillis()
-        val newJson = ImagePathUtil.normalizeContent(contentJson)
-        val text = ContentFlatten.flattenContent(newJson)
+                val now = System.currentTimeMillis()
+                val newJson = ImagePathUtil.normalizeContent(contentJson)
+                val text = ContentFlatten.flattenContent(newJson)
 
-        if (locText != null && locPrecision != null) {
-            db.execSQL(
-                JustDiarySchema.UPDATE_BLOCK_CONTENT_WITH_LOCATION,
-                arrayOf<Any?>(newJson, text, now, locText, locPrecision, blockId),
-            )
-        } else {
-            db.execSQL(JustDiarySchema.UPDATE_BLOCK_CONTENT_ONLY, arrayOf<Any?>(newJson, text, now, blockId))
-        }
-        if (diaryId > 0) touchDiary(db, diaryId, now)
+                if (locText != null && locPrecision != null) {
+                    db.execSQL(
+                        JustDiarySchema.UPDATE_BLOCK_CONTENT_WITH_LOCATION,
+                        arrayOf<Any?>(newJson, text, now, locText, locPrecision, blockId),
+                    )
+                } else {
+                    db.execSQL(JustDiarySchema.UPDATE_BLOCK_CONTENT_ONLY, arrayOf<Any?>(newJson, text, now, blockId))
+                }
+                if (diaryId > 0) touchDiary(db, diaryId, now)
 
-        cleanupImagesRemovedBetween(db, oldJson, newJson)
+                // 文件删除必须等事务提交后再做；否则事务回滚时 JSON 仍引用已经删掉的文件。
+                removedImageSrcsBetween(oldJson, newJson)
+            },
+            afterCommit = { db, removed -> deleteImagesIfUnreferenced(db, removed) },
+        )
     }
 
     /**
@@ -332,43 +330,47 @@ class DiaryRepository(
      */
     suspend fun deleteBlocks(ids: List<Long>) {
         if (ids.isEmpty()) return
-        write { db ->
-            val placeholders = ids.joinToString(",") { "?" }
-            val args = ids.map { it.toString() }.toTypedArray()
+        write<List<String>>(
+            block = { db ->
+                val placeholders = ids.joinToString(",") { "?" }
+                val args = ids.map { it.toString() }.toTypedArray()
 
-            val removedJsons = db.rawQuery(
-                JustDiarySchema.SELECT_BLOCK_JSON_BY_IDS_PREFIX + placeholders + ");",
-                args,
-            ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0) ?: "[]") } }
+                val removedJsons = db.rawQuery(
+                    JustDiarySchema.SELECT_BLOCK_JSON_BY_IDS_PREFIX + placeholders + ");",
+                    args,
+                ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0) ?: "[]") } }
 
-            val diaryIds = db.rawQuery(
-                JustDiarySchema.SELECT_DIARY_IDS_BY_BLOCK_IDS_PREFIX + placeholders + ");",
-                args,
-            ).use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }
+                val diaryIds = db.rawQuery(
+                    JustDiarySchema.SELECT_DIARY_IDS_BY_BLOCK_IDS_PREFIX + placeholders + ");",
+                    args,
+                ).use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }
 
-            db.execSQL(JustDiarySchema.DELETE_BLOCKS_PREFIX + placeholders + ");", args)
+                db.execSQL(JustDiarySchema.DELETE_BLOCKS_PREFIX + placeholders + ");", args)
 
-            for (diaryId in diaryIds) {
-                val remaining = db.rawQuery(
-                    JustDiarySchema.COUNT_BLOCKS_OF_DIARY,
-                    arrayOf(diaryId.toString()),
-                ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+                for (diaryId in diaryIds) {
+                    val remaining = db.rawQuery(
+                        JustDiarySchema.COUNT_BLOCKS_OF_DIARY,
+                        arrayOf(diaryId.toString()),
+                    ).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
 
-                if (remaining == 0L) {
-                    val dayKey = db.rawQuery(JustDiarySchema.SELECT_DAY_KEY_OF_DIARY, arrayOf(diaryId.toString()))
-                        .use { c -> if (c.moveToFirst()) c.getString(0) else null }
-                    if (dayKey != null) {
-                        db.execSQL(JustDiarySchema.DELETE_DIARY_BY_ID, arrayOf(diaryId))
-                        db.execSQL(JustDiarySchema.DELETE_DIARY_FLAG, arrayOf(dayKey))
-                        if (ftsSupported) db.execSQL(JustDiarySchema.FTS_DELETE_BY_DIARY, arrayOf(diaryId))
+                    if (remaining == 0L) {
+                        val dayKey = db.rawQuery(JustDiarySchema.SELECT_DAY_KEY_OF_DIARY, arrayOf(diaryId.toString()))
+                            .use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                        if (dayKey != null) {
+                            db.execSQL(JustDiarySchema.DELETE_DIARY_BY_ID, arrayOf(diaryId))
+                            db.execSQL(JustDiarySchema.DELETE_DIARY_FLAG, arrayOf(dayKey))
+                            if (ftsSupported) db.execSQL(JustDiarySchema.FTS_DELETE_BY_DIARY, arrayOf(diaryId))
+                        }
+                    } else {
+                        touchDiary(db, diaryId, System.currentTimeMillis())
                     }
-                } else {
-                    touchDiary(db, diaryId, System.currentTimeMillis())
                 }
-            }
 
-            deleteImagesIfUnreferenced(db, removedJsons.flatMap(ImagePathUtil::collectImageSrcs))
-        }
+                // 图片也要等事务提交后再删（`afterCommit`）。
+                removedJsons.flatMap(ImagePathUtil::collectImageSrcs)
+            },
+            afterCommit = { db, removed -> deleteImagesIfUnreferenced(db, removed) },
+        )
     }
 
     /** 删除某一天的全部内容（编辑器往返测试的 `-ui-test-reset-data` 用到）。 */
@@ -557,11 +559,14 @@ class DiaryRepository(
 
     // ------------------------------------------------------------------ 图片文件
 
-    /** 删除 `images/` 下不再被任何片段引用的文件。对应 iOS `cleanupOrphanImages`。 */
-    suspend fun cleanupOrphanImages() {
+    /**
+     * 删除 `images/` 下不再被任何片段（或受保护的草稿）引用的文件。
+     * 对应 iOS `cleanupOrphanImages`；返回删掉的文件数（P2-5）。
+     */
+    suspend fun cleanupOrphanImages(protectedSrcs: Set<String> = emptySet()): Int =
         withContext(singleThread) {
             val db = helper.writableDatabase
-            val files = imagesDir.listFiles() ?: return@withContext
+            val files = imagesDir.listFiles() ?: return@withContext 0
             val referenced = db.rawQuery(JustDiarySchema.SELECT_ALL_BLOCKS, null).use { c ->
                 buildSet {
                     while (c.moveToNext()) {
@@ -570,24 +575,29 @@ class DiaryRepository(
                     }
                 }
             }
+            var deleted = 0
             for (file in files) {
                 val src = ImagePathUtil.IMAGE_DIR_PREFIX + file.name
-                if (src !in referenced) {
-                    runCatching { file.delete() }
-                        .onFailure { Log.db.w("删除孤立图片失败：${file.name}") }
+                if (src !in referenced && src !in protectedSrcs) {
+                    if (runCatching { file.delete() }
+                            .onFailure { Log.db.w("删除孤立图片失败：${file.name}") }
+                            .getOrDefault(false)
+                    ) {
+                        deleted += 1
+                    }
                 }
             }
+            deleted
         }
-    }
 
     fun resolveImagePath(src: String): File =
         File(imagesDir, ImagePathUtil.normalizeSrcKey(src).removePrefix(ImagePathUtil.IMAGE_DIR_PREFIX))
 
-    /** 只删"新旧内容差集里、且已不再被任何片段引用"的图片。 */
-    private fun cleanupImagesRemovedBetween(db: SQLiteDatabase, oldJson: String, newJson: String) {
+    /** 新旧内容差集里的图片 src（删除动作在事务提交后做）。 */
+    private fun removedImageSrcsBetween(oldJson: String, newJson: String): List<String> {
         val removed = ImagePathUtil.collectImageSrcs(oldJson).toSet() -
             ImagePathUtil.collectImageSrcs(newJson).toSet()
-        deleteImagesIfUnreferenced(db, removed.toList())
+        return removed.toList()
     }
 
     private fun deleteImagesIfUnreferenced(db: SQLiteDatabase, srcs: List<String>) {
@@ -788,7 +798,6 @@ class DiaryRepository(
                 }
             }
         }
-        emitChange()
         return stats
     }
 
@@ -907,27 +916,31 @@ class DiaryRepository(
         }
     }
 
-    /** 串行化写路径 + 单个事务（`BEGIN IMMEDIATE`）。 */
-    private suspend fun <T> write(block: (SQLiteDatabase) -> T): T {
+    /**
+     * 串行化写路径 + 单个事务（`BEGIN IMMEDIATE`）。
+     *
+     * [afterCommit] 在事务**提交后**、仍占用写锁时执行，用来做"不能回滚的副作用"
+     * （例如删除图片文件）。P2-6b：文件删除不能放在事务里，否则事务回滚后
+     * `content_json` 仍引用已经删掉的文件。
+     */
+    private suspend fun <T> write(
+        afterCommit: (SQLiteDatabase, T) -> Unit = { _, _ -> },
+        block: (SQLiteDatabase) -> T,
+    ): T {
         val result = writeMutex.withLock {
             withContext(singleThread) {
                 val db = helper.writableDatabase
                 db.beginTransactionNonExclusive()
-                try {
-                    val value = block(db)
-                    db.setTransactionSuccessful()
-                    value
+                val value = try {
+                    block(db).also { db.setTransactionSuccessful() }
                 } finally {
                     db.endTransaction()
                 }
+                afterCommit(db, value)
+                value
             }
         }
-        emitChange()
         return result
-    }
-
-    private fun emitChange() {
-        _changes.tryEmit(Unit)
     }
 
     private fun diaryFrom(c: Cursor): DiaryRecord = DiaryRecord(

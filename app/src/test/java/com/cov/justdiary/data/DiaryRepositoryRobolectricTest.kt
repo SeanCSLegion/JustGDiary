@@ -25,6 +25,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * 数据层的**运行时**验证（Robolectric）。
@@ -67,6 +68,7 @@ class DiaryRepositoryRobolectricTest {
     @After
     fun tearDown() {
         context.deleteDatabase(JustDiarySchema.DB_NAME)
+        repository.imagesDir.deleteRecursively()
     }
 
     // ------------------------------------------------------------------ 建表与迁移
@@ -235,6 +237,81 @@ class DiaryRepositoryRobolectricTest {
         assertNull("最后一条片段删掉后，这一天本身也要消失", repository.getDiaryByDay(dayKey))
         assertEquals(0, repository.countDiaries())
         assertEquals(0, repository.getDiaryFlagsRange("0000-01-01", "9999-12-31").size)
+    }
+
+    @Test
+    fun `orphan cleanup protects referenced and draft images`() = runBlocking {
+        repository.prepare()
+        repository.imagesDir.deleteRecursively()
+        repository.imagesDir.mkdirs()
+        val referenced = File(repository.imagesDir, "img_ref.jpg").apply { writeBytes(byteArrayOf(1)) }
+        val orphan = File(repository.imagesDir, "img_orphan.jpg").apply { writeBytes(byteArrayOf(2)) }
+        val protected = File(repository.imagesDir, "img_draft.jpg").apply { writeBytes(byteArrayOf(3)) }
+
+        val startUtc = 1_700_000_100_000L
+        repository.addBlock(
+            startTimeUtc = startUtc,
+            locText = "",
+            latitude = 0.0,
+            longitude = 0.0,
+            locPrecision = LocPrecision.none,
+            region = LocRegion("", "", "", "", "", LocQuality.none),
+            contentJson = ContentFlatten.serializeContent(
+                listOf(
+                    ContentPart(
+                        style = ContentPartStyle.image,
+                        src = "images/${referenced.name}",
+                        w = 10.0,
+                        h = 10.0,
+                    ),
+                ),
+            ),
+            dayStartHour = 4,
+        )
+
+        val protectedCount = repository.cleanupOrphanImages(
+            protectedSrcs = setOf("images/${protected.name}"),
+        )
+        assertEquals("孤儿图只该删一张", 1, protectedCount)
+        assertTrue("被片段引用的图不能删", referenced.exists())
+        assertTrue("草稿引用的图不能删", protected.exists())
+        assertTrue("真正的孤儿应被删除", !orphan.exists())
+    }
+
+    @Test
+    fun `updating a block removes its old image after the transaction commits`() = runBlocking {
+        repository.prepare()
+        repository.imagesDir.mkdirs()
+        val oldImage = File(repository.imagesDir, "img_old.jpg").apply { writeBytes(byteArrayOf(1)) }
+        val startUtc = 1_700_000_200_000L
+        repository.addBlock(
+            startTimeUtc = startUtc,
+            locText = "",
+            latitude = 0.0,
+            longitude = 0.0,
+            locPrecision = LocPrecision.none,
+            region = LocRegion("", "", "", "", "", LocQuality.none),
+            contentJson = ContentFlatten.serializeContent(
+                listOf(
+                    ContentPart(
+                        style = ContentPartStyle.image,
+                        src = "images/${oldImage.name}",
+                        w = 10.0,
+                        h = 10.0,
+                    ),
+                ),
+            ),
+            dayStartHour = 4,
+        )
+        val dayKey = DateUtil.dayKeyForUtc(startUtc, 4)
+        val block = repository.getBlocks(repository.getDiaryByDay(dayKey)!!.id).single()
+
+        repository.updateBlockContent(
+            blockId = block.id,
+            contentJson = ContentFlatten.serializeContent(listOf(ContentPart(text = "换成了纯文字"))),
+        )
+
+        assertTrue("事务提交后旧图应被删除", !oldImage.exists())
     }
 
     @Test
