@@ -1,6 +1,7 @@
 package com.cov.justdiary.data
 
 import com.cov.justdiary.model.DateUtil
+import java.time.ZoneId
 
 /**
  * 「新一天的开始时间」改动后，归属日重算的**完整计划**。
@@ -53,14 +54,24 @@ internal data class DayKeyPlan(
     val movedBlocks: Int get() = movers.size
 }
 
-internal fun planDayKeys(rows: List<DayKeyRow>, dayStartHour: Int): DayKeyPlan {
+/**
+ * @param zone 计算归属日用的时区。生产上必须与写库时一致（`day_key` 是按设备时区算的，
+ *   所以默认 `ZoneId.systemDefault()`）；测试固定传一个时区，否则结论会随 CI 机器的
+ *   TZ 变化 —— GitHub runner 是 UTC，本机是 Asia/Shanghai，同一组数据会算出不同的
+ *   `day_key`（`DayKeyPlanTest` 的两个冲突用例曾因此在 CI 上挂掉）。
+ */
+internal fun planDayKeys(
+    rows: List<DayKeyRow>,
+    dayStartHour: Int,
+    zone: ZoneId = ZoneId.systemDefault(),
+): DayKeyPlan {
     val newKeys = HashMap<Long, String>(rows.size)
 
     /** 当前（旧）键 → 持有它的记录 id。`day_key` 有 UNIQUE 约束，所以是一对一。 */
     val currentHolderOf = HashMap<String, Long>(rows.size)
     for (row in rows) {
         val key = if (row.firstUtc > 0) {
-            DateUtil.dayKeyForUtc(row.firstUtc, dayStartHour)
+            DateUtil.dayKeyForUtc(row.firstUtc, dayStartHour, zone)
         } else {
             row.oldKey
         }

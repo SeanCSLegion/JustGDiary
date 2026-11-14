@@ -12,6 +12,11 @@ import java.time.ZoneId
  *
  * 这组断言守住的是设置页「先算再问再改」的前提：**预览与执行是同一个函数**。
  * 只要计划里 `movedBlocks == 0`，执行就不可能动到任何一条 `day_key`。
+ *
+ * ⚠️ 时区必须显式钉在 `zone`（Asia/Shanghai）上：构造 instant 和调用 [planDayKeys] 都用它。
+ * GitHub runner 的默认时区是 UTC，本机是 Asia/Shanghai；一旦随手用
+ * `ZoneId.systemDefault()`，同一组数据会算出不同的 `day_key`，
+ * 「目标键被占」的用例在 CI 上就会变成「两条都能搬」而失败。
  */
 class DayKeyPlanTest {
 
@@ -22,7 +27,11 @@ class DayKeyPlanTest {
         LocalDate.parse(date).atTime(hour, minute).atZone(zone).toInstant().toEpochMilli()
 
     private fun keyOf(date: String, dayStartHour: Int, hour: Int, minute: Int = 0): String =
-        DateUtil.dayKeyForUtc(utcAt(date, hour, minute), dayStartHour)
+        keyOfUtc(utcAt(date, hour, minute), dayStartHour)
+
+    /** 所有用例都固定在 [zone] 上算 `day_key`，绝不读 `systemDefault()`（CI runner 是 UTC）。 */
+    private fun keyOfUtc(firstUtc: Long, dayStartHour: Int): String =
+        DateUtil.dayKeyForUtc(firstUtc, dayStartHour, zone)
 
     @Test
     fun `no entry moves when the boundary does not cross any start time`() {
@@ -31,7 +40,7 @@ class DayKeyPlanTest {
             DayKeyRow(1, keyOf("2026-09-26", 4, 21, 40), utcAt("2026-09-26", 21, 40)),
             DayKeyRow(2, keyOf("2026-09-25", 4, 9, 15), utcAt("2026-09-25", 9, 15)),
         )
-        val plan = planDayKeys(rows, 3)
+        val plan = planDayKeys(rows, 3, zone)
         assertEquals(0, plan.movedBlocks)
         assertEquals(0, plan.conflicts)
     }
@@ -41,7 +50,7 @@ class DayKeyPlanTest {
         // 21:40 在 start=4 时属于 9/26；把边界推到 22:00 之后属于 9/25
         val utc = utcAt("2026-09-26", 21, 40)
         val rows = listOf(DayKeyRow(1, keyOf("2026-09-26", 4, 21, 40), utc))
-        val plan = planDayKeys(rows, 22)
+        val plan = planDayKeys(rows, 22, zone)
         assertEquals(1, plan.movedBlocks)
         assertEquals("2026-09-25", plan.finalKeys[1])
     }
@@ -49,8 +58,8 @@ class DayKeyPlanTest {
     @Test
     fun `already correct keys stay untouched`() {
         val utc = utcAt("2026-09-26", 10, 0)
-        val rows = listOf(DayKeyRow(7, DateUtil.dayKeyForUtc(utc, 4), utc))
-        val plan = planDayKeys(rows, 4)
+        val rows = listOf(DayKeyRow(7, keyOfUtc(utc, 4), utc))
+        val plan = planDayKeys(rows, 4, zone)
         assertTrue(plan.movers.isEmpty())
         assertEquals(0, plan.conflicts)
     }
@@ -59,7 +68,7 @@ class DayKeyPlanTest {
     fun `rows without a start time keep their current key`() {
         // start_time_utc = 0（历史数据）时不参与移动，也不报冲突
         val rows = listOf(DayKeyRow(3, "2026-09-20", 0L))
-        val plan = planDayKeys(rows, 22)
+        val plan = planDayKeys(rows, 22, zone)
         assertEquals(0, plan.movedBlocks)
         assertEquals(0, plan.conflicts)
     }
@@ -70,10 +79,10 @@ class DayKeyPlanTest {
         val utcA = utcAt("2026-09-26", 21, 40) // start=4 → 9/26；start=22 → 9/25
         val utcB = utcAt("2026-09-25", 23, 30) // start=4 → 9/25；start=22 → 9/25（不动）
         val rows = listOf(
-            DayKeyRow(1, DateUtil.dayKeyForUtc(utcA, 4), utcA),
-            DayKeyRow(2, DateUtil.dayKeyForUtc(utcB, 4), utcB),
+            DayKeyRow(1, keyOfUtc(utcA, 4), utcA),
+            DayKeyRow(2, keyOfUtc(utcB, 4), utcB),
         )
-        val plan = planDayKeys(rows, 22)
+        val plan = planDayKeys(rows, 22, zone)
         assertEquals(1, plan.conflicts)
         assertEquals(0, plan.movedBlocks)
     }
@@ -95,11 +104,11 @@ class DayKeyPlanTest {
         val utcB = utcAt("2026-09-25", 21, 40)
         val utcA = utcAt("2026-09-26", 21, 40)
         val rows = listOf(
-            DayKeyRow(1, DateUtil.dayKeyForUtc(utcC, 4), utcC),
-            DayKeyRow(2, DateUtil.dayKeyForUtc(utcB, 4), utcB),
-            DayKeyRow(3, DateUtil.dayKeyForUtc(utcA, 4), utcA),
+            DayKeyRow(1, keyOfUtc(utcC, 4), utcC),
+            DayKeyRow(2, keyOfUtc(utcB, 4), utcB),
+            DayKeyRow(3, keyOfUtc(utcA, 4), utcA),
         )
-        val plan = planDayKeys(rows, 22)
+        val plan = planDayKeys(rows, 22, zone)
         assertEquals(0, plan.movedBlocks)
         assertEquals(2, plan.conflicts)
     }
@@ -109,8 +118,8 @@ class DayKeyPlanTest {
     fun `the surviving movers never collide with keys that stay`() {
         // 构造一串"接力"搬迁：每一条都想搬到前一条的键上
         val utc = (23..26).map { day -> utcAt("2026-09-${day}", 21, 40) }
-        val rows = utc.mapIndexed { i, u -> DayKeyRow((i + 1).toLong(), DateUtil.dayKeyForUtc(u, 4), u) }
-        val plan = planDayKeys(rows, 22)
+        val rows = utc.mapIndexed { i, u -> DayKeyRow((i + 1).toLong(), keyOfUtc(u, 4), u) }
+        val plan = planDayKeys(rows, 22, zone)
         val staying = rows.filter { it.id !in plan.movers.toSet() }.map { it.oldKey }.toSet()
         val written = plan.finalKeys.values.toList()
         assertEquals(written.size, written.toSet().size)          // 移动者之间不重复
@@ -123,10 +132,10 @@ class DayKeyPlanTest {
         val utcA = utcAt("2026-09-26", 21, 40) // 4 → 9/26；22 → 9/25
         val utcB = utcAt("2026-09-25", 21, 40) // 4 → 9/25；22 → 9/24
         val rows = listOf(
-            DayKeyRow(1, DateUtil.dayKeyForUtc(utcA, 4), utcA),
-            DayKeyRow(2, DateUtil.dayKeyForUtc(utcB, 4), utcB),
+            DayKeyRow(1, keyOfUtc(utcA, 4), utcA),
+            DayKeyRow(2, keyOfUtc(utcB, 4), utcB),
         )
-        val plan = planDayKeys(rows, 22)
+        val plan = planDayKeys(rows, 22, zone)
         assertEquals(0, plan.conflicts)
         assertEquals(2, plan.movedBlocks)
         assertEquals("2026-09-25", plan.finalKeys[1])
