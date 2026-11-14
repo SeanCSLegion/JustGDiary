@@ -172,6 +172,57 @@ class DiaryReadScreenTest {
     }
 
     @Test
+    fun `the bottom write button continues writing with one tap`() {
+        var writes = 0
+        rule.setContent {
+            DiaryReadScreen(
+                dayTitle = "9月15日 周二",
+                blocks = listOf(block()),
+                showWriteButton = true,
+                onWrite = { writes++ },
+            )
+        }
+
+        // 有内容时是「继续写日记」；点它才真正进编辑态（不是进阅读态）
+        rule.onNodeWithText(str(R.string.index_continue_write)).performClick()
+        assertEquals(1, writes)
+        rule.onNodeWithText(str(R.string.index_write)).assertDoesNotExist()
+    }
+
+    @Test
+    fun `an empty day offers writing instead of continuing`() {
+        var writes = 0
+        rule.setContent {
+            DiaryReadScreen(
+                dayTitle = "9月27日 周日",
+                blocks = emptyList(),
+                isToday = true,
+                showWriteButton = true,
+                onWrite = { writes++ },
+            )
+        }
+
+        rule.onNodeWithText(str(R.string.index_write)).performClick()
+        assertEquals(1, writes)
+        rule.onNodeWithText(str(R.string.index_continue_write)).assertDoesNotExist()
+    }
+
+    @Test
+    fun `select mode hides the bottom write button`() {
+        rule.setContent {
+            DiaryReadScreen(
+                dayTitle = "9月15日 周二",
+                blocks = listOf(block()),
+                showWriteButton = true,
+                selectMode = true,
+            )
+        }
+
+        rule.onNodeWithText(str(R.string.index_continue_write)).assertDoesNotExist()
+        rule.onNodeWithText(str(R.string.index_write)).assertDoesNotExist()
+    }
+
+    @Test
     fun `in-page search bar shows the hit ordinal and steps through hits`() {
         // 搜索栏是**悬浮在内容之上**的独立组件（宿主画它，不进列表），因此单独组合它。
         var step = 0

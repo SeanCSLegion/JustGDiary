@@ -33,6 +33,8 @@ fun toSpannable(
     quoteStyle: QuoteStyle? = null,
     /** 列表 / 待办标记的几何与配色；null 表示用字面的 `• ` / `☐ ` 字符画（纯文本模式）。 */
     markerStyle: MarkerStyle? = null,
+    /** 图片行的圆角与上下留白；null 表示按原尺寸直接画（测试 / 纯文本模式）。 */
+    imageStyle: ImageStyle? = null,
 ): SpannableStringBuilder {
     val builder = SpannableStringBuilder()
     val lineStarts = mutableListOf<Pair<Int, Int>>() // (start, end)，不含结尾的 \n
@@ -48,12 +50,7 @@ fun toSpannable(
             val end = builder.length
             lineStarts.add(start to end)
             val bitmap = imageProvider?.invoke(line.imageSrc)
-            val drawable = if (bitmap != null) {
-                android.graphics.drawable.BitmapDrawable(null, bitmap)
-            } else {
-                android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
-            }
-            // 与 iOS `DiaryImageView` 同规则：自然宽度、不超可用宽度、不小于 40，高度按比例
+            // 与 iOS `DiaryImageView` 同规则：宽度铺满列宽，高度按比例（存库的 w/h 只作比例）。
             val (imageW, imageH) = ImageDisplaySize.fit(
                 containerWidthPx = containerWidthPx,
                 storedWidth = line.imageWidth,
@@ -61,14 +58,35 @@ fun toSpannable(
                 fallbackWidth = bitmap?.width ?: SpannableBridge.IMAGE_PLACEHOLDER_PX,
                 fallbackHeight = bitmap?.height ?: SpannableBridge.IMAGE_PLACEHOLDER_PX,
             )
-            drawable.setBounds(0, 0, imageW, imageH)
+            val hasTerminator = index < lines.size - 1 || phantomTail
+            val style = imageStyle
+            val drawable = if (style != null) {
+                // 阅读态图片的上下各 10dp 与「图与下一段之间的 8dp」都折算进行高：
+                // `ImageSpan` 把 drawable 的 bottom 当作行的 ascent，平台不会再给段距。
+                val topPadding = style.verticalPaddingPx
+                val bottomPadding = topPadding + if (index < lines.size - 1) {
+                    metricsFor?.invoke(ContentPartStyle.body)?.paragraphSpacingPx ?: 0
+                } else {
+                    0
+                }
+                RoundedImageDrawable(bitmap, style, imageH).apply {
+                    setBounds(0, 0, imageW, imageH + topPadding + bottomPadding)
+                }
+            } else if (bitmap != null) {
+                android.graphics.drawable.BitmapDrawable(null, bitmap).apply {
+                    setBounds(0, 0, imageW, imageH)
+                }
+            } else {
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT).apply {
+                    setBounds(0, 0, imageW, imageH)
+                }
+            }
             builder.setSpan(
                 ImagePayloadSpan(line.imageSrc, line.imageWidth, line.imageHeight, drawable),
                 start,
                 end,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
-            val hasTerminator = index < lines.size - 1 || phantomTail
             if (hasTerminator) builder.append('\n')
             // **图片段居中**（对应 iOS `PartsCodec.imageParagraphStyle()`：
             // `alignment = .center`，让图片永远不会贴在宽栏的左边）。
@@ -153,6 +171,10 @@ fun toSpannable(
                         textSizePx = metrics.textSizePx,
                         lineHeightPx = metrics.lineHeightPx,
                         paragraphSpacingPx = metrics.paragraphSpacingPx,
+                        // 字距 / 字重也必须一起传：少了这两项，编辑态的字距是 0、
+                        // 小标题是 400 —— 同一段文字与阅读态换行不同、标题也不够重。
+                        letterSpacingEm = metrics.letterSpacingEm,
+                        fontWeight = metrics.fontWeight,
                     ),
                     start,
                     paragraphEnd,

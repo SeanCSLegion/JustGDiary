@@ -94,13 +94,13 @@ class EditReadPixelParityTest {
                 textArgb = MaterialTheme.colorScheme.onSurface.toArgb()
                 val density = LocalDensity.current
                 val bodyStyle = EditorTypography.textStyleFor(ContentPartStyle.body)
-                bodyMetrics = with(density) {
-                    BlockMetrics(
-                        textSizePx = bodyStyle.fontSize.toPx().toInt(),
-                        lineHeightPx = bodyStyle.lineHeight.toPx().toInt(),
-                        paragraphSpacingPx = 0,
-                    )
-                }
+                // 与生产同一套换算（字号 / 行高 / **字距 / 字重**）：只比字号与行高的话，
+                // 字距漏掉时两边仍能过阈值，而真实排版差在换行位置上（用户反馈的"排版不一致"）。
+                bodyMetrics = blockMetricsOf(
+                    style = bodyStyle,
+                    density = density,
+                    paragraphSpacingPx = 0,
+                )
                 Surface(
                     modifier = Modifier.size(width = 411.dp, height = 400.dp),
                     color = MaterialTheme.colorScheme.surface,

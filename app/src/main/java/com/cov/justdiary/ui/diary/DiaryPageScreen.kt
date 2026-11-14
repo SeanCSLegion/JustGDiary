@@ -372,6 +372,9 @@ fun DiaryPageScreen(
                         imageLoader = { part ->
                             part.src?.let { src -> container.mediaStore.image(src)?.asImageBitmap() }
                         },
+                        // 读到底也能接着写（用户 2026-11-14）：与顶栏同一动作，只限当天。
+                        showWriteButton = state.canEditToday,
+                        onWrite = viewModel::enterWrite,
                     )
                     // 页内搜索栏悬浮在内容之上（钉住不滚动）：跳到命中处时
                     // 「第几个/共几个」与步进键都还在手边

@@ -76,6 +76,7 @@ import com.cov.justdiary.ui.components.DiaryCard
 import com.cov.justdiary.ui.components.locPrecisionLabel
 import com.cov.justdiary.ui.theme.DynamicTypeMetrics
 import com.cov.justdiary.ui.theme.EditorTypography
+import com.cov.justdiary.ui.theme.Radius
 import com.cov.justdiary.ui.theme.Spacing
 import com.cov.justdiary.ui.theme.TypeSize
 import kotlinx.coroutines.FlowPreview
@@ -290,6 +291,7 @@ fun EditorScreen(
     val metricsFor = rememberBlockMetrics()
     val quoteStyle = rememberQuoteStyle()
     val markerStyle = rememberMarkerStyle()
+    val imageStyle = rememberImageStyle()
     // 正文列宽与阅读态同一条公式（规范 §2.6：阅读 = 编辑）
     val columnWidth: Dp = LocalAdaptiveLayout.current
         .contentColumn(EditorLayout.CONTENT_MAX_WIDTH).dp
@@ -337,6 +339,7 @@ fun EditorScreen(
                         metricsFor = metricsFor,
                         quoteStyle = quoteStyle,
                         markerStyle = markerStyle,
+                        imageStyle = imageStyle,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
@@ -657,16 +660,12 @@ private fun rememberBlockMetrics(): (String) -> BlockMetrics {
     val paragraphSpacingPx = with(density) { BlockGeometry.ParagraphGap.toPx() }.toInt()
     return remember(density, styles) {
         { style ->
-            val textStyle = styles[style] ?: styles.getValue(ContentPartStyle.body)
-            val sizePx = with(density) { textStyle.fontSize.toPx() }.toInt()
-            val lineHeight = if (textStyle.lineHeight == TextUnit.Unspecified) {
-                textStyle.fontSize * 1.35f
-            } else {
-                textStyle.lineHeight
-            }
-            BlockMetrics(
-                textSizePx = sizePx,
-                lineHeightPx = with(density) { lineHeight.toPx() }.toInt(),
+            // 字号 / 行高 / **字距 / 字重**统一走 [blockMetricsOf]：阅读态的 M3 角色带
+            // letterSpacing（正文 0.5sp、引用 0.25sp），早先编辑态只同步字号与行高，
+            // 两边同一段文字的换行位置就会不同（用户反馈的"排版不一致"）。
+            blockMetricsOf(
+                style = styles[style] ?: styles.getValue(ContentPartStyle.body),
+                density = density,
                 paragraphSpacingPx = paragraphSpacingPx,
             )
         }
@@ -726,6 +725,26 @@ private fun rememberMarkerStyle(): MarkerStyle {
             fillColor = fill.toArgb(),
             checkColor = onFill.toArgb(),
             doneTextColor = outline.toArgb(),
+        )
+    }
+}
+
+/**
+ * 图片行的外观（编辑态）：圆角与上下留白**与阅读态的 `InlineImage` 同源**
+ * （`Radius.image` / `ReadLayout.IMAGE_SPACING`），占位色用阅读态的 `surfaceContainerHighest`。
+ *
+ * 阅读态是 Compose `Image`，圆角与留白由布局直接给；编辑态是 `ImageSpan`，
+ * 平台只把 drawable 塞进行里 —— 所以这两项必须由 [RoundedImageDrawable] 自己带。
+ */
+@Composable
+private fun rememberImageStyle(): ImageStyle {
+    val density = LocalDensity.current
+    val placeholder = MaterialTheme.colorScheme.surfaceContainerHighest
+    return remember(density, placeholder) {
+        ImageStyle(
+            verticalPaddingPx = with(density) { ReadLayout.IMAGE_SPACING.dp.toPx() }.toInt(),
+            cornerRadiusPx = with(density) { Radius.image.toPx() },
+            placeholderColor = placeholder.toArgb(),
         )
     }
 }

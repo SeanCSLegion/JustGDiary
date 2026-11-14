@@ -4513,3 +4513,46 @@ P2-3 / P2-11 / P2-12 / P2-13 全部在真机上测完。
 - 真机测试数据已 `pm clear`；字体/显示/夜间/无障碍设置已恢复。
 - 工作树只保留本次功能、重构、测试、文档与 `docs/ui-audit/r40|r41` 证据；
   未提交任何构建产物。
+
+---
+
+## R45 · 编辑/阅读排版对齐、阅读页底部写入口、设置页字号统一（2026-11-14）
+
+用户反馈三条：编辑态的文字/图片排版与阅读态不一致；阅读页要能读到底直接接着写；
+设置页行文本大小不统一。本轮全部收口。
+
+### 1. 编辑态排版对齐阅读态
+
+- **字距**：`BlockMetrics` 新增 `letterSpacingEm`，由 `blockMetricsOf` 从同一个
+  `TextStyle`（M3 `bodyLarge` 0.5sp / `bodyMedium` 0.25sp）折算成平台的 em 并写进
+  `BlockMetricsSpan`。在此之前编辑态只同步字号与行高，同一段正文的换行位置比阅读态晚
+  一个词（真机对比：列表项在阅读态折在 `a` 之后、编辑态能多塞 `second`）。
+- **字重**：小标题在 M3 里是 `500`（阅读态 `titleLarge.copy(fontWeight = Medium)`），
+  编辑态此前按 400 画。`BlockMetricsSpan` 现在一并应用，并保留行内 B/I 的 typeface。
+- **图片**：编辑态此前是直角、贴着上下文字。新增 `ImageStyle` + `RoundedImageDrawable`：
+  12dp 圆角、上下各 10dp、图后接 8dp 段距（`ImageSpan` 把 drawable 高度当作行高，
+  平台不会再补段距）；占位图也用阅读态同色的圆角块。
+- **测试**：`EditorMetricsTest`（4 条：换算 / 小标题 500 / 落到 TextPaint / 不覆盖行内
+  粗斜体）与 `EditorImageRenderTest`（2 条：上下留白 / 圆角像素探针）；
+  `EditReadPixelParityTest` 改用生产同源的 `blockMetricsOf`，字距漏传时不再可能"绿着过"。
+
+### 2. 阅读页底部「写日记 / 继续写日记」
+
+- `DiaryReadScreen` 末尾新增一颗 `Button`（`fillMaxWidth`，与首页周视图下方那颗同宽同高）：
+  有内容 → 「继续写日记」，空的一天 → 「写日记」；动作 = 顶栏铅笔（`enterWrite`）。
+- 仅当天、非多选态显示；顶栏入口保留。
+- `DiaryReadScreenTest` +3 条（有内容 / 空的一天 / 多选态隐藏）。
+
+### 3. 设置页字号统一
+
+- `MenuRow` 早就是 `bodyLarge` 标题 + `bodyMedium` 副标题，而 `ValueRow` / `SwitchRow`
+  还是 `bodyMedium` + `bodySmall` —— 同一页的三种行里出现了两种标题字号。统一为
+  `bodyLarge` + `bodyMedium`（M3 list item 的标题 / 支持文本角色）。
+
+### 4. 验证
+
+- JVM：`./gradlew testDebugUnitTest` → **658 / 658 通过**（66 个测试类，
+  其中 29 个 Robolectric 类 / 198 条运行时用例）。
+- `./gradlew assembleDebug`：通过；模拟器（Pixel_10_Pro）逐条对比：
+  列表项与引用的换行与阅读态一致、编辑态图片圆角/留白与阅读态一致、底部写按钮可用。
+- `python3 tools/verify_docs.py`：需在测试结果就位后跑（见下）。

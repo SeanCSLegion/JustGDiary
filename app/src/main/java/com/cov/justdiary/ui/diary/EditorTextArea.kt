@@ -62,6 +62,8 @@ fun EditorTextArea(
     quoteStyle: QuoteStyle? = null,
     /** 列表 / 待办标记的外观（缩进/图形/配色）；同上。 */
     markerStyle: MarkerStyle? = null,
+    /** 图片行：圆角、上下留白与占位色；与阅读态的图片外观同参数。 */
+    imageStyle: ImageStyle? = null,
     /** 把内部的 `EditText` 交给宿主（点空白收键盘要用它）。 */
     onViewReady: (AppCompatEditText) -> Unit = {},
     /**
@@ -158,6 +160,7 @@ fun EditorTextArea(
                             metricsFor,
                             quoteStyle,
                             markerStyle,
+                            imageStyle,
                         ),
                     )
                     setSelection(text?.length ?: 0)
@@ -258,6 +261,7 @@ fun EditorTextArea(
                             metricsFor,
                             quoteStyle,
                             markerStyle,
+                            imageStyle,
                         ),
                     )
                     val safe = caret.coerceIn(0, view.text?.length ?: 0)

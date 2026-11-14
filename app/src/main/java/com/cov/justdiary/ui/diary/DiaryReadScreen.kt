@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -145,6 +146,14 @@ fun DiaryReadScreen(
     scrollTargetBlockId: Long? = null,
     onScrollTargetConsumed: () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(),
+    /**
+     * 列表末尾的「写日记 / 继续写日记」入口（只有当天、且不在多选态时显示）。
+     *
+     * 顶栏的铅笔仍然保留 —— 这一颗是为了让长日记读到底时**不用再折回屏幕顶部**，
+     * 与首页周视图下方那颗 `Button` 是同一个动作、同一个尺寸（用户 2026-11-14 反馈）。
+     */
+    showWriteButton: Boolean = false,
+    onWrite: () -> Unit = {},
 ) {
     // 正文列宽：一条公式、一处读取（`AdaptiveLayout.contentColumn`）。
     val columnWidth: Dp = LocalAdaptiveLayout.current
@@ -215,6 +224,25 @@ fun DiaryReadScreen(
                     // 只有"当前命中所在的那张卡"才把某一处画成当前命中
                     currentHit = currentHit.takeIf { block.id == currentHitBlockId },
                 )
+            }
+        }
+        // 读到底就能接着写：与首页周视图下方那颗按钮同一个动作/尺寸。
+        // 多选态不显示（那时整页的操作语义是"选与删"）。
+        if (showWriteButton && !selectMode) {
+            item(key = WRITE_KEY) {
+                DiaryColumn(columnWidth) {
+                    Button(
+                        onClick = onWrite,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(
+                                // 空的一天仍然叫「写日记」；有内容才是「继续写日记」
+                                if (blocks.isEmpty()) R.string.index_write else R.string.index_continue_write,
+                            ),
+                        )
+                    }
+                }
             }
         }
     }
@@ -870,6 +898,7 @@ private fun AnnotatedString.withHighlights(highlights: List<DiarySearch.Highligh
 /** 段落里"整段"这个文本单元的下标（列表 / 待办用项下标，普通段落用 -1）。 */
 private const val ITEM_WHOLE_PART = -1
 private const val HERO_KEY = "diary-hero"
+private const val WRITE_KEY = "diary-write"
 
 /** 页内搜索栏的尺寸（规范 §2.7：栏高 52dp）。 */
 object SearchBarMetrics {

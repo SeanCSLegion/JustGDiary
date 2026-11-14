@@ -1,6 +1,22 @@
 package com.cov.justdiary.ui.diary
 
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.text.Spanned
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.TextUnit
 
 /**
  * 编辑器 `Spannable` 用的平台 span 类型与样式数据。
@@ -210,7 +226,51 @@ data class BlockMetrics(
     val textSizePx: Int,
     val lineHeightPx: Int,
     val paragraphSpacingPx: Int,
+    /**
+     * 字距（**em**，与平台 `TextPaint.letterSpacing` 同一单位）。
+     *
+     * 阅读态用 Compose 的 `TextStyle`，它带 M3 角色的 `letterSpacing`（正文 0.5sp、
+     * 引用 0.25sp），而编辑态早先只同步了字号与行高 —— 同一段文字在两边**换行位置不同**：
+     * 「… wrap onto a second / line」在阅读态折在 `a` 之后，编辑态却能多塞一个
+     * `second`（用户反馈"编辑模式排版和阅读模式不一致"）。这里把 sp 折算成 em 交给平台，
+     * 两边的字距因此是同一个值（见 [blockMetricsOf]）。
+     */
+    val letterSpacingEm: Float = 0f,
+    /** 段落字重（M3 `FontWeight` 的数值）；小标题的 500 只在这一层补。 */
+    val fontWeight: Int = 400,
 )
+
+/**
+ * 把 Compose 的 `TextStyle` 折成编辑器的排版数据（px + em）。
+ *
+ * **唯一换算点**：字号 / 行高 / 字距 / 字重都从这里过，编辑态与阅读态因此不会各算一套。
+ * `TextUnit.Unspecified` 的字段按"没有额外设置"处理（行高退回 1.35×，字距为 0）。
+ */
+fun blockMetricsOf(
+    style: TextStyle,
+    density: Density,
+    paragraphSpacingPx: Int,
+): BlockMetrics {
+    val sizePx = with(density) { style.fontSize.toPx() }.toInt()
+    val lineHeight = if (style.lineHeight == TextUnit.Unspecified) {
+        style.fontSize * 1.35f
+    } else {
+        style.lineHeight
+    }
+    val letterSpacingPx = if (style.letterSpacing == TextUnit.Unspecified) {
+        0f
+    } else {
+        with(density) { style.letterSpacing.toPx() }
+    }
+    return BlockMetrics(
+        textSizePx = sizePx,
+        lineHeightPx = with(density) { lineHeight.toPx() }.toInt(),
+        paragraphSpacingPx = paragraphSpacingPx,
+        // 平台要的是 em（`TextPaint.setLetterSpacing`），Compose 给的是 sp 的绝对值
+        letterSpacingEm = if (sizePx > 0) letterSpacingPx / sizePx else 0f,
+        fontWeight = style.fontWeight?.weight ?: 400,
+    )
+}
 
 /**
  * 段落排版 span：字号（`MetricAffectingSpan`）+ 行高 + 段后距（`LineHeightSpan`）。
@@ -228,15 +288,41 @@ class BlockMetricsSpan(
     private val textSizePx: Int,
     private val lineHeightPx: Int,
     private val paragraphSpacingPx: Int,
+    /** 字距（em）：与阅读态 `TextStyle.letterSpacing` 同源，见 [BlockMetrics.letterSpacingEm]。 */
+    private val letterSpacingEm: Float = 0f,
+    /** 段落字重：小标题在 M3 里是 500，编辑态必须一起补。 */
+    private val fontWeight: Int = 400,
 ) : android.text.style.MetricAffectingSpan(),
     android.text.style.LineHeightSpan.WithDensity {
 
     override fun updateMeasureState(paint: android.text.TextPaint) {
         paint.textSize = textSizePx.toFloat()
+        paint.letterSpacing = letterSpacingEm
+        applyWeight(paint)
     }
 
     override fun updateDrawState(paint: android.text.TextPaint) {
         paint.textSize = textSizePx.toFloat()
+        paint.letterSpacing = letterSpacingEm
+        applyWeight(paint)
+    }
+
+    /**
+     * 段落字重（只处理比正文重的角色，如小标题的 500）。
+     *
+     * **要保留行内样式**：同一个字符上可能还挂着 `StyleSpan(BOLD/ITALIC)`。平台的
+     * `MetricAffectingSpan` 按 `getSpans` 的顺序逐个改同一支 `TextPaint`，而本 span
+     * 在 [SpannableEncoder] 里先于行内 span 挂上，所以正常顺序是"先段落字重、再行内样式"。
+     * 这里仍显式合并一次现有 typeface：即便顺序反过来（或平台实现调整），粗体与斜体
+     * 也不会被段落字重抹掉。
+     */
+    private fun applyWeight(paint: android.text.TextPaint) {
+        if (fontWeight <= 400) return
+        val base = paint.typeface
+        val bold = base?.isBold == true
+        val target = if (bold) maxOf(fontWeight, 700) else fontWeight
+        if (bold && target == 700) return
+        paint.typeface = Typeface.create(base ?: Typeface.DEFAULT, target, base?.isItalic == true)
     }
 
     /** `LineHeightSpan` 的入口（无密度版）。 */
@@ -303,6 +389,103 @@ class BlockMetricsSpan(
         fm.descent = descent
         fm.top = ascent
         fm.bottom = descent
+    }
+}
+
+/**
+ * 图片段在**编辑器**里的外观：与阅读态、首页预览共用 [BlockGeometry] / `ReadLayout` 的取值。
+ *
+ * 阅读态是一张 Compose `Image`：铺满列宽、**12dp 圆角**、上下各 10dp、图与前后段落之间
+ * 再隔 8dp。编辑态是 `ImageSpan`，平台只负责把 drawable 按原尺寸画进行里 ——
+ * 圆角、上下留白与段距都得由这里的 drawable 自己带，否则同一张图在两种模式下
+ * 一个圆角一个直角、一个贴着一句一个隔着空（用户反馈的"图片排版不一致"）。
+ */
+data class ImageStyle(
+    /** 图片上方 / 下方的留白（px）。下方还会再叠加段距，见 [SpannableEncoder.toSpannable]。 */
+    val verticalPaddingPx: Int,
+    /** 圆角（px）。 */
+    val cornerRadiusPx: Float,
+    /** 位图还没解码出来时的占位色（与阅读态的占位块同色）。 */
+    val placeholderColor: Int,
+)
+
+/**
+ * 编辑态的内联图片：**圆角 + 上下留白**，几何由 [ImageStyle] 决定。
+ *
+ * bounds 是"整条图片行"的高度（图片 + 上留白 + 下留白），图片本身画在中间；
+ * 于是 `ImageSpan` 量出的行高与阅读态那张 `Image` 占的高度是同一件事。
+ */
+internal class RoundedImageDrawable(
+    private val bitmap: Bitmap?,
+    private val style: ImageStyle,
+    private val imageHeightPx: Int,
+) : Drawable() {
+
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rect = RectF()
+
+    /**
+     * 位图的着色器与矩阵只随 bounds 变一次。
+     *
+     * 编辑区滚动时 [draw] 会被反复调用；每次 draw 都 `new BitmapShader` 会让长日记
+     * （多张图）在滑动时持续分配 —— 图片是静态的，这里缓存到 bounds 变化为止。
+     */
+    private var shader: BitmapShader? = null
+
+    override fun draw(canvas: Canvas) {
+        val bounds = bounds
+        if (bounds.isEmpty || rect.isEmpty) return
+        val source = bitmap
+        if (source != null) {
+            val active = shader ?: return
+            paint.shader = active
+            paint.color = Color.WHITE
+            canvas.drawRoundRect(rect, style.cornerRadiusPx, style.cornerRadiusPx, paint)
+            paint.shader = null
+        } else {
+            paint.color = style.placeholderColor
+            canvas.drawRoundRect(rect, style.cornerRadiusPx, style.cornerRadiusPx, paint)
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {
+        if (paint.alpha != alpha) {
+            paint.alpha = alpha
+            invalidateSelf()
+        }
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        paint.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    @Deprecated("Deprecated in Drawable; required for older callers")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+
+    override fun getIntrinsicWidth(): Int = bounds.width()
+
+    override fun getIntrinsicHeight(): Int = bounds.height()
+
+    override fun onBoundsChange(bounds: Rect) {
+        super.onBoundsChange(bounds)
+        val top = (bounds.top + style.verticalPaddingPx).toFloat()
+        rect.set(bounds.left.toFloat(), top, bounds.right.toFloat(), top + imageHeightPx)
+        val source = bitmap
+        shader = if (source != null && !rect.isEmpty) {
+            BitmapShader(source, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                val matrix = Matrix()
+                matrix.setRectToRect(
+                    RectF(0f, 0f, source.width.toFloat(), source.height.toFloat()),
+                    rect,
+                    Matrix.ScaleToFit.FILL,
+                )
+                setLocalMatrix(matrix)
+            }
+        } else {
+            null
+        }
+        invalidateSelf()
     }
 }
 

@@ -40,8 +40,9 @@ object SpannableBridge {
         metricsFor: ((String) -> BlockMetrics?)? = null,
         quoteStyle: QuoteStyle? = null,
         markerStyle: MarkerStyle? = null,
+        imageStyle: ImageStyle? = null,
     ): SpannableStringBuilder = SpannableEncoder.toSpannable(
-        lines, imageProvider, containerWidthPx, metricsFor, quoteStyle, markerStyle,
+        lines, imageProvider, containerWidthPx, metricsFor, quoteStyle, markerStyle, imageStyle,
     )
 
     /** `Spannable` → 行模型；实现在 [SpannableDecoder.fromSpannable]。 */
