@@ -34,7 +34,7 @@ class EditorMarkerRenderTest {
     private val density = RuntimeEnvironment.getApplication().resources.displayMetrics.density
     private fun px(value: Float): Int = (value * density).toInt()
 
-    private val metrics = SpannableBridge.BlockMetrics(
+    private val metrics = BlockMetrics(
         textSizePx = px(16f),
         lineHeightPx = px(24f),
         paragraphSpacingPx = px(8f),
@@ -46,7 +46,7 @@ class EditorMarkerRenderTest {
     private val fillColor = Color.rgb(0x00, 0x60, 0xC0)
     private val checkColor = Color.rgb(0xFF, 0xD0, 0x00)
 
-    private val marker = SpannableBridge.MarkerStyle(
+    private val marker = MarkerStyle(
         indentPx = px(BlockGeometry.MarkerIndent.value),
         centerXPx = px(BlockGeometry.MarkerSlot.value) / 2f,
         bulletDiameterPx = px(BlockGeometry.BulletSize.value).toFloat(),
@@ -86,7 +86,7 @@ class EditorMarkerRenderTest {
      * 引用底（含左侧竖条）现在由**视图**在 `super.onDraw` 之前画（画在光标之下，见
      * `DiaryEditText.onDraw`），所以这一条要经过真实的 `DiaryEditText`，不能再只画 `StaticLayout`。
      */
-    private fun renderQuoteView(lines: List<EditorLine>, quoteStyle: SpannableBridge.QuoteStyle): Bitmap {
+    private fun renderQuoteView(lines: List<EditorLine>, quoteStyle: QuoteStyle): Bitmap {
         val pad = px(BlockGeometry.TextInset.value)
         val view = DiaryEditText(RuntimeEnvironment.getApplication())
         view.quoteStyle = quoteStyle
@@ -228,7 +228,7 @@ class EditorMarkerRenderTest {
 
     @Test
     fun `a quote line indents its text by the shared inset`() {
-        val quoteStyle = SpannableBridge.QuoteStyle(
+        val quoteStyle = QuoteStyle(
             backgroundColor = Color.rgb(0xEE, 0xEE, 0xEE),
             cornerRadiusPx = px(BlockGeometry.QuoteRadius.value).toFloat(),
             textInsetPx = px(BlockGeometry.QuoteTextInset.value),
@@ -256,7 +256,7 @@ class EditorMarkerRenderTest {
     @Test
     fun `the quote bar is drawn inside the block near the left edge`() {
         val barColor = Color.rgb(0x10, 0x80, 0x30)
-        val quoteStyle = SpannableBridge.QuoteStyle(
+        val quoteStyle = QuoteStyle(
             backgroundColor = Color.rgb(0xEE, 0xEE, 0xEE),
             cornerRadiusPx = px(BlockGeometry.QuoteRadius.value).toFloat(),
             textInsetPx = px(BlockGeometry.QuoteTextInset.value),

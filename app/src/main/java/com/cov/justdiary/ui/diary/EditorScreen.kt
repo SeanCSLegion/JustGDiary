@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -45,7 +46,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,7 +103,7 @@ import kotlinx.coroutines.launch
  * ## 与阅读态共用同一把尺子
  *
  * 段落样式 → M3 角色（[EditorTypography]）→ 字号/行高/段距都以 px 传给 `Spannable`
- * （[SpannableBridge.BlockMetrics]），因此**编辑时看到的排版就是阅读时看到的排版**。
+ * （[BlockMetrics]），因此**编辑时看到的排版就是阅读时看到的排版**。
  *
  * ## 键盘与光标
  *
@@ -228,33 +228,40 @@ fun EditorScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val imageFailedText = stringResource(R.string.editor_image_failed_msg)
     val importingText = stringResource(R.string.editor_image_importing)
+    // 多张图片共用同一条导入链：逐张导入 → 预载 → 插入图片行。
+    suspend fun importAndInsert(uris: List<Uri>): Boolean {
+        var failed = false
+        uris.forEach { uri ->
+            val imported = onImportImage(uri)
+            if (imported == null) {
+                failed = true
+                return@forEach
+            }
+            loadImage(imported.src, MediaStore.PREVIEW_MAX_PIXEL)?.let { bitmap ->
+                images[imported.src] = bitmap
+            }
+            imageRevision += 1
+            state.insertImage(
+                src = imported.src,
+                width = imported.width,
+                height = imported.height,
+            )
+        }
+        return failed
+    }
 
-    // 图片选择：Photo Picker（无需存储权限）
-    val pickImage = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null) {
+    // 图片选择：Photo Picker（无需存储权限）。P3：支持一次选多张，按选择顺序逐张
+    // 插成独立的图片行（设计：一行一张图）；任何一张失败只提示一次，剩下的继续。
+    val pickImages = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_PICK),
+    ) { uris ->
+        if (uris.isNotEmpty()) {
             scope.launch {
                 importingImage = true
                 try {
-                    // 调用方用 MediaStore 把图片导入应用目录（原分辨率 / JPEG q0.95）
-                    val imported = onImportImage(uri)
-                    if (imported == null) {
+                    if (importAndInsert(uris)) {
                         snackbarHostState.showSnackbar(imageFailedText)
-                        return@launch
                     }
-                    // P2-1：先把图加载进内存表，再插入行；这样这次回写就有真实 ImageSpan。
-                    loadImage(imported.src, MediaStore.PREVIEW_MAX_PIXEL)?.let { bitmap ->
-                        images[imported.src] = bitmap
-                    }
-                    imageRevision += 1
-                    // 插图 + **把光标移到图片下面那一行**（iOS `insertImage` 同一行为）：
-                    // 否则插图之后接着打字会打在图片上面。
-                    state.insertImage(
-                        src = imported.src,
-                        width = imported.width,
-                        height = imported.height,
-                    )
                 } finally {
                     importingImage = false
                 }
@@ -265,7 +272,9 @@ fun EditorScreen(
     // 顶栏（宿主）驱动的三个动作：保存 / 放弃 / 插图
     SideEffect {
         actions.onInsertImage = {
-            pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            pickImages.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            )
         }
         // 「保存时还没有位置」的二次确认（规范 §3.6 D3）在 **ViewModel** 里做，
         // 不在这一层：它后面还紧跟着跨日确认（D4），两个弹窗共用同一个待写入项，
@@ -498,6 +507,9 @@ class EditorActions {
     fun flushDraft() = onFlushDraft()
 }
 
+/** 一次最多选几张图（Photo Picker 的 `maxItems`；与 iOS 多图上限同量级）。 */
+private const val MAX_IMAGES_PER_PICK = 9
+
 /** 编辑页的版面常量。 */
 object EditorLayout {
     /** 正文列宽上限（与阅读态同一条公式：`min(660, 宽 − 32)`）。 */
@@ -634,7 +646,7 @@ private fun LocationChip(
  * 这四个值随主题与系统字号变化，所以在这里解析一次、以纯数据传进桥接层。
  */
 @Composable
-private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
+private fun rememberBlockMetrics(): (String) -> BlockMetrics {
     val density = LocalDensity.current
     val styles: Map<String, TextStyle> = mapOf(
         ContentPartStyle.title to EditorTypography.textStyleFor(ContentPartStyle.title),
@@ -652,7 +664,7 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
             } else {
                 textStyle.lineHeight
             }
-            SpannableBridge.BlockMetrics(
+            BlockMetrics(
                 textSizePx = sizePx,
                 lineHeightPx = with(density) { lineHeight.toPx() }.toInt(),
                 paragraphSpacingPx = paragraphSpacingPx,
@@ -668,15 +680,15 @@ private fun rememberBlockMetrics(): (String) -> SpannableBridge.BlockMetrics {
  * 编辑态以前只挂了块样式 span，点「引用」时正文外观**逐像素不变**（R30 记的 F1）——
  * 而阅读态与 iOS 编辑态都是有底的。这里把这套几何交给 `DiaryEditText.onDraw` 画
  * （**不能**用 `LineBackgroundSpan`：平台先画光标、再画行背景 span，底会把光标盖住，
- * 见 [SpannableBridge.QuoteStyle] 与 R33 的记录）。
+ * 见 [QuoteStyle] 与 R33 的记录）。
  */
 @Composable
-private fun rememberQuoteStyle(): SpannableBridge.QuoteStyle {
+private fun rememberQuoteStyle(): QuoteStyle {
     val density = LocalDensity.current
     val background = MaterialTheme.colorScheme.surfaceContainerHigh
     val bar = MaterialTheme.colorScheme.outlineVariant
     return remember(density, background, bar) {
-        SpannableBridge.QuoteStyle(
+        QuoteStyle(
             backgroundColor = background.toArgb(),
             cornerRadiusPx = with(density) { BlockGeometry.QuoteRadius.toPx() },
             textInsetPx = with(density) { BlockGeometry.QuoteTextInset.toPx() }.toInt(),
@@ -697,13 +709,13 @@ private fun rememberQuoteStyle(): SpannableBridge.QuoteStyle {
  * 与阅读态的 `BulletRow` / `TodoBox` 是同一套数（那边按 dp 直接用同一批常量）。
  */
 @Composable
-private fun rememberMarkerStyle(): SpannableBridge.MarkerStyle {
+private fun rememberMarkerStyle(): MarkerStyle {
     val density = LocalDensity.current
     val outline = MaterialTheme.colorScheme.onSurfaceVariant
     val fill = MaterialTheme.colorScheme.primary
     val onFill = MaterialTheme.colorScheme.onPrimary
     return remember(density, outline, fill, onFill) {
-        SpannableBridge.MarkerStyle(
+        MarkerStyle(
             indentPx = with(density) { BlockGeometry.MarkerIndent.toPx() }.toInt(),
             centerXPx = with(density) { BlockGeometry.MarkerSlot.toPx() } / 2f,
             bulletDiameterPx = with(density) { BlockGeometry.BulletSize.toPx() },

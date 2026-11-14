@@ -282,7 +282,7 @@ M3 `TopAppBar`（64dp），**钉在页面顶部，不进滚动区**。
 | 8 | `strikethrough` | 删除线 | 同上 | — |
 | 9 | `format_underline` | 下划线 | 同上 | — |
 
-- 尺寸：按钮 40 × 40dp（**触控目标 48dp**）；图标 20dp；active = `secondaryContainer` 胶囊底 + `onSecondaryContainer` 前景；disabled = `alpha 0.38` + 不响应点击。
+- 尺寸：按钮 40dp 宽 × 40dp 视觉圆（**触控高 48dp**；横向 40dp 是“9 键一行”预算下的有意例外，见下）；图标 20dp；active = `secondaryContainer` 胶囊底 + `onSecondaryContainer` 前景；disabled = `alpha 0.38` + 不响应点击。
 - **引用有自己的按钮，不在段落样式菜单里**（菜单只有三项）。
 - **第 1 个按钮是「菜单」而不是「开关」，必须带下拉指示**：宽 **46dp**，图标 18dp + `expand_more` 14dp。
   只放一个 `format_size` 图标时用户看不出它会展开展开菜单（iOS 用的也是
@@ -609,7 +609,7 @@ y = 56
 | 待办勾选框 | 「验证标题层级，已完成/未完成」，可点切换 |
 | 图片 | 「图片，宽 660 高 420」+「双击全屏查看」 |
 | 动态字体 | 编辑器字号按 §2.3 的逐档封顶；最大档下输入区最小高 × body 系数 |
-| 触控目标 | 全部 ≥ 48dp（iOS 是 44pt） |
+| 触控目标 | 全部 ≥ 48dp（iOS 是 44pt）；格式栏按钮 40dp 宽是已记录的例外（§3.3） |
 
 ---
 

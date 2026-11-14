@@ -9,19 +9,17 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.appcompat.widget.AppCompatEditText
 import com.cov.justdiary.model.ContentPartStyle
@@ -59,11 +57,11 @@ fun EditorTextArea(
     /** 图片异步加载完成后的版本号；变化时回写一次文本，让 ImageSpan 从占位换成真图。 */
     imageRevision: Int = 0,
     /** 段落样式 → 字号/行高/段距（px）；编辑器与阅读态共用同一把尺子。 */
-    metricsFor: ((String) -> SpannableBridge.BlockMetrics?)? = null,
+    metricsFor: ((String) -> BlockMetrics?)? = null,
     /** 引用段的外观（底色/圆角/内边距/竖条）；由界面层从主题解析，与阅读态同参数。 */
-    quoteStyle: SpannableBridge.QuoteStyle? = null,
+    quoteStyle: QuoteStyle? = null,
     /** 列表 / 待办标记的外观（缩进/图形/配色）；同上。 */
-    markerStyle: SpannableBridge.MarkerStyle? = null,
+    markerStyle: MarkerStyle? = null,
     /** 把内部的 `EditText` 交给宿主（点空白收键盘要用它）。 */
     onViewReady: (AppCompatEditText) -> Unit = {},
     /**
@@ -105,7 +103,7 @@ fun EditorTextArea(
         android.text.SpannableString(placeholder).apply {
             if (bodyMetrics != null) {
                 setSpan(
-                    SpannableBridge.BlockMetricsSpan(
+                    BlockMetricsSpan(
                         textSizePx = bodyMetrics.textSizePx,
                         lineHeightPx = bodyMetrics.lineHeightPx,
                         paragraphSpacingPx = 0,
@@ -343,10 +341,10 @@ internal class DiaryEditText(context: android.content.Context) : AppCompatEditTe
      *
      * 在 `super.onDraw` **之前**画就没有这个问题（光标由 `super.onDraw` 里的 `Editor` 画）。
      * 顺带还修掉了另一个真机缺陷：以前那个 `QuoteBackgroundSpan`（已删）复用同一个 `Paint`，
-     * 而 [SpannableBridge.QuoteStyle.drawBox] 画竖条时会把 `Paint.color` 改成竖条色 ——
+     * 而 [QuoteStyle.drawBox] 画竖条时会把 `Paint.color` 改成竖条色 ——
      * 第二帧起整块底就变成竖条那种深灰（截图里引用底明显比末尾空行那块底暗一档）。
      */
-    var quoteStyle: SpannableBridge.QuoteStyle? = null
+    var quoteStyle: QuoteStyle? = null
 
     /**
      * 文档**只有一行**、且那一行是空的引用行时，它的底没有任何字符可挂（见
@@ -394,7 +392,7 @@ internal class DiaryEditText(context: android.content.Context) : AppCompatEditTe
     private fun drawQuoteParagraph(
         canvas: android.graphics.Canvas,
         layout: android.text.Layout,
-        style: SpannableBridge.QuoteStyle,
+        style: QuoteStyle,
         start: Int,
         end: Int,
     ) {
@@ -414,7 +412,7 @@ internal class DiaryEditText(context: android.content.Context) : AppCompatEditTe
     private fun drawQuoteBox(
         canvas: android.graphics.Canvas,
         layout: android.text.Layout,
-        style: SpannableBridge.QuoteStyle,
+        style: QuoteStyle,
         line: Int,
         firstLine: Int,
         lastLine: Int,

@@ -15,14 +15,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,7 +40,6 @@ import com.cov.justdiary.R
 import com.cov.justdiary.data.DiaryProgress
 import com.cov.justdiary.data.ShareLayout
 import com.cov.justdiary.data.DiaryTopBarState
-import com.cov.justdiary.model.ContentFlatten
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.service.ShareIntents
@@ -202,13 +201,15 @@ fun DiaryPageScreen(
     val savedMessage = stringResource(R.string.share_saved)
     val saveFailedMessage = stringResource(R.string.share_save_failed)
     val noShareAppMessage = stringResource(R.string.share_no_app)
+    val textCopiedMessage = stringResource(R.string.share_text_copied)
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(
             when (message) {
-                DiaryPageViewModel.DiaryMessage.SavedToGallery -> savedMessage
-                DiaryPageViewModel.DiaryMessage.SaveToGalleryFailed -> saveFailedMessage
-                DiaryPageViewModel.DiaryMessage.NoShareApp -> noShareAppMessage
+                DiaryPageMessage.SavedToGallery -> savedMessage
+                DiaryPageMessage.SaveToGalleryFailed -> saveFailedMessage
+                DiaryPageMessage.NoShareApp -> noShareAppMessage
+                DiaryPageMessage.TextCopied -> textCopiedMessage
             },
         )
         viewModel.consumeMessage()
@@ -254,7 +255,7 @@ fun DiaryPageScreen(
             dayKey = dayKey,
         )
     }
-    val shareNow: (DiaryPageViewModel.State) -> Unit = { current ->
+    val shareNow: (DiaryPageState) -> Unit = { current ->
         viewModel.openSharePanel()
         viewModel.shareDiary(
             isDark = darkTheme,
@@ -441,13 +442,40 @@ fun DiaryPageScreen(
     )
 
     // 分享面板（规范 §4）：预览 + 「分享…」+「保存到相册」。关闭时清掉临时分享图。
+    val diaryPlainText = remember(state.dayKey, state.blocks, state.partsByBlock, formats) {
+        val date = com.cov.justdiary.model.DateUtil.parseDayKey(state.dayKey)
+            ?: java.time.LocalDate.now()
+        DiaryText.format(
+            title = formats.dayTitle(date),
+            blocks = state.blocks,
+            partsByBlock = state.partsByBlock,
+        )
+    }
     ShareSheet(
         visible = state.sharePanelVisible,
         rendering = state.sharing,
         imageFile = state.shareImageFile,
+        plainText = diaryPlainText,
         onDismiss = viewModel::dismissSharePanel,
         onShare = shareNow2,
         onSaveToGallery = viewModel::saveShareToGallery,
+        onCopyText = {
+            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+            val copied = runCatching {
+                clipboard?.setPrimaryClip(
+                    android.content.ClipData.newPlainText(appLabel, diaryPlainText),
+                )
+            }.isSuccess
+            if (copied) viewModel.notifyTextCopied()
+        },
+        onShareText = {
+            val sent = runCatching {
+                context.startActivity(
+                    ShareIntents.shareText(context, diaryPlainText, shareChooserTitle),
+                )
+            }.isSuccess
+            if (!sent) viewModel.notifyNoShareApp()
+        },
     )
 
     state.alert?.let { alert ->
@@ -470,7 +498,7 @@ fun DiaryPageScreen(
  *
  * 下标越界是真实场景：删掉片段后 `hits` 可能已经变短。
  */
-private fun currentHit(state: DiaryPageViewModel.State): DiaryPageViewModel.SearchHit? =
+private fun currentHit(state: DiaryPageState): DiaryPageSearchHit? =
     if (state.showSearch) state.hits.getOrNull(state.hitIndex) else null
 
 /**
@@ -479,7 +507,7 @@ private fun currentHit(state: DiaryPageViewModel.State): DiaryPageViewModel.Sear
  * 规则与 iOS 一致（`LocationRules`）：编辑已有片段只读、**不提供重新获取入口**；
  * 新建片段才可能处于"获取中 / 获取失败"。
  */
-private fun editorLocationState(state: DiaryPageViewModel.State): LocationRules.EditorLocationState {
+private fun editorLocationState(state: DiaryPageState): LocationRules.EditorLocationState {
     val snapshot = state.location
     return when {
         snapshot != null && snapshot.hasLocation -> LocationRules.EditorLocationState.Recorded(snapshot)
@@ -492,8 +520,8 @@ private fun editorLocationState(state: DiaryPageViewModel.State): LocationRules.
 
 @Composable
 private fun DiaryAlertDialog(
-    alert: DiaryPageViewModel.DiaryAlert,
-    state: DiaryPageViewModel.State,
+    alert: DiaryPageAlert,
+    state: DiaryPageState,
     viewModel: DiaryPageViewModel,
     onClose: () -> Unit,
 ) {
@@ -503,17 +531,17 @@ private fun DiaryAlertDialog(
     var onConfirm: (() -> Unit)? = null
 
     when (alert) {
-        DiaryPageViewModel.DiaryAlert.HistoryNoAdd -> {
+        DiaryPageAlert.HistoryNoAdd -> {
             title = HISTORY_NO_ADD_TITLE
             message = HISTORY_NO_ADD_MESSAGE
         }
 
-        DiaryPageViewModel.DiaryAlert.ReadOnly -> {
+        DiaryPageAlert.ReadOnly -> {
             title = READONLY_TITLE
             message = READONLY_MESSAGE
         }
 
-        DiaryPageViewModel.DiaryAlert.ExitConfirm -> {
+        DiaryPageAlert.ExitConfirm -> {
             title = EXIT_TITLE
             message = EXIT_MESSAGE
             confirmLabel = DISCARD_LABEL
@@ -521,45 +549,45 @@ private fun DiaryAlertDialog(
             onConfirm = viewModel::showRead
         }
 
-        DiaryPageViewModel.DiaryAlert.DiscardConfirm -> {
+        DiaryPageAlert.DiscardConfirm -> {
             title = DISCARD_TITLE
             message = DISCARD_MESSAGE
             confirmLabel = DISCARD_LABEL
             onConfirm = viewModel::performDiscardEditing
         }
 
-        is DiaryPageViewModel.DiaryAlert.CrossDay -> {
+        is DiaryPageAlert.CrossDay -> {
             title = CROSS_DAY_TITLE
             message = stringResource(R.string.editor_cross_day_msg, alert.dayKey)
             confirmLabel = SAVE_EXIT_LABEL
             onConfirm = viewModel::confirmCrossDay
         }
 
-        DiaryPageViewModel.DiaryAlert.LocationMissing -> {
+        DiaryPageAlert.LocationMissing -> {
             title = LOCATION_MISSING_TITLE
             message = LOCATION_MISSING_MESSAGE
             confirmLabel = SAVE_ANYWAY_LABEL
             onConfirm = viewModel::confirmSaveAnyway
         }
 
-        DiaryPageViewModel.DiaryAlert.SaveFailed -> {
+        DiaryPageAlert.SaveFailed -> {
             title = SAVE_FAILED_TITLE
             message = SAVE_FAILED_MESSAGE
         }
 
-        is DiaryPageViewModel.DiaryAlert.DeleteConfirm -> {
+        is DiaryPageAlert.DeleteConfirm -> {
             title = DELETE_TITLE
             message = stringResource(R.string.editor_delete_msg, alert.count)
             confirmLabel = DELETE_LABEL
             onConfirm = viewModel::performDeleteSelected
         }
 
-        DiaryPageViewModel.DiaryAlert.ImageInsertFailed -> {
+        DiaryPageAlert.ImageInsertFailed -> {
             title = IMAGE_FAILED_TITLE
             message = IMAGE_FAILED_MESSAGE
         }
 
-        DiaryPageViewModel.DiaryAlert.ShareFailed -> {
+        DiaryPageAlert.ShareFailed -> {
             title = SHARE_FAILED_TITLE
             message = SHARE_FAILED_MESSAGE
         }
@@ -567,8 +595,8 @@ private fun DiaryAlertDialog(
 
     // 「取消」对两个确认弹窗（未获取到位置 / 跨日）意味着**放弃这次保存**：
     // 只清 alert 不够，待写入项也得一起丢掉，否则下次点保存会拿旧内容重来。
-    val alertIsSaveConfirm = alert is DiaryPageViewModel.DiaryAlert.CrossDay ||
-        alert is DiaryPageViewModel.DiaryAlert.LocationMissing
+    val alertIsSaveConfirm = alert is DiaryPageAlert.CrossDay ||
+        alert is DiaryPageAlert.LocationMissing
     val cancel: () -> Unit = if (alertIsSaveConfirm) viewModel::cancelPendingSave else viewModel::consumeAlert
 
     AlertDialog(

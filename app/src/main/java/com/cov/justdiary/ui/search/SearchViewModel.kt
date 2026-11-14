@@ -47,6 +47,8 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         val locLoading: Boolean = false,
         /** 索引还没建好（首屏可能出现一次）。 */
         val indexing: Boolean = false,
+        /** 最近搜索（已提交的关键词，最新在前）。 */
+        val history: List<String> = emptyList(),
     )
 
     private val _state = MutableStateFlow(State())
@@ -54,6 +56,10 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
 
     private var searchJob: Job? = null
     private var locSearchJob: Job? = null
+
+    init {
+        _state.value = _state.value.copy(history = container.searchHistory.load())
+    }
 
     /** 输入框变化 → 250ms 防抖后重查。 */
     /**
@@ -80,8 +86,23 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     fun commitKeyword() {
         val term = _state.value.ui.keyword.trim()
         if (term.isEmpty()) return
+        val history = container.searchHistory.add(term)
         apply(SearchFilters.commitKeyword(_state.value.ui, term))
+        _state.value = _state.value.copy(history = history)
         runSearchNow(reset = true)
+    }
+
+    /** 点“最近搜索”里的词：填进输入框并立即搜索。 */
+    fun selectHistory(word: String) {
+        val term = word.trim()
+        if (term.isEmpty()) return
+        apply(_state.value.ui.copy(keyword = term))
+        commitKeyword()
+    }
+
+    fun clearHistory() {
+        container.searchHistory.clear()
+        _state.value = _state.value.copy(history = emptyList())
     }
 
     fun removeKeyword(word: String) {

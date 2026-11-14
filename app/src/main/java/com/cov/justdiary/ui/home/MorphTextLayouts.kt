@@ -42,9 +42,6 @@ class MorphTextLayouts {
 
     private val cache = HashMap<String, TextLayoutResult>()
 
-    /** 临时探针：真实测量（未命中）次数 —— 用来判断"新月份第一次画"贵在哪。 */
-    var misses: Int = 0
-        private set
 
     /**
      * 取一条布局；没有就量一次并记住。
@@ -67,7 +64,6 @@ class MorphTextLayouts {
         val quantized = kotlin.math.round(fontSize.value * 8f) / 8f
         val key = text + "|" + quantized + "|" + fontWeight.weight + "|" + color.value.toString(16)
         cache[key]?.let { return it }
-        misses++
         val result = measurer.measure(
             text = text,
             style = style.copy(fontSize = fontSize, fontWeight = fontWeight, color = color),

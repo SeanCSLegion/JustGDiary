@@ -320,7 +320,7 @@ class DiaryRepository(
                 // 文件删除必须等事务提交后再做；否则事务回滚时 JSON 仍引用已经删掉的文件。
                 removedImageSrcsBetween(oldJson, newJson)
             },
-            afterCommit = { db, removed -> deleteImagesIfUnreferenced(db, removed) },
+            afterCommit = { db, removed -> deleteImagesIfUnreferenced(db, imagesDir, removed) },
         )
     }
 
@@ -369,7 +369,7 @@ class DiaryRepository(
                 // 图片也要等事务提交后再删（`afterCommit`）。
                 removedJsons.flatMap(ImagePathUtil::collectImageSrcs)
             },
-            afterCommit = { db, removed -> deleteImagesIfUnreferenced(db, removed) },
+            afterCommit = { db, removed -> deleteImagesIfUnreferenced(db, imagesDir, removed) },
         )
     }
 
@@ -565,55 +565,10 @@ class DiaryRepository(
      */
     suspend fun cleanupOrphanImages(protectedSrcs: Set<String> = emptySet()): Int =
         withContext(singleThread) {
-            val db = helper.writableDatabase
-            val files = imagesDir.listFiles() ?: return@withContext 0
-            val referenced = db.rawQuery(JustDiarySchema.SELECT_ALL_BLOCKS, null).use { c ->
-                buildSet {
-                    while (c.moveToNext()) {
-                        val json = c.getString(c.getColumnIndexOrThrow("content_json")) ?: "[]"
-                        addAll(ImagePathUtil.collectImageSrcs(json))
-                    }
-                }
-            }
-            var deleted = 0
-            for (file in files) {
-                val src = ImagePathUtil.IMAGE_DIR_PREFIX + file.name
-                if (src !in referenced && src !in protectedSrcs) {
-                    if (runCatching { file.delete() }
-                            .onFailure { Log.db.w("删除孤立图片失败：${file.name}") }
-                            .getOrDefault(false)
-                    ) {
-                        deleted += 1
-                    }
-                }
-            }
-            deleted
+            cleanupOrphanImageFiles(helper.writableDatabase, imagesDir, protectedSrcs)
         }
 
-    fun resolveImagePath(src: String): File =
-        File(imagesDir, ImagePathUtil.normalizeSrcKey(src).removePrefix(ImagePathUtil.IMAGE_DIR_PREFIX))
-
-    /** 新旧内容差集里的图片 src（删除动作在事务提交后做）。 */
-    private fun removedImageSrcsBetween(oldJson: String, newJson: String): List<String> {
-        val removed = ImagePathUtil.collectImageSrcs(oldJson).toSet() -
-            ImagePathUtil.collectImageSrcs(newJson).toSet()
-        return removed.toList()
-    }
-
-    private fun deleteImagesIfUnreferenced(db: SQLiteDatabase, srcs: List<String>) {
-        if (srcs.isEmpty()) return
-        for (src in srcs.distinct()) {
-            // LIKE 的通配符要转义：图片名形如 img_<ms>.jpg，`_` 是 LIKE 的单字符通配符
-            val stillReferenced = db.rawQuery(
-                "SELECT 1 FROM edit_block WHERE content_json LIKE ? ESCAPE '\\' LIMIT 1;",
-                arrayOf("%${SearchUtil.escapeLikeTerm(src)}%"),
-            ).use { it.moveToFirst() }
-            if (!stillReferenced) {
-                runCatching { resolveImagePath(src).delete() }
-                    .onFailure { Log.db.w("删除图片失败：$src") }
-            }
-        }
-    }
+    fun resolveImagePath(src: String): File = imageFileOf(imagesDir, src)
 
     /** 写入 `content_json` 时统一走这里，保证图片路径与格式归一（与 iOS 的写出路径一致）。 */
     fun normalizeContent(raw: String): String = ImagePathUtil.normalizeContent(raw)
@@ -785,7 +740,7 @@ class DiaryRepository(
 
                     // 事务已提交：被覆盖片段留下的旧图终于可以删了。删除放在事务**之后**，
                     // 避免"事务回滚了、文件却已经被删"（P2-6b 的同类问题）。
-                    deleteImagesIfUnreferenced(mainDb, removedImageSrcs)
+                    deleteImagesIfUnreferenced(mainDb, imagesDir, removedImageSrcs)
 
                     BackupStats(
                         importedDays = importedDays,
@@ -800,76 +755,6 @@ class DiaryRepository(
         }
         return stats
     }
-
-    /** 某一天全部片段的 `content_json` 里引用到的图片键（OVERWRITE 前用来清理旧图）。 */
-    private fun imageSrcsOfDiary(db: SQLiteDatabase, diaryId: Long): List<String> =
-        db.rawQuery(
-            "SELECT content_json FROM edit_block WHERE diary_id = ?;",
-            arrayOf(diaryId.toString()),
-        ).use { c ->
-            buildList {
-                while (c.moveToNext()) {
-                    addAll(ImagePathUtil.collectImageSrcs(c.getString(0) ?: "[]"))
-                }
-            }
-        }
-
-    /** 导入前置校验：备份库中每个 `content_json.src` 都必须是 `images/<safe-name>`。 */
-    private fun validateBackupImageSources(backupDb: SQLiteDatabase) {
-        backupDb.rawQuery("SELECT content_json FROM edit_block;", null).use { cursor ->
-            while (cursor.moveToNext()) {
-                val raw = cursor.getString(0) ?: continue
-                val srcs = runCatching { ImagePathUtil.collectImageSrcs(raw) }.getOrElse {
-                    throw BackupException.InvalidManifest("备份里有无法解析的 content_json：${it.message}")
-                }
-                for (src in srcs) {
-                    if (!ImagePathUtil.isValidImportSrc(src)) {
-                        throw BackupException.InvalidManifest("备份包含非法图片路径：$src")
-                    }
-                }
-            }
-        }
-    }
-
-    private fun readBackupBlocks(
-        backupDb: SQLiteDatabase,
-        diaryId: Long,
-        hasRegion: Boolean,
-        hasQuality: Boolean,
-        hasCountryCode: Boolean,
-    ): List<BackupBlockRow> = backupDb.rawQuery(
-        JustDiarySchema.SELECT_BACKUP_BLOCKS_OF_DIARY,
-        arrayOf(diaryId.toString()),
-    ).use { c ->
-        buildList {
-            while (c.moveToNext()) {
-                add(
-                    BackupBlockRow(
-                        startTimeUtc = c.longOrNull("start_time_utc") ?: 0L,
-                        locText = c.stringOrNull("loc_text") ?: "",
-                        latitude = c.doubleOrNull("latitude") ?: 0.0,
-                        longitude = c.doubleOrNull("longitude") ?: 0.0,
-                        contentJson = c.stringOrNull("content_json") ?: "[]",
-                        locPrecision = c.stringOrNull("loc_precision") ?: "none",
-                        locQuality = if (hasQuality) c.stringOrNull("loc_quality") ?: "" else "",
-                        country = c.stringOrNull("country") ?: "",
-                        countryCode = if (hasCountryCode) c.stringOrNull("country_code") ?: "" else "",
-                        region1 = if (hasRegion) c.stringOrNull("region1") ?: "" else c.stringOrNull("province") ?: "",
-                        region2 = if (hasRegion) c.stringOrNull("region2") ?: "" else c.stringOrNull("city") ?: "",
-                        region3 = if (hasRegion) c.stringOrNull("region3") ?: "" else c.stringOrNull("district") ?: "",
-                        createdUtc = c.longOrNull("created_utc") ?: 0L,
-                        updatedUtc = c.longOrNull("updated_utc") ?: 0L,
-                    ),
-                )
-            }
-        }
-    }
-
-    private fun tableColumnsOf(db: SQLiteDatabase, table: String): Set<String> =
-        db.rawQuery("PRAGMA table_info($table);", null).use { c ->
-            val index = c.getColumnIndex("name")
-            buildSet { while (c.moveToNext()) if (index >= 0) add(c.getString(index)) }
-        }
 
     private fun lastInsertRowId(db: SQLiteDatabase): Long =
         db.rawQuery("SELECT last_insert_rowid();", null).use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
@@ -976,44 +861,4 @@ class DiaryRepository(
         /** 地点候选上限（iOS 取前 20）。 */
         const val LOCATION_OPTION_LIMIT: Int = 20
     }
-}
-
-/**
- * 备份库里一条片段的中间表示。
- *
- * 单列出来是因为备份库可能是**老 schema**：缺 `region1/2/3` 时要回落读
- * `province/city/district`，缺 `loc_quality` 时要由坐标推导 —— 这些回落必须在
- * 读取阶段就做完，后面的写入路径才能只面对一种形状。
- */
-private data class BackupBlockRow(
-    val startTimeUtc: Long,
-    val locText: String,
-    val latitude: Double,
-    val longitude: Double,
-    val contentJson: String,
-    val locPrecision: String,
-    val locQuality: String,
-    val country: String,
-    val countryCode: String,
-    val region1: String,
-    val region2: String,
-    val region3: String,
-    val createdUtc: Long,
-    val updatedUtc: Long,
-)
-
-/** 列不存在或值为 NULL 时返回 null（老 schema 的兼容读取需要它）。 */
-private fun Cursor.stringOrNull(name: String): String? {
-    val index = getColumnIndex(name)
-    return if (index < 0 || isNull(index)) null else getString(index)
-}
-
-private fun Cursor.longOrNull(name: String): Long? {
-    val index = getColumnIndex(name)
-    return if (index < 0 || isNull(index)) null else getLong(index)
-}
-
-private fun Cursor.doubleOrNull(name: String): Double? {
-    val index = getColumnIndex(name)
-    return if (index < 0 || isNull(index)) null else getDouble(index)
 }

@@ -8,6 +8,7 @@ import com.cov.justdiary.service.ImageShareRenderer
 import com.cov.justdiary.service.LocationService
 import com.cov.justdiary.service.MediaStore
 import com.cov.justdiary.service.ReminderScheduler
+import com.cov.justdiary.data.SearchHistoryStore
 import com.cov.justdiary.service.SettingsStore
 
 /**
@@ -31,6 +32,9 @@ class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
     val settings: SettingsStore by lazy { SettingsStore(appContext) }
+
+    /** 搜索页的最近关键词（P3）。 */
+    val searchHistory: SearchHistoryStore by lazy { SearchHistoryStore(appContext) }
 
     val repository: DiaryRepository by lazy { DiaryRepository(appContext, settings) }
 

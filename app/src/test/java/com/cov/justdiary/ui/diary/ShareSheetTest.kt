@@ -42,6 +42,7 @@ class ShareSheetTest {
             ShareSheetContent(
                 rendering = true,
                 imageFile = null,
+                plainText = "",
                 onShare = {},
                 onSaveToGallery = {},
             )
@@ -64,6 +65,7 @@ class ShareSheetTest {
             ShareSheetContent(
                 rendering = false,
                 imageFile = file,
+                plainText = "body",
                 onShare = { shareClicks++ },
                 onSaveToGallery = { saveClicks++ },
             )
@@ -102,5 +104,26 @@ class ShareSheetTest {
         }
         bitmap.recycle()
         return file
+    }
+
+    @Test
+    fun `text actions work without image rendering`() {
+        var copyClicks = 0
+        var shareTextClicks = 0
+        rule.setContent {
+            ShareSheetContent(
+                rendering = true,
+                imageFile = null,
+                plainText = "body",
+                onShare = {},
+                onSaveToGallery = {},
+                onCopyText = { copyClicks++ },
+                onShareText = { shareTextClicks++ },
+            )
+        }
+        rule.onNodeWithText(str(R.string.share_action_copy_text)).performClick()
+        rule.onNodeWithText(str(R.string.share_action_share_text)).performClick()
+        assertEquals(1, copyClicks)
+        assertEquals(1, shareTextClicks)
     }
 }

@@ -2,7 +2,6 @@ package com.cov.justdiary.ui.diary
 
 import android.content.Context
 import com.cov.justdiary.app.AppContainer
-import com.cov.justdiary.data.DiaryRepository
 import com.cov.justdiary.data.DiaryTopBarState
 import com.cov.justdiary.data.db.JustDiarySchema
 import com.cov.justdiary.model.AppSettings
@@ -141,8 +140,8 @@ class DiaryPageStateTest {
     }
 
     private fun awaitState(
-        predicate: (DiaryPageViewModel.State) -> Boolean,
-    ): DiaryPageViewModel.State = runBlocking {
+        predicate: (DiaryPageState) -> Boolean,
+    ): DiaryPageState = runBlocking {
         withTimeout(10_000) { viewModel.state.first(predicate) }
     }
 
@@ -213,7 +212,7 @@ class DiaryPageStateTest {
 
         viewModel.enterSelect(ids[0])
         viewModel.confirmDeleteSelected()
-        assertEquals(1, (viewModel.state.value.alert as DiaryPageViewModel.DiaryAlert.DeleteConfirm).count)
+        assertEquals(1, (viewModel.state.value.alert as DiaryPageAlert.DeleteConfirm).count)
         viewModel.performDeleteSelected()
 
         val state = awaitState { it.blocks.size == 1 }
@@ -242,7 +241,7 @@ class DiaryPageStateTest {
         assertTrue("选中集合也不该被动到", pending.selectedIds.isEmpty())
         assertEquals(
             "确认框只该针对被点的那一条",
-            DiaryPageViewModel.DiaryAlert.DeleteConfirm(1),
+            DiaryPageAlert.DeleteConfirm(1),
             pending.alert,
         )
         assertEquals(listOf(ids[1]), pending.pendingDeleteIds)
@@ -289,7 +288,7 @@ class DiaryPageStateTest {
 
         viewModel.enterEditBlock(0)
         viewModel.handleBack(editorHasContent = true)
-        assertEquals(DiaryPageViewModel.DiaryAlert.ExitConfirm, viewModel.state.value.alert)
+        assertEquals(DiaryPageAlert.ExitConfirm, viewModel.state.value.alert)
         assertFalse(viewModel.state.value.requestDismiss)
 
         viewModel.showRead()
@@ -417,7 +416,7 @@ class DiaryPageStateTest {
         // 即便被调用（例如深链），也只给一条提示、**不进编辑态**
         viewModel.enterWrite()
         assertTrue("历史日期的新增入口即便被调用也不该进编辑态", viewModel.state.value.isRead)
-        assertEquals(DiaryPageViewModel.DiaryAlert.HistoryNoAdd, viewModel.state.value.alert)
+        assertEquals(DiaryPageAlert.HistoryNoAdd, viewModel.state.value.alert)
     }
 
     @Test
@@ -453,7 +452,7 @@ class DiaryPageStateTest {
         viewModel.save(EditorSavePayload(parts = parts("第一条"), startTimeUtc = System.currentTimeMillis()))
 
         val state = viewModel.state.value
-        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, state.alert)
+        assertEquals(DiaryPageAlert.LocationMissing, state.alert)
         assertTrue("点过保存 = 有待写入项", state.pendingSave != null)
         assertTrue("确认之前一个字都不入库", state.blocks.isEmpty())
 
@@ -474,7 +473,7 @@ class DiaryPageStateTest {
     fun `cancelling the location confirmation writes nothing`() {
         openTodayInWrite()
         viewModel.save(EditorSavePayload(parts = parts("先不写"), startTimeUtc = System.currentTimeMillis()))
-        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, viewModel.state.value.alert)
+        assertEquals(DiaryPageAlert.LocationMissing, viewModel.state.value.alert)
 
         viewModel.cancelPendingSave()
         scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
@@ -497,13 +496,13 @@ class DiaryPageStateTest {
 
         viewModel.save(EditorSavePayload(parts = parts("熬到后半夜才写完"), startTimeUtc = yesterday))
         // 先过 D3（无位置），再落到 D4（跨日）
-        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, viewModel.state.value.alert)
+        assertEquals(DiaryPageAlert.LocationMissing, viewModel.state.value.alert)
         viewModel.confirmSaveAnyway()
         scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
         scheduler.runCurrent()
 
         val prompting = viewModel.state.value
-        assertEquals(DiaryPageViewModel.DiaryAlert.CrossDay(yesterdayKey), prompting.alert)
+        assertEquals(DiaryPageAlert.CrossDay(yesterdayKey), prompting.alert)
         assertTrue("跨日弹窗期间同样不落库", prompting.blocks.isEmpty())
 
         // 「保存并退出」：写进的是弹窗里说的那一天
@@ -529,11 +528,11 @@ class DiaryPageStateTest {
         val yesterday = yesterdayNoonMillis()
 
         viewModel.save(EditorSavePayload(parts = parts("还是别存了"), startTimeUtc = yesterday))
-        assertEquals(DiaryPageViewModel.DiaryAlert.LocationMissing, viewModel.state.value.alert)
+        assertEquals(DiaryPageAlert.LocationMissing, viewModel.state.value.alert)
         viewModel.confirmSaveAnyway()
         scheduler.advanceTimeBy(DiaryPageViewModel.CROSS_DAY_PROMPT_DELAY_MS + 50)
         scheduler.runCurrent()
-        assertTrue(viewModel.state.value.alert is DiaryPageViewModel.DiaryAlert.CrossDay)
+        assertTrue(viewModel.state.value.alert is DiaryPageAlert.CrossDay)
 
         viewModel.cancelPendingSave()
         val state = viewModel.state.value

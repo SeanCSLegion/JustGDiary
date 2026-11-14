@@ -22,7 +22,7 @@ import java.time.LocalDate
  * **回归**：连续月历流"挪挂载窗口"时，已挂载的月份块**不能被重建**。
  *
  * 为什么值得一条用例：真机上"跨月顿一下"实测就是这件事 ——
- * 一次挪窗口把**整窗 9 块**全部重组 + 重录，一帧 91~157ms（`ScrollProf` 逐帧日志）。
+ * 一次挪窗口把**整窗 9 块**全部重组 + 重录，一帧 91~157ms（`-morph-log` 逐帧日志 逐帧日志）。
  * 根因是循环形状（见 [MonthBlockWindow] 的注释）：`for (i in range) { blocks.getOrNull(i) ?: continue }`
  * 会让 Compose 的 movable group 匹配不回已有组；换成直接下标后只剩新挂进来的那一块。
  *

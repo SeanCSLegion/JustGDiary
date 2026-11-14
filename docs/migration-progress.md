@@ -4271,3 +4271,245 @@ P2-3（morph 性能）与 P2-6（大文件拆分）本轮不做，已在 `TODO.m
 - release：`assembleRelease` + `bundleRelease` 成功；签名 APK / AAB 构建通过（R37 的签名配置未改）。
 - 模拟器：设置页显示 `Journal 103 kB · Images 0 B · Backups 0 B`，
   “清理孤儿图片”返回“Removed 0 orphan images.”；证据 `docs/ui-audit/r38/`。
+
+---
+
+## R39 · P2-6 大文件拆分（2026-11-14）
+
+用户指定做 `TODO.md` 里的 P2-6。目标是**纯搬家、不改行为**：把五个 1000–2000 行的
+UI/编辑器核心文件按“纯函数 / 数据模型先出，Compose 组合后出”拆开，公开入口保持稳定，
+每个文件拆完单独编译 + 跑相关测试，最后全量回归。
+
+### 1. SpannableBridge（987 → 4 个文件）
+
+- `EditorSpans.kt`：`BlockStyleSpan` / `PhantomLineSpan` / `MarkerSpan` / `TodoDoneSpan` /
+  `BlockMetricsSpan` / `ImagePayloadSpan` 与 `MarkerStyle` / `BlockMetrics` / `QuoteStyle`；
+- `SpannableEncoder.kt`：`toSpannable` 与行内 span 挂载（唯一“写平台文本”入口）；
+- `SpannableDecoder.kt`：`fromSpannable` / `parseLine` / `extractRuns` / 补位行与泄漏判据；
+- `SpannableBridge.kt`：保留门面委托、引用几何与末尾空行的视图级规则。
+- 调用点只把 `SpannableBridge.<SpanType>` 改成顶层类型名，语义不变。
+
+### 2. EditorModel（1126 → 5 个文件）
+
+- `EditorPartsCodec.kt`：`linesToParts` / `partsToLines`；
+- `EditorParagraphOps.kt`：块样式、对齐、引用、标记、回车修复与空行规则；
+- `EditorInlineOps.kt`：run 工具、行内格式、倒序应用与 run 切片；
+- `EditorLineOps.kt`：拆行 / 插行 / 合并 / 插图；
+- `EditorModel.kt`：常量 + 同名门面，调用点一行未改。
+
+### 3. MonthFlow（1917 → 5 个文件）
+
+- `MonthFlowGeometry.kt`：`MonthFlowLayout`、`FlowScroll`、morph 度量探针；
+- `MonthFlowCanvas.kt`：块窗口、`BlockCanvas`、逐日无障碍层、钉住层与滚动指示器；
+- `MonthFlowPhysics.kt`：拖动、投影落点、弹簧回弹；
+- `MonthFlowMorph.kt`：`morphSource` 与 `MonthWeekMorph`；
+- `MonthFlow.kt`：主入口、`MonthFlowLabel` 与两个空闲常量。
+
+### 4. SettingsScreen / HomeScreen
+
+- `SettingsRows.kt` / `SettingsDialogs.kt` / `SettingsFormat.kt`：行组件、对话框、文案与格式；
+- `HomeTopBar.kt` / `HomeCalendarLayers.kt` / `HomeDayPanel.kt`：顶栏、周/年层、当日面板。
+
+### 5. 约定与验证
+
+- 跨文件调用者的可见性从 `private` 提到 `internal`（如 `MonthFlowBlock`、`flowDrag`、
+  `EditorInlineOps.sliceRuns`），其余保持文件私有；依赖方向单向（几何/模型不反向依赖视图）。
+- JVM：**636 / 636 通过**（61 个测试类，0 失败）。
+- `./gradlew :app:compileDebugKotlin` 在每个文件拆完后单独通过；`python3 tools/verify_docs.py` 通过。
+- 未改任何用户可见行为、未改数据库/备份格式；未做 P2-3 morph 性能与 P2-11/12/13 真机走查。
+- 后续候选：`DiaryPageViewModel.kt`（1116）与 `DiaryRepository.kt`（1019）仍在数据/事务链路上，
+  建议下一轮单独拆；`HomeScreen.kt`（1194）可再拆三态 morph 状态机。
+
+---
+
+## R40 · 真机收口：morph 性能 + 无障碍/触控/分享走查（2026-11-14）
+
+真机：**MEIZU 21 / Android 16 / 1080×2340 / 440dpi / 120Hz**。本轮把 `TODO.md` 里剩下的
+P2-3 / P2-11 / P2-12 / P2-13 全部在真机上测完。
+
+### 1. P2-3 morph 性能
+
+- 月份块只画可能可见的行：`MonthFlowBlock` 用 `derivedStateOf` 按视口算 `visibleRows`，
+  `BlockCanvas` 只录这些行；整块不可见时不挂 Canvas。
+- morph 层静态行走 `graphicsLayer`：`MonthWeekMorph` 非选中行的内容只录一次，600ms 内只更新
+  `translationY/alpha`；选中行（要插值字号/行高）保留每帧重画。
+- 结果（AOT、3 轮）：月→周 **97.8–100.7fps**（最长 24ms），周→月 **117.5–119.4fps**
+  （最长 8–16ms），新月份块首帧 **6.8ms**（19.1 → 6.8）；周→月退出瞬间从 8 块重录
+  38.9ms 降到 2 块 ~7ms。
+- 证据：`docs/ui-audit/r40/`（截图 + `morph-log.txt`）。
+
+### 2. P2-11 TalkBack
+
+开启 TalkBack（跳过首次教程）后逐屏抓无障碍树：
+
+- 月态 43 个日期节点，`content-desc` 带“今天/选中/有无日记”；
+- 设置 10 个行级节点，开关 `checked` 正确、无相邻重复停靠；
+- 格式栏 9 键都有名称；2.0× 字号无裁切（设置副标题换行但未压线）。
+- 证据：`12-talkback-month.xml` / `13-talkback-settings.xml` / `10-home-font2.png` /
+  `11-settings-font2.png`。音频语速/语气仍需人工听感，已写入 TODO 的剩余边界。
+
+### 3. P2-12 触控目标
+
+`uiautomator` 实测：月态日格 56×72dp、周态 80×80dp、设置行 56dp 高、搜索胶囊 48dp 高、
+顶栏 48dp、底栏 80dp，全部达标。格式栏按钮 40–47.6dp 宽 × 48dp 高，是 9 键一行
+（393dp 宽放不下 9×48dp）的**有意例外**，已在设计文档 §3.3 标注，不再改横滑/换行。
+
+### 4. P2-13 三项走查
+
+- 分享长图深色：正常（`05-share-dark.png`）；
+- 平板/横屏分享面板：1600×2560 与 2560×1600（240dpi）模拟，预览随内容列放大、无裁切
+  （`06`/`07`）；
+- 图片行 caret：点图片中间插入点落在该行、键盘正常弹出（`08`/`09`）。
+
+### 5. 验证
+
+- JVM：**636 / 636 通过**（61 个测试类）。
+- 真机：MEIZU 21，Android 16；morph 日志与截图见 `docs/ui-audit/r40/`。
+- `python3 tools/verify_docs.py` / `verify_sqlite_schema.py`：通过。
+- 未做：P3 可选增强；`DiaryPageViewModel` / `DiaryRepository` / `HomeScreen` 的后续拆分。
+
+---
+
+## R41 · P3 第一批：复制/分享正文、搜索历史、多图（2026-11-14）
+
+用户确认“剩余内容全都做完”后，先做 P3 里成本最低、用户价值最高的三项。
+
+### 1. 复制 / 分享正文
+
+- 新增 `DiaryText`（纯函数）：标题 + 片段纯文本；列表 `• `、待办 `☐/☑ `、引用 `> `、
+  图片 `[图片]`，片段之间空一行；`DiaryTextTest` 三条。
+- 分享面板底部新增「复制文字 / 分享文字」，不依赖长图渲染（面板渲染中也能用）；
+  复制走 `ClipboardManager` + Snackbar，分享文字走 `ShareIntents.shareText`
+  （`ACTION_SEND` + `text/plain`），无接收方时复用“没有可用的分享应用”提示。
+
+### 2. 搜索历史
+
+- 新增 `SearchHistoryStore`（SharedPreferences + JSON）：最多 10 条、去重置顶、可清除；
+  `SearchHistoryStoreRobolectricTest` 三条。
+- `SearchViewModel` 在提交关键词时写入，引导态显示“最近搜索 / 清除”，点 chip 立即搜索。
+
+### 3. 多图一次插入
+
+- `EditorScreen` 的 Photo Picker 改为 `PickMultipleVisualMedia(9)`，按选择顺序逐张
+  `importImage` + `state.insertImage`，保持“一行一张图、光标在图片下”的规则；
+  任一失败只提示一次。
+
+### 4. 相机直拍（已撤回）
+
+- 用户 2026-11-14 明确“不要做相机相关调用，只需要能插入图片”。
+  相关代码/资源（`TakePicture`、`cache/camera` FileProvider 路径、来源对话框与字符串）
+  已在同一轮撤回，只保留相册多选插图。
+
+### 4. 验证
+
+- JVM：**643 / 643 通过**（63 个测试类）。
+- 真机：MEIZU 21；截图/选择器状态在 `docs/ui-audit/r41/`。
+- 仍待做：桌面小组件、应用锁、平板拖放/键盘快捷键；
+  `DiaryPageViewModel` / `DiaryRepository` / `HomeScreen` 的后续拆分。
+
+---
+
+## R42 · 后续拆分：DiaryPageViewModel / DiaryRepository（2026-11-14）
+
+用户确认“继续拆分”；P3 其余项暂不做。本轮仍是**纯搬家、不改行为**。
+
+### 1. DiaryPageViewModel（1124 → 830）
+
+- `DiaryPageState.kt`（180）：`State` / `PendingNewBlock` / `DiaryMessage` / `DiaryAlert` /
+  `SearchHit` 五个嵌套类型提为顶层，并保留派生属性；`EMPTY_REGION` 提为包内常量。
+  调用点把 `DiaryPageViewModel.State` 等限定名改为顶层名，语义不变。
+- `DiaryPageShareController.kt`（152）：分享面板开合、长图渲染、保存到相册、提示消息；
+  由 ViewModel 注入 `state()` / `update()`，协程仍在 `viewModelScope` 上。
+- `DiaryLocationSnapshots.kt`（32）：`regionOf` / `locationSnapshotOf` 两个纯函数。
+- `DiaryPageViewModel.kt` 只剩状态机、草稿、保存/删除、搜索、定位与委托。
+
+### 2. DiaryRepository（1020 → 864）
+
+- `DiaryImageFiles.kt`（75）：孤儿图片清理、`images/` 路径解析、事务后按引用删图。
+- `DiaryBackupReads.kt`（122）：备份读取侧（老 schema 回落、图片路径校验、列探测、
+  `BackupBlockRow` 与 Cursor 扩展）。
+- `DiaryRepository.kt` 保留事务/FTS/合并写入等必须串行的部分。
+
+### 3. 未做
+
+- `HomeScreen.kt`（1194）仍是一个整块 composable：三态状态机与几十个组合参数耦合，
+  安全拆分需要先抽独立状态 holder（会改变组合结构），不在本轮硬切。
+- P3 其余（小组件 / 应用锁 / 平板键鼠）按用户 2026-11-14 决定暂不做。
+
+### 4. 验证
+
+- JVM：**643 / 643 通过**（63 个测试类）。
+- `python3 tools/verify_docs.py`：通过；`./gradlew assembleDebug`：通过。
+
+---
+
+## R43 · HomeScreen 二拆（第一层）：纯决策 + morph 覆盖层（2026-11-14）
+
+按用户要求继续拆 `HomeScreen.kt`，但**不硬切组合结构**：先抽可纯化的导航/交班判据，
+再把两个 morph 覆盖层移出。
+
+### 1. `HomeCalendarNavigation.kt`（87 行）
+
+- `stepMonthKey` / `pageMonthKey` / `stepDayKey` / `monthKeyOfDay` / `carrySelectionKey` /
+  `pageWeek` / `monthKeyFor`：只吃日期与状态、返回下一状态，不读 Compose。
+- `topBarMode` / `showMonthFlow` / `showWeekLayer`：morph 期间的图层交班判据（纯函数）。
+- 新增 `HomeCalendarNavigationTest`（6 条）：跨月翻日、月末夹取、翻周跨月、
+  顶栏主导层、两层的显隐判据。
+
+### 2. `HomeMorphLayers.kt`（107 行）
+
+- 年↔月 morph（含内部一份 `YearLayer`）与月↔周 morph 两个覆盖层移出；
+- 参数全部由 HomeScreen 传入（冻结源、进度读取器、几何、文案、当日内容 lambda），
+  层内不再读组合状态，避免影响 `HomeScreen` 的 skip/重组结构。
+
+### 3. 结果与边界
+
+- `HomeScreen.kt`：1194 → **1146** 行；外部行为未变。
+- 原目标里的“顶栏 / 周层 / 年层 / 当日面板 / morph 层”均已各自成文件
+  （`HomeTopBar.kt` / `HomeCalendarLayers.kt` / `HomeDayPanel.kt` / `HomeMorphLayers.kt`），
+  导航与交班判据在 `HomeCalendarNavigation.kt`。
+- 剩余 1146 行是**三态状态机 + 组合根**（`mode` / `monthKey` / `selectedKey` / morph 标志 /
+  冻结源 / 动画进度 / 十来个导航 lambda）。再抽 holder 会改变组合结构、可能影响刚修好的
+  morph 性能，因此本轮不做；这不在“按层拆文件”的验收里。
+- P3 其余与相机仍按用户要求不做。
+
+### 4. 验证
+
+- JVM：**649 / 649 通过**（64 个测试类）。
+- `./gradlew assembleDebug`：通过；`python3 tools/verify_docs.py`：通过。
+
+---
+
+## R44 · 收尾清理、全量验证与提交（2026-11-14）
+
+本轮不再压行数，只做代码整洁、测试与清理。
+
+### 1. 代码清理
+
+- 删除 P2-3 用的**临时**滚动探针 `ScrollProf.kt` 及 `MonthFlowCanvas` / `MonthFlowPhysics`
+  里的计时调用；后续复测看 `-morph-log` 即可。
+- 删除 `HomeCalendarNavigation.todayKeyFor`（未被调用）。
+- `DiaryText.IMAGE_PLACEHOLDER` 收为 `private`。
+- `SearchViewModel.commitKeyword` 直接使用 `SearchHistoryStore.add` 的返回值，
+  不再重复读一次 SharedPreferences。
+- 清理所有改动/新增 Kotlin 文件的未使用 import（保留 Compose 委托必需的
+  `getValue` / `setValue`；逐个编译验证）。
+
+### 2. 验证
+
+- JVM：`./gradlew clean assembleDebug testDebugUnitTest --rerun-tasks`
+  → **649 / 649 通过**（64 个测试类）。
+- 真机 instrumented：MEIZU 21 / Android 16 → **7 / 7 通过**
+  （`app/build/outputs/androidTest-results/connected/debug/`）。
+- release：`./gradlew :app:assembleRelease` 通过；R8/资源压缩后 APK **4.1MB**。
+- `python3 tools/verify_docs.py`、`python3 tools/verify_sqlite_schema.py`：通过。
+- `git diff --check`：通过。
+- `:app:lintDebug` **无法运行**：AGP 9.5.1 + Kotlin 2.4 的 lint K2 分析器崩溃
+  （`AsyncExecutionService.getService must not return null`，lint 自身 bug），
+  不是代码告警；CI 目前不跑 lint（见 `.github/workflows/android.yml`）。
+
+### 3. 清理
+
+- 真机测试数据已 `pm clear`；字体/显示/夜间/无障碍设置已恢复。
+- 工作树只保留本次功能、重构、测试、文档与 `docs/ui-audit/r40|r41` 证据；
+  未提交任何构建产物。

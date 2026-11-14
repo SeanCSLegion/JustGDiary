@@ -514,9 +514,9 @@ class EditorStateTest {
 
     @Test
     fun `rule 6 the trailing blank line drives the view level cursor metrics`() {
-        val body = SpannableBridge.BlockMetrics(textSizePx = 48, lineHeightPx = 60, paragraphSpacingPx = 0)
-        val title = SpannableBridge.BlockMetrics(textSizePx = 84, lineHeightPx = 100, paragraphSpacingPx = 0)
-        val metrics: (String) -> SpannableBridge.BlockMetrics = { style ->
+        val body = BlockMetrics(textSizePx = 48, lineHeightPx = 60, paragraphSpacingPx = 0)
+        val title = BlockMetrics(textSizePx = 84, lineHeightPx = 100, paragraphSpacingPx = 0)
+        val metrics: (String) -> BlockMetrics = { style ->
             if (style == ContentPartStyle.title) title else body
         }
 
@@ -544,13 +544,13 @@ class EditorStateTest {
      */
     @Test
     fun `a paragraph span leaked over an inserted newline is detected`() {
-        val markerStyle = SpannableBridge.MarkerStyle(
+        val markerStyle = MarkerStyle(
             indentPx = 28, centerXPx = 9f, bulletDiameterPx = 8f,
             checkboxSizePx = 18f, checkboxRadiusPx = 2f, checkboxBorderPx = 2f,
             outlineColor = 0, fillColor = 0, checkColor = 0, doneTextColor = 0,
         )
-        val metrics = { _: String -> SpannableBridge.BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0) }
-        val quoteStyle = SpannableBridge.QuoteStyle(
+        val metrics = { _: String -> BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0) }
+        val quoteStyle = QuoteStyle(
             backgroundColor = 0, cornerRadiusPx = 4f, textInsetPx = 48, paddingVerticalPx = 6,
         )
 

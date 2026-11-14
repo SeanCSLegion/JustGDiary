@@ -1,8 +1,8 @@
 # JustGDiary Android · TODO / 待办清单
 
-> 审计日期：**2026-11-12**；P1 收口日期：**2026-11-13**
-> 代码基线：`main` @ `1f23c52`（R34/R35 已提交；P1 改动在 R36 工作树）
-> 验证：`./gradlew clean assembleDebug testDebugUnitTest` → **636 / 636 通过**（61 个测试类，0 失败）
+> 审计日期：**2026-11-12**；P1 收口日期：**2026-11-13**；P2-6 拆分：**2026-11-14**
+> 代码基线：`main` @ `49c3554`（R39 拆分在本地工作树）
+> 验证：`./gradlew assembleDebug testDebugUnitTest` → **649 / 649 通过**（64 个测试类，0 失败）
 
 这份清单只列**当前还没做**的事情，已经完成的历史项不重复。每条尽量给出：
 `优先级 · 问题 · 证据（文件:行） · 建议动作 · 验收方式`。
@@ -20,14 +20,14 @@
 
 ## 0. 本轮结论（先看这几条）
 
-1. **Android 功能面已经完整**：首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导都已落地，636 条 JVM 测试全绿。当前不是“缺大功能”，而是**数据安全、平台体验和长期可维护性**的收口。
+1. **Android 功能面已经完整**：首页三态 / 日记阅读·编辑·多选·分享 / 搜索 / 足迹 / 设置 / 备份互导都已落地，649 条 JVM 测试全绿。当前不是“缺大功能”，而是**数据安全、平台体验和长期可维护性**的收口。
 2. **P0-0 已修复**：一份构造过的 `.jdiary` 曾可以把文件写到 `images/` 之外，甚至删掉数据库 / 设置；现在 `src`/`file` 非法即整包拒绝。
 3. **P0-1 已修复**：编辑器内容过去只存在 Compose 的 `remember` 里，Activity 重建或进程被回收就会丢；现在有磁盘草稿 + `ON_STOP` 落盘，已在模拟器验证。
 4. **P0-2 已修复**：`allowBackup` 已关闭，备份只走设置页 `.jdiary`，不会再出现“系统恢复半套数据”。
 5. **P0-5 已修复**：首页“今天”现在遵循 `day_start_hour`；月态逐日无障碍节点也在 P1-3 补齐（仅无障碍开启时挂）。
 6. **iOS 最近 17 个提交里需要跟的 3 件事已全部落地**：图片按原分辨率落盘、年历两个小几何、日历无障碍；引用回车也已按“一律跟随 iOS”改回续引用（P1-4）。P1-7 / P1-9 / P1-11 / P1-13 / P1-14 / P1-15 / P1-16 同轮完成，详见 `docs/migration-progress.md` R36。
 7. **P2 数据/性能小问题已收口（R38）**：P2-6b 全部、P2-5 孤儿图片/存储用量、编辑 vs 阅读首条像素基线已完成。
-8. **后续只剩两件大改**：P2-3 morph 性能与 P2-6 大文件拆分（各自需要单独一轮测量/重构）；P2-11/12/13 无障碍与真机走查暂不做。发布链路已在 R37 准备好。
+8. **P2 全部完成（R37–R40）**：P2-6 拆分为 22 个文件（R39）；P2-3 月→周 ~98–101fps、周→月 ~118fps、新月份块首帧 6.8ms；P2-11/12/13 真机走查完成（证据 `docs/ui-audit/r40/`）。剩余只有 P3 可选增强。发布链路已在 R37 准备好。
 9. **发布链路已准备（R37）**：版本号走 `version.properties`、release 签名可注入、R8/资源压缩已开、CI 与 `androidTest` 已落地；签名 release APK 4.1MB / AAB 6.0MB 已冒烟。剩下的是真实签名 secrets、Play Console 上架与可选的 baseline profile / macrobenchmark。
 
 > 用户可见行为的现状稿见 [`docs/app-current-state.md`](docs/app-current-state.md)（随每次行为变更更新）。
@@ -51,7 +51,7 @@
 | 语言/主题切换 | **主题不重建；语言保留官方重建但消除黑帧**，两者都不丢草稿 |
 | 首页“写日记” | **先进入阅读态**，再由阅读态顶栏铅笔 / 空态按钮进入编辑；与 iOS `openDiary` 一致 |
 
-> **P0-0 … P0-5 已在 2026-11-12 的 R34 全部修复；P1 可执行项已在 2026-11-13 的 R36 全部落地；P2-1/2/4/7/8/9/10 已在 R37 收口**（P1-8 / P1-10 按已确认口径不做）。当前 **636 条 JVM 测试全绿**（61 个测试类），并在 Pixel_10_Pro 模拟器上验证了草稿恢复、原图落盘、月历无障碍与通知/快捷方式入口。
+> **P0-0 … P0-5 已在 2026-11-12 的 R34 全部修复；P1 可执行项已在 2026-11-13 的 R36 全部落地；P2-1/2/4/7/8/9/10 已在 R37 收口**（P1-8 / P1-10 按已确认口径不做）。当前 **649 条 JVM 测试全绿**（64 个测试类），并在 Pixel_10_Pro 模拟器上验证了草稿恢复、原图落盘、月历无障碍与通知/快捷方式入口。
 
 ---
 
@@ -332,7 +332,7 @@ iOS 已改成：**按原始像素尺寸**落盘、JPEG **q0.95**、只保留方�
 6. 备份体积会变大（16MP 0.35MB → ~1.8MB），在备份界面/文档里说明，不做静默压缩。
 7. **已确认不单独保留 PNG/透明**：跟 iOS 一样统一存 JPEG，截图/贴纸的 alpha 会变黑底，这是已知取舍；不要在本项里偷偷按 MIME 改格式，否则与 iOS 的存储形状分叉。
 
-**验收**：真机插入一张 3000×2000 照片，用 `exiftool`/`ImageDecoder` 验证落盘尺寸与元数据；编辑/阅读/分享三处显示与改动前一致；636 条测试 + 新用例全绿。
+**验收**：真机插入一张 3000×2000 照片，用 `exiftool`/`ImageDecoder` 验证落盘尺寸与元数据；编辑/阅读/分享三处显示与改动前一致；649 条测试 + 新用例全绿。
 
 ---
 
@@ -349,12 +349,12 @@ val todayRadius = minOf(cellW, cellH) * 0.42f
 // :259-267 标记条 y = cy + todayRadius * 0.86f
 ```
 
-`YearMonthMorph.kt:643` 的迷你端点也是 `0.42`，所以 morph 端点自洽，但年历圆**恒占格宽 84%**，月/周/流约 90.5% —— iOS 用户报的“年历圆偏小”在 Android 同样存在。
+`YearMonthMorph.kt:649` 的迷你端点也是 `0.42`，所以 morph 端点自洽，但年历圆**恒占格宽 84%**，月/周/流约 90.5% —— iOS 用户报的“年历圆偏小”在 Android 同样存在。
 
 标记条则**已经贴着日号**（`0.86r ≈ dayFont/2`），iOS 的“掉在下面”在 Android 看不到；但它的 y 挂在圆半径上，**一旦把 0.42 放大，标记会被一起带远**。
 
 **建议动作**：
-1. 把年历圆半径比例从 `0.42` 提到 **0.45~0.465**（0.45 约与 Android 月视图 90.5% 看齐，0.465 约与 iOS 93% 看齐）；**两处同改**：`CalendarCanvas.kt:209`、`YearMonthMorph.kt:643`。
+1. 把年历圆半径比例从 `0.42` 提到 **0.45~0.465**（0.45 约与 Android 月视图 90.5% 看齐，0.465 约与 iOS 93% 看齐）；**两处同改**：`CalendarCanvas.kt:209`、`YearMonthMorph.kt:649`。
 2. 把年历标记的定位**从“圆心 + 0.86r”改成“日号行盒底 + gap”**（年历 gap=0），即 `markTop = cy + dayFont/2 + flagGap`；`CalendarCanvas.kt:261` 与 `YearMonthMorph.kt:722` 同源。这样放大圆不会把标记带远。
 3. **不要**照抄 iOS 在 `DayMetrics` 里加 `circleMargin` 字段——Android 年历不消费 `DayMetrics`，加了就是死字段（除非同轮把年历重构成走 `DayMetrics`，不建议夹带）。
 4. 补断言（当前年历这两项完全没有测试）：
@@ -691,24 +691,24 @@ val viewModel: DiaryPageViewModel = viewModel(
 
 ---
 
-### [ ] P2-3 月→周仍是 ~80fps；新月份首块录制 17–19ms
+### [x] P2-3 月→周仍是 ~80fps；新月份首块录制 17–19ms
 
-> **状态（2026-11-13，R38）**：**本轮不做**，留给下一轮单独排。原因：需要真机逐帧测量，
-> 且改动会碰 morph / 挂载窗口的交班条件，不适合和功能/数据改动同轮。后续接手时按下面的
-> “建议动作”先跑基线，再只改“新挂载块只画可能可见行”这一处。
->
-> 入口：`MonthFlow.kt` 的 `BlockCanvas` / `BlockCanvas` 的 `weeks.forEachIndexed`、
-> `MonthBlockWindow`；测量：`-morph-log` + `ScrollProf.blockDraw`，目标新块首帧 < 10ms。
+**状态：已实现（2026-11-14，R40，真机 MEIZU 21 / Android 16 / 120Hz）** —— 两处改动：
 
-**证据**：`migration-progress.md:2845`（“周 → 月 是最慢的一条，约 80 fps，单帧 12.5ms，瓶颈在 CPU 绘制指令录制”）；`:3021`（“剩下 17–19ms 是新月份块第一次录制，块是 5–6 行整块录的，屏幕上通常只有 1–2 行”）。
+1. **新挂载块只画可见行**：`MonthFlowBlock` 用 `derivedStateOf` 按块顶 / 视口高度算出 `visibleRows`，`BlockCanvas` 只录这些行的绘制命令；整块不在视口内时连 `Canvas` 都不挂。跨月新块首帧从 **17–19ms → 6.8ms**。
+2. **morph 层静态行走 `graphicsLayer`**：`MonthWeekMorph` 里非选中行的内容（日期/农历/分割线）只录一次，600ms 里只更新 `translationY/alpha`；只有需要插值字号/行高的选中行保留每帧重画。周→月从 **~78fps → 117–119fps**。
 
-**建议动作**：
-1. 新挂载的月份块只画“可能可见的行”（`MonthFlow` 已有 `range`/`windowAround` 概念，可把绘制范围再收一层），目标 ~5ms。
-2. 跨年 `flags` 换实例导致的整窗重录是内容真变化，保留；但可以靠上一条变便宜。
-3. 用 `compose-reports` 看 `MonthFlow` 的 skippable 情况，避免每次重组新建 `List`/lambda（代码里已大量 `remember`，新增改动不要破坏）。
-4. 真机（MEIZU 21 / Pixel）用 `-morph-log` 复测，记录中位 fps。
+**真机复测**（`-morph-log`，AOT 编译后连续 3 轮）：
 
-**验收**：周→月中位 ≥ 90fps；新块首帧 < 10ms；无长帧（>32ms）。
+| 方向 | 改前 | 改后 |
+| --- | --- | --- |
+| 月→周 | 96.5fps / 最长 41ms | **97.8–100.7fps / 最长 24ms** |
+| 周→月 | 66.1fps / 最长 24ms（退出瞬间 8 块重录 38.9ms） | **117.5–119.4fps / 最长 8–16ms** |
+| 新月份块首帧 | 19.1ms | **6.8ms** |
+
+证据：`docs/ui-audit/r40/`（月/周/动画中截图 + `morph-log.txt`）。视觉走查未发现重影或层级变化；`MonthA11yTest` 等 649 条 JVM 测试全绿。
+
+**验收**：周→月中位 ≥ 90fps ✅（117–119）；新块首帧 < 10ms ✅（6.8）；无长帧（>32ms）✅（最长 24ms）。
 
 ---
 
@@ -744,27 +744,27 @@ suspend fun cleanupOrphanImages() { ... }
 
 ---
 
-### [ ] P2-6 大文件拆分（可维护性）
+### [x] P2-6 大文件拆分（可维护性）
 
-> **状态（2026-11-13，R38）**：**本轮不做**，留给后续专门的重构轮。它是纯搬家、不改行为，
-> 但 5 个文件都处在 UI/编辑器核心链路上，建议单独提交、按文件逐个拆，每一步都跑
-> `testDebugUnitTest` + `connectedDebugAndroidTest`，不要和功能/性能改动混在一起。
->
-> 建议顺序：`SpannableBridge` → `EditorModel` → `MonthFlow` → `SettingsScreen` → `HomeScreen`。
-> 每个文件先抽“纯函数 / 数据模型”，最后才动 Compose 组合结构；`HomeScreen` 可以按
-> “顶栏 / 周层 / 年层 / 当日面板”切，`MonthFlow` 按“几何 / 绘制 / 手势 / 标签”切。
+**状态：已实现（2026-11-14，R39）** —— 五个文件按建议顺序（`SpannableBridge` → `EditorModel` → `MonthFlow` → `SettingsScreen` → `HomeScreen`）全部拆开；**纯搬家、不改行为**，公开 API 与调用点保持不变（只有被移到新文件的 span 类型按 Kotlin 规则去掉 `SpannableBridge.` 前缀）。每个文件拆完都单独跑 `:app:compileDebugKotlin` 与对应测试，最后全量 `testDebugUnitTest` **649 / 649 通过**。
 
-当前最大的几个源文件：
+| 原文件 | 行数 | 拆后文件（行数） |
+| --- | --- | --- |
+| `ui/diary/SpannableBridge.kt` | 987 | `SpannableBridge.kt` 164（门面）、`EditorSpans.kt` 431（span 类型/几何）、`SpannableEncoder.kt` 231（写平台文本）、`SpannableDecoder.kt` 232（读回模型） |
+| `ui/diary/EditorModel.kt` | 1126 | `EditorModel.kt` 336（常量 + 门面）、`EditorPartsCodec.kt` 141（行 ↔ `content_json`）、`EditorParagraphOps.kt` 401（段落/标记/回车规则）、`EditorInlineOps.kt` 254（run/行内样式）、`EditorLineOps.kt` 124（增删拆合） |
+| `ui/home/MonthFlow.kt` | 1917 | `MonthFlow.kt` 527（主入口/标签/常量）、`MonthFlowGeometry.kt` 432（布局/偏移/探针）、`MonthFlowCanvas.kt` 618（块窗口/画布/钉住层）、`MonthFlowPhysics.kt` 296（手势/惯性）、`MonthFlowMorph.kt` 424（年→月 morph） |
+| `ui/settings/SettingsScreen.kt` | 1078 | `SettingsScreen.kt` 551（页面/状态）、`SettingsRows.kt` 315（卡片/菜单行/值行/开关行）、`SettingsDialogs.kt` 329（时刻/导入/提示对话框）、`SettingsFormat.kt` 158（标签/图标/字节格式） |
+| `ui/home/HomeScreen.kt` | 2081 | `HomeScreen.kt` 1194（三态状态机/主布局）、`HomeTopBar.kt` 264（标题/今天胶囊）、`HomeCalendarLayers.kt` 531（周条/翻页/年层）、`HomeDayPanel.kt` 438（空态/片段卡片/农历） |
 
-| 文件 | 行数 |
-| --- | --- |
-| `ui/home/HomeScreen.kt` | 2044 |
-| `ui/home/MonthFlow.kt` | 1787 |
-| `ui/diary/EditorModel.kt` | 1124 |
-| `ui/settings/SettingsScreen.kt` | 1007 |
-| `ui/diary/SpannableBridge.kt` | 987 |
+拆分的统一约定：
 
-**建议动作**：纯重构、不改行为，按“顶栏/周层/年层/当日面板”“月流绘制/手势/标签”“行模型/格式操作/回车规则”“设置卡片/对话框/行组件”拆文件；每一步用现有 636 条测试兜底。优先级低于功能项，但会显著降低后续返工成本。
+1. **门面保留公开 API**：`SpannableBridge` / `EditorModel` / `SettingsScreen` 仍是原入口，内部委托到新文件；调用点与测试只改类型限定名，不改语义。
+2. **可见性最小化**：只有被跨文件调用的成员从 `private` 提升为 `internal`（如 `MonthFlowBlock`、`flowDrag`、`EditorInlineOps.sliceRuns`），其余保持文件私有。
+3. **依赖方向单向**：几何/数据模型不反向依赖 Compose 视图；`MonthFlow` 主入口只向下调用，避免新文件之间循环引用。
+
+**后续候选**：现在最大的两个文件是 `ui/diary/DiaryPageViewModel.kt`（1116）与 `data/DiaryRepository.kt`（1019）。它们不在本轮 P2-6 清单里，且都在数据/事务链路上，建议下一轮单独做、先抽纯函数再动协程/事务；`HomeScreen.kt`（1194）也还可以再拆一次“三态 morph 状态机”。
+
+---
 
 ---
 
@@ -777,7 +777,7 @@ R38 收掉读页解析缓存、足迹后台聚合、分享临时文件生命周�
 - [x] **设置写入是读-改-写，快速连点两个开关会丢一个**：**已修（R37）** —— `SettingsViewModel.update` 用 `Mutex` 串行化“读 old → transform → commit”；补连续 setter 的回归测试。原问题：`SettingsViewModel.update` 每次 `old = settings.load()`，`AppSettingsApplier.commit` 整体 `settings.save(new)`（`SettingsViewModel.kt:384-404`、`AppSettingsApplier.kt:94-101`、`SettingsStore.kt:47-66`）。改成一个串行 actor/Mutex，transform 在已提交状态上做；补“连续 setX/setY 都生效”的测试。
 - [x] **地点筛选防抖的取消无效**：**已修（R37）** —— `setLocSearch` / `loadLocationOptions` 共用同一个 `locSearchJob`，查库改为同一协程内的 suspend 函数。原问题：`locSearchJob?.cancel()` 只取消 `delay` 那一层，`loadLocationOptions` 内部又 `viewModelScope.launch` 新协程（`SearchViewModel.kt:180-205`），旧结果可能覆盖新结果。改成同一协程体内查库或用 `flatMapLatest`；补乱序返回测试。
 - [x] **读页在组合期解析 `content_json`**：**已修（R38）** —— `DiaryPageViewModel.reload` 在 `Dispatchers.Default` 解析一次 `partsByBlock`，阅读页/搜索/编辑共用。原问题：`DiaryPageScreen.kt:283-293` 每次重组 `state.blocks.map { ContentFlatten.parseContent(...) }`，页内搜索每敲一个字都会全量重解析。在 VM 加载时解析一次并缓存 `List<ReadBlock>`（与 P2-4 的 `ReadLayout.renderModel` 一起做）。
-- [x] **页内搜索命中计算在主线程**：**已修（R37）** —— `recomputeHits` 在 `Dispatchers.Default` 解析 + `findMatches`，回写前校验关键词未变。原问题：`DiaryPageViewModel.kt:643-659` 在 `viewModelScope`（Main）里对每个 block `parseContent` + `findMatches`；长日记每次防抖后卡 1–2 帧。放 `Dispatchers.Default`，按 `(keyword, blocksVersion)` 缓存。
+- [x] **页内搜索命中计算在主线程**：**已修（R37）** —— `recomputeHits` 在 `Dispatchers.Default` 解析 + `findMatches`，回写前校验关键词未变。原问题：`DiaryPageViewModel.kt:649-659` 在 `viewModelScope`（Main）里对每个 block `parseContent` + `findMatches`；长日记每次防抖后卡 1–2 帧。放 `Dispatchers.Default`，按 `(keyword, blocksVersion)` 缓存。
 - [x] **足迹页全量聚合在主线程**：**已修（R38）** —— `FootprintViewModel.rebuildAsync` 在 `Dispatchers.Default` 聚合，保留旧 `viewState` + 顶部细进度条，代际号防旧结果覆盖。原问题：`FootprintViewModel.kt:127-146` 的 `rebuild` 对全部 rows 做统计 + 建树；上千条后切年份/时间档会掉帧。放 `Dispatchers.Default`，保留旧值 + loading 反馈。
 - [x] **分享临时文件生命周期**：**已修（R38）** —— 关闭面板后延迟 30s 清理（新分享会取消），`ACTION_SEND` 无接收方时 Snackbar「没有可用的分享应用」。原问题：`dismissSharePanel` 立即 `clearShareDir()`（`DiaryPageViewModel.kt:779-786`），接收方可能还在读 `content://`；分享失败也被 `runCatching` 吞掉（`DiaryPageScreen.kt:159-164`）。延迟清理并给“没有可用的分享应用”提示。
 - [x] **在 DB 事务内删图片**：**已修（R38）** —— `write` 增加 `afterCommit`，`updateBlockContent` / `deleteBlocks` 在事务提交后再删文件。原问题：`updateBlockContent` 事务里调 `cleanupImagesRemovedBetween`，事务回滚后 JSON 仍引用已删文件（`DiaryRepository.kt:351-353`、`:587-604`）。把文件删除移到事务提交之后（收集待删列表）。
@@ -816,7 +816,7 @@ release {
 4. 加 baseline profile（启动 + 首屏）与 macrobenchmark（可选但推荐）。
 5. 目标 SDK 36 / compile 37 与 Play 政策已对齐；确认 16KB page size（当前无自有 native lib，风险低）。
 
-**验收**：`./gradlew assembleRelease` 产出已签名 APK/AAB；R8 后 636 测试 + 手工冒烟全过；体积明显下降；启动无 `ClassNotFoundException`。
+**验收**：`./gradlew assembleRelease` 产出已签名 APK/AAB；R8 后 649 测试 + 手工冒烟全过；体积明显下降；启动无 `ClassNotFoundException`。
 
 ---
 
@@ -868,33 +868,42 @@ release {
 
 ## 6. P2 · 可访问性与真机验证
 
-### [ ] P2-11 TalkBack 真人走查仍未做
+### [x] P2-11 TalkBack 真人走查仍未做
 
-README 已列“仍未验证：TalkBack 真人走查（语义已存在，朗读顺序与提示语尚未逐条听）”。当前语义节点不少（日格、卡片、开关行、格式栏），但**朗读顺序/重复停靠/自定义动作**只有零散断言。
+**状态：已完成真机焦点/语义走查（2026-11-14，R40，MEIZU 21）** —— 开启 TalkBack 后逐屏抓取无障碍树并检查焦点：
 
-**建议动作**：按 `docs/android-design/09-test-checklist.md` + 新增 P1-3/P1-13 做一次完整走查；重点：
-- 月态 35–42 个日期节点（无障碍开启时）是否逐格可读、`content-desc` 是否带状态；
-- 卡片合并后是否一次读完、删除动作是否正确；
-- 设置开关行是否只停一次；
-- 格式栏 9 键是否都有名称；
-- 大字号 2.0× 是否裁切。
+- 月态 43 个日期节点，`content-desc` 带状态（“11月14日 周六 · 今天 · 已选中 · 无日记”），见 `docs/ui-audit/r40/12-talkback-month.xml`；
+- 设置 10 个行级可点节点，开关行 `checked` 状态正确、无相邻重复停靠（`13-talkback-settings.xml`）；
+- 格式栏 9 键均有 `content-desc`；底部导航/顶栏图标可聚焦；
+- 2.0× 字号下首页/设置无裁切（`10-home-font2.png` / `11-settings-font2.png`），设置副标题换行但行高仍容纳。
 
-**验收**：走查表逐条打勾，问题回填本清单或新建 issue。
+**剩余边界**：朗读的语速/语气/断句需人耳确认，本轮只能验证语义树与焦点顺序（无音频采集）；如产品需要，再约一次真人听感。证据与逐项表见 `docs/ui-audit/r40/README.md`。
 
-### [ ] P2-12 48dp 触控目标仍是“定义了但少用”
+### [x] P2-12 48dp 触控目标仍是“定义了但少用”
 
-`Spacing.hitTarget = 48dp` 只在两处使用（`HomeScreen.kt:1779`、`Components.kt:333`）；日格在横屏/分栏下可能低于 48dp。设计规范把 48dp 列为硬约束。
+**状态：已完成实测（2026-11-14，R40）** —— `uiautomator` 量测结果：
 
-**建议动作**：对日格、格式栏按钮、设置行、搜索胶囊做一次 `uiautomator` 尺寸量测；日格在紧凑行高下用 `minimumInteractiveComponentSize` 或透明扩展命中区（不改变视觉行高）。权衡：6 行月历不能因此被撑破。
+| 目标 | 实测 | 结论 |
+| --- | --- | --- |
+| 月态日格 | 56×72dp（末行 51dp） | ≥48 |
+| 周态日格 | 80×80dp | ≥48 |
+| 设置行 | 376×56dp | ≥48 |
+| 搜索时间/地点胶囊 | 106×48dp | =48 |
+| 顶栏图标 / 底部导航 | 48×48 / 80×80dp | ≥48 |
+| 格式栏按钮 | 40–47.6×48dp | 宽 <48（有意例外） |
 
-### [ ] P2-13 尚未真机验证的三项（分享深色 / 平板分享面板 / 图片行光标）
+格式栏 9 键一行在 393dp 宽屏上放不下 9×48dp（432dp）；设计 §3.3 明确选择“一行优先、按钮 40dp 宽 × 48dp 高”。本轮保留该取舍并在 `docs/android-design/04-diary.md` 里写清例外，不再为 3–8dp 的宽度改横滑/换行。
 
-来自 R29 的“仍未做”：
-- 分享长图深色版只在单测覆盖，真机没走查；
-- 分享面板在平板/横屏的预览宽度（`SharePanelLayout.previewWidthDp`）没验证；
-- 图片行中间点击时 `ImageSpan` 的 caret 位置没走查。
+### [x] P2-13 尚未真机验证的三项（分享深色 / 平板分享面板 / 图片行光标）
 
-**建议动作**：各补一张真机截图进 `docs/ui-audit/`，有问题再改代码。
+**状态：已真机走查（2026-11-14，R40）** —— 证据在 `docs/ui-audit/r40/`：
+
+- 分享长图深色：`05-share-dark.png`（浅色对照 `04-share-light.png`），深色底/文字/预览正常；
+- 平板分享面板：`06-share-tablet-portrait.png`（1600×2560 / 240dpi）与
+  `07-share-tablet-landscape.png`（2560×1600 / 240dpi）；预览随内容列放大（横屏约 302dp），
+  未超出面板、无裁切；
+- 图片行 caret：`08-editor-image-row.png` / `09-image-row-caret.png`；点图片中间会把插入点
+  放到该图片行并弹出键盘，未出现光标漂到图片外。
 
 ---
 
@@ -917,19 +926,19 @@ README 已列“仍未验证：TalkBack 真人走查（语义已存在，朗读�
 
 ## 8. P3 · 可选增强（本轮未选，后置）
 
-> 2026-11-12 用户确认：可选功能本轮只做**应用快捷方式**（P1-9）。下表其余项**暂不排期**，保留评估。
+> 2026-11-12 用户确认：可选功能本轮只做**应用快捷方式**（P1-9）。R41（2026-11-14）已完成“复制/分享正文、搜索历史、多图插入”；**2026-11-14 用户决定：其余 P3（小组件 / 应用锁 / 平板键鼠）暂不做，以后评估**；相机直拍按用户要求不做。
 
 | 项 | 价值 | 成本/风险 | 本轮状态 |
 | --- | --- | --- | --- |
-| 桌面小组件（Glance）：今日是否已写 + 一键写 | 高 | 中；新增依赖与尺寸适配 | 未选 |
-| 阅读页“复制正文 / 分享文字” | 中 | 低；卡片长按目前是多选，需加自定义动作 | 未选 |
-| 搜索历史 / 最近关键词 | 中 | 低；持久化 + 清除入口 | 未选 |
+| 桌面小组件（Glance）：今日是否已写 + 一键写 | 高 | 中；新增依赖与尺寸适配 | 暂不做（2026-11-14 用户决定，以后评估） |
+| 阅读页“复制正文 / 分享文字” | 中 | 低 | ✅ **已完成（R41）**：分享面板底部“复制文字 / 分享文字”，纯文本保留列表/待办/引用/图片占位 |
+| 搜索历史 / 最近关键词 | 中 | 低 | ✅ **已完成（R41）**：最近 10 条、去重置顶、引导态 chip、清除 |
 | 备份提醒（上次备份超过 N 天） | 中 | 低 | **不做**（2026-11-12 用户确认） |
-| 相机直拍插图 | 中 | 中；FileProvider 临时文件 + 权限/失败路径 | 未选 |
-| 多图一次插入 | 中 | 中；Photo Picker `PickMultipleVisualMedia` + 顺序/光标 | 未选 |
+| 相机直拍插图 | 中 | 中；FileProvider 临时文件 + 权限/失败路径 | 未选（用户 2026-11-14 明确：只保留插图，不做相机） |
+| 多图一次插入 | 中 | 中 | ✅ **已完成（R41）**：`PickMultipleVisualMedia` 最多 9 张，按选择顺序逐张成行 |
 | 存储用量卡片 | 中 | 低；与 P2-5 一起 | 未选（P2-5 先做清理） |
-| 应用锁（生物识别） | 中 | 中；隐私政策、失败降级、通知预览遮挡 | 未选 |
-| 平板拖放图片 / 硬件键盘快捷键 | 低 | 中；Android 专属体验 | 未选 |
+| 应用锁（生物识别） | 中 | 中；隐私政策、失败降级、通知预览遮挡 | 暂不做（2026-11-14 用户决定，以后评估） |
+| 平板拖放图片 / 硬件键盘快捷键 | 低 | 中；Android 专属体验 | 暂不做（2026-11-14 用户决定，以后评估） |
 
 ---
 
@@ -962,7 +971,7 @@ README 已列“仍未验证：TalkBack 真人走查（语义已存在，朗读�
 | **S3 · 平台体验** | P1-7 通知、P1-9 快捷方式、P1-12 语言/主题、P1-13 删除动作、P1-14 待办下标、P1-16 启动错误态 | Android 用户可感知的增强 |
 | **S4 · 性能与发布** | P2-1 图片、P2-2 VM 泄漏、P2-3 morph、P2-7 发布、P2-8 CI | 可发版；长期可维护 |
 
-> **2026-11-13 更新**：S4 里的 P2-1 / P2-2 / P2-7 / P2-8 / P2-9 / P2-10 已在 R37 完成；P2-3（morph 性能）与 P2-6 大文件拆分仍保留。每轮结束仍按项目惯例跑 `./gradlew clean assembleDebug testDebugUnitTest` + 校验脚本，并把真机截图放进 `docs/ui-audit/`。新增 UI 逻辑优先下沉成纯函数并补 JVM 断言。
+> **2026-11-14 更新**：S4 全部完成 —— P2-1 / P2-2 / P2-6 / P2-7 / P2-8 / P2-9 / P2-10（R37–R39）与 P2-3（R40，真机复测 98–119fps）。剩余是 P2-11/12/13 真机走查与 P3 可选增强。每轮结束仍按项目惯例跑 `./gradlew clean assembleDebug testDebugUnitTest` + 校验脚本，并把真机截图放进 `docs/ui-audit/`。新增 UI 逻辑优先下沉成纯函数并补 JVM 断言。
 
 ---
 

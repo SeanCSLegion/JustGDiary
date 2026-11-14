@@ -20,10 +20,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,9 +71,12 @@ fun ShareSheet(
     visible: Boolean,
     rendering: Boolean,
     imageFile: File?,
+    plainText: String,
     onDismiss: () -> Unit,
     onShare: () -> Unit,
     onSaveToGallery: () -> Unit,
+    onCopyText: () -> Unit,
+    onShareText: () -> Unit,
 ) {
     if (!visible) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -85,8 +87,11 @@ fun ShareSheet(
         ShareSheetContent(
             rendering = rendering,
             imageFile = imageFile,
+            plainText = plainText,
             onShare = onShare,
             onSaveToGallery = onSaveToGallery,
+            onCopyText = onCopyText,
+            onShareText = onShareText,
         )
     }
 }
@@ -96,8 +101,11 @@ fun ShareSheet(
 fun ShareSheetContent(
     rendering: Boolean,
     imageFile: File?,
+    plainText: String,
     onShare: () -> Unit,
     onSaveToGallery: () -> Unit,
+    onCopyText: () -> Unit = {},
+    onShareText: () -> Unit = {},
 ) {
     val previewSize = SharePanelLayout.previewWidthDp(LocalAdaptiveLayout.current)
     val density = LocalDensity.current
@@ -161,6 +169,19 @@ fun ShareSheetContent(
             }
             TextButton(onClick = onSaveToGallery, enabled = preview != null && !rendering) {
                 Text(stringResource(R.string.share_action_save))
+            }
+        }
+
+        // 纯文字的两个动作不依赖长图渲染：分享图失败/还没好时也能用。
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.card, Alignment.CenterHorizontally),
+        ) {
+            TextButton(onClick = onCopyText, enabled = plainText.isNotBlank()) {
+                Text(stringResource(R.string.share_action_copy_text))
+            }
+            TextButton(onClick = onShareText, enabled = plainText.isNotBlank()) {
+                Text(stringResource(R.string.share_action_share_text))
             }
         }
     }

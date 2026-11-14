@@ -28,6 +28,15 @@ object ShareIntents {
         return Intent.createChooser(send, chooserTitle)
     }
 
+    /** 分享纯文字（[Intent.EXTRA_TEXT]）。 */
+    fun shareText(context: Context, text: String, chooserTitle: String): Intent {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = MIME_TEXT
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        return Intent.createChooser(send, chooserTitle)
+    }
+
     /** 取得可对外授权的 `content://` URI。 */
     fun uriFor(context: Context, file: File) =
         FileProvider.getUriForFile(context, authorityOf(context), file)
@@ -37,4 +46,5 @@ object ShareIntents {
 
     const val AUTHORITY_SUFFIX = ".fileprovider"
     const val MIME_PNG = "image/png"
+    const val MIME_TEXT = "text/plain"
 }

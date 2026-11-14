@@ -243,7 +243,7 @@ class EditorEnterKeyTest {
     /**
      * 末尾那个**空的引用行**（文档里还有别的行）上打字：整条链路跑通 ——
      *
-     * 它在平台文本里靠**补位换行**撑住段落样式（[SpannableBridge.PhantomLineSpan]），
+     * 它在平台文本里靠**补位换行**撑住段落样式（[PhantomLineSpan]），
      * 打字之后补位行要被丢掉、模型不多不少、光标停在刚打的字后面。
      */
     @Test

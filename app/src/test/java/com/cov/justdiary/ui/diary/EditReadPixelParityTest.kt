@@ -3,14 +3,12 @@ package com.cov.justdiary.ui.diary
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.text.SpannableStringBuilder
 import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -53,7 +51,7 @@ class EditReadPixelParityTest {
 
     private fun editorBitmap(
         width: Int,
-        metrics: SpannableBridge.BlockMetrics,
+        metrics: BlockMetrics,
         backgroundColor: Int,
         textColor: Int,
     ): Bitmap {
@@ -86,7 +84,7 @@ class EditReadPixelParityTest {
 
     @Test
     fun `body paragraph renders the same pixels in editor and reader`() {
-        var bodyMetrics: SpannableBridge.BlockMetrics? = null
+        var bodyMetrics: BlockMetrics? = null
         var surfaceArgb = Color.WHITE
         var textArgb = Color.BLACK
 
@@ -97,7 +95,7 @@ class EditReadPixelParityTest {
                 val density = LocalDensity.current
                 val bodyStyle = EditorTypography.textStyleFor(ContentPartStyle.body)
                 bodyMetrics = with(density) {
-                    SpannableBridge.BlockMetrics(
+                    BlockMetrics(
                         textSizePx = bodyStyle.fontSize.toPx().toInt(),
                         lineHeightPx = bodyStyle.lineHeight.toPx().toInt(),
                         paragraphSpacingPx = 0,

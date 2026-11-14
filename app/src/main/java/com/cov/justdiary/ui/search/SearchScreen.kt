@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -41,11 +40,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -117,6 +116,10 @@ fun SearchScreen(
     appLanguage: String = AppSettings.LANGUAGE_SYSTEM,
     onKeywordChange: (String) -> Unit = {},
     onCommitKeyword: () -> Unit = {},
+    /** 最近搜索（最新在前）；点 chip 直接搜索，右侧可清空。 */
+    history: List<String> = emptyList(),
+    onSelectHistory: (String) -> Unit = {},
+    onClearHistory: () -> Unit = {},
     onRemoveKeyword: (String) -> Unit = {},
     onClearAll: () -> Unit = {},
     onTimeKindChange: (TimeRangeKind) -> Unit = {},
@@ -342,12 +345,24 @@ fun SearchScreen(
                 )
 
                 // ④ 未输入条件：引导态（不是"没结果"）
-                state.isEmpty && !state.hasAnyCondition -> EmptyState(
-                    icon = Icons.Filled.Search,
-                    text = START_TITLE,
-                    hint = START_HINT,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+                state.isEmpty && !state.hasAnyCondition -> Column(
+                    modifier = Modifier.fillMaxSize().padding(top = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (history.isNotEmpty()) {
+                        RecentSearches(
+                            history = history,
+                            onSelect = onSelectHistory,
+                            onClear = onClearHistory,
+                            modifier = Modifier.padding(horizontal = Spacing.page),
+                        )
+                    }
+                    EmptyState(
+                        icon = Icons.Filled.Search,
+                        text = START_TITLE,
+                        hint = START_HINT,
+                    )
+                }
 
                 // ⑤ 有条件但无结果：必须给一个"清除全部条件"的出口
                 state.isEmpty -> EmptyState(
@@ -835,3 +850,44 @@ private val LABEL_LOCATION: String
     @Composable get() = stringResource(R.string.search_loc_label)
 private val CANCEL_LABEL: String
     @Composable get() = stringResource(R.string.cancel)
+
+
+/** 最近搜索：标题 + 清除 + 一排可点的词。只在“无条件”引导态出现。 */
+@Composable
+private fun RecentSearches(
+    history: List<String>,
+    onSelect: (String) -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.search_history_title),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClear) {
+                Text(stringResource(R.string.search_history_clear))
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            history.forEach { word ->
+                FilterChip(
+                    selected = false,
+                    onClick = { onSelect(word) },
+                    label = { Text(word) },
+                )
+            }
+        }
+    }
+}

@@ -32,7 +32,7 @@ import org.robolectric.annotation.GraphicsMode
  *    光标在 8 张连拍里一张都找不到，而正文 / 大标题行同样的操作 3/8 张能找到）。
  *
  * 另外钉住"横向内边距是左侧缩进"这个平台限制（`Spannable` 没有右边距 span，见
- * [SpannableBridge.QuoteStyle] 的说明）。
+ * [QuoteStyle] 的说明）。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -40,13 +40,13 @@ import org.robolectric.annotation.GraphicsMode
 class EditorQuoteRenderTest {
 
     private val boxColor = Color.rgb(0xC0, 0x20, 0x20)
-    private val style = SpannableBridge.QuoteStyle(
+    private val style = QuoteStyle(
         backgroundColor = boxColor,
         cornerRadiusPx = 4f,
         textInsetPx = 10,
         paddingVerticalPx = 6,
     )
-    private val metrics = SpannableBridge.BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0)
+    private val metrics = BlockMetrics(textSizePx = 40, lineHeightPx = 50, paragraphSpacingPx = 0)
 
     private val width = 400
     private val height = 600
@@ -67,8 +67,8 @@ class EditorQuoteRenderTest {
      */
     private fun render(
         lines: List<EditorLine>,
-        quoteStyle: SpannableBridge.QuoteStyle? = style,
-        metricsFor: ((String) -> SpannableBridge.BlockMetrics?)? = { metrics },
+        quoteStyle: QuoteStyle? = style,
+        metricsFor: ((String) -> BlockMetrics?)? = { metrics },
     ): Rendered {
         val view = DiaryEditText(RuntimeEnvironment.getApplication())
         view.quoteStyle = quoteStyle
@@ -194,7 +194,7 @@ class EditorQuoteRenderTest {
      * 末尾那个**空的引用行**也要有行首内缩 —— 否则光标停在列的最左边
      * （用户 2026-10-01 报的"引用时光标位置不对"），一打字又往右跳 16dp。
      *
-     * 手法：模型有两行以上时给它补一个终止换行（[SpannableBridge.PhantomLineSpan]），
+     * 手法：模型有两行以上时给它补一个终止换行（[PhantomLineSpan]），
      * 它因此是一段"有字符的段落"，`LeadingMarginSpan` 照常生效。
      */
     @Test

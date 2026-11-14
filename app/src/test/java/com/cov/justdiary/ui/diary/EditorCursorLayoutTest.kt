@@ -38,11 +38,11 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorCursorLayoutTest {
 
-    private val body = SpannableBridge.BlockMetrics(textSizePx = 48, lineHeightPx = 60, paragraphSpacingPx = 0)
-    private val heading = SpannableBridge.BlockMetrics(textSizePx = 66, lineHeightPx = 84, paragraphSpacingPx = 0)
-    private val quote = SpannableBridge.BlockMetrics(textSizePx = 42, lineHeightPx = 54, paragraphSpacingPx = 0)
+    private val body = BlockMetrics(textSizePx = 48, lineHeightPx = 60, paragraphSpacingPx = 0)
+    private val heading = BlockMetrics(textSizePx = 66, lineHeightPx = 84, paragraphSpacingPx = 0)
+    private val quote = BlockMetrics(textSizePx = 42, lineHeightPx = 54, paragraphSpacingPx = 0)
 
-    private fun metrics(style: String): SpannableBridge.BlockMetrics = when (style) {
+    private fun metrics(style: String): BlockMetrics = when (style) {
         ContentPartStyle.title, ContentPartStyle.heading -> heading
         ContentPartStyle.quote -> quote
         else -> body
@@ -52,8 +52,8 @@ class EditorCursorLayoutTest {
     private fun layoutOf(
         lines: List<EditorLine>,
         width: Int = 3000,
-        metricsOverride: SpannableBridge.BlockMetrics? = null,
-        quoteStyle: SpannableBridge.QuoteStyle? = null,
+        metricsOverride: BlockMetrics? = null,
+        quoteStyle: QuoteStyle? = null,
     ): StaticLayout {
         val spanned = SpannableBridge.toSpannable(
             lines,
@@ -191,7 +191,7 @@ class EditorCursorLayoutTest {
     // ------------------------------------------------------------------ 引用段的**光标 x**（用户 2026-10-01 报的"光标位置不对"）
 
     private val inset = 48
-    private val quoteStyle = SpannableBridge.QuoteStyle(
+    private val quoteStyle = QuoteStyle(
         backgroundColor = 0,
         cornerRadiusPx = 0f,
         textInsetPx = inset,
@@ -207,7 +207,7 @@ class EditorCursorLayoutTest {
      *
      * 平台对"文档末尾那个空段落"是不认段落 span 的
      * （`Layout.getParagraphSpans`：`start == end && start > 0` 直接返回空数组，`text/Layout.java:3489`），
-     * 所以文档里有别的行时，末尾那个空的引用行必须补一个终止换行（[SpannableBridge.PhantomLineSpan]）
+     * 所以文档里有别的行时，末尾那个空的引用行必须补一个终止换行（[PhantomLineSpan]）
      * 才挂得上 `LeadingMarginSpan` —— 真机实测：不补就是 x=77（列最左边），补了才是 120（内缩处）。
      */
     @Test

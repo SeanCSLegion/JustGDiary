@@ -31,7 +31,7 @@ import com.cov.justdiary.ui.theme.EditorTypography
  * 列表 / 待办的一行：**标记槽 + 间距 + 正文**。
  *
  * 阅读态（`DiaryReadScreen`）与首页日面板预览（`HomeScreen`）共用这一个 composable，
- * 于是两处不可能各画各的；编辑态那份在 `SpannableBridge.MarkerSpan`（Canvas 手绘），
+ * 于是两处不可能各画各的；编辑态那份在 `MarkerSpan`（Canvas 手绘），
  * 三处共用 [BlockGeometry] 的几何与 M3 语义色 —— "同一行在哪儿都长一样"。
  *
  * 换行后的第二行同样从 [BlockGeometry.MarkerIndent] 起（Row 布局天然如此），
@@ -77,7 +77,7 @@ fun MarkerRow(
  * 待办勾选框。尺寸全部对 **M3 `CheckboxTokens`**：容器 18dp、圆角 2dp、
  * 未选描边 2dp / `onSurfaceVariant`、选中 `primary` 实底 + `onPrimary` 对勾、图标 18dp。
  *
- * 编辑态那边是同一套数（`SpannableBridge.MarkerSpan.drawCheckbox` 手绘）。
+ * 编辑态那边是同一套数（`MarkerSpan.drawCheckbox` 手绘）。
  */
 @Composable
 private fun MarkerCheckbox(done: Boolean) {
@@ -105,7 +105,7 @@ private fun MarkerCheckbox(done: Boolean) {
 /**
  * 标记图形相对首行顶部的下沉量：**在首行行盒里垂直居中**。
  *
- * 与编辑态同一条规则（`SpannableBridge.MarkerSpan` 用 `(top + bottom) / 2` 落笔），
+ * 与编辑态同一条规则（`MarkerSpan` 用 `(top + bottom) / 2` 落笔），
  * 三种界面上的圆点 / 勾选框因此都压在首行文字的视觉中线上；行高取正文的 M3 角色。
  */
 @Composable
