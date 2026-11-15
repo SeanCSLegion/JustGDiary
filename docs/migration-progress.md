@@ -4556,3 +4556,14 @@ P2-3 / P2-11 / P2-12 / P2-13 全部在真机上测完。
 - `./gradlew assembleDebug`：通过；模拟器（Pixel_10_Pro）逐条对比：
   列表项与引用的换行与阅读态一致、编辑态图片圆角/留白与阅读态一致、底部写按钮可用。
 - `python3 tools/verify_docs.py`：需在测试结果就位后跑（见下）。
+
+### 5. 发布包（1.1 / 2）
+
+- `version.properties`：`VERSION_CODE=2`、`VERSION_NAME=1.1`（延续 `v1.0` 的语义化版本）。
+- 签名 release APK：`app/build/outputs/apk/release/app-release.apk`，4.1MB，
+  SHA-256 `c30cc2cb124a008827748de79b321d91bdb4643126d1870f66eb5c8585412c98`
+  （v2 签名，证书 `CN=JustGDiary`）。
+- 签名 AAB：`app/build/outputs/bundle/release/app-release.aab`，6.0MB，
+  SHA-256 `f3fd3e3e79210301476fb782353c09f3f8de097e15ecca668474104837674be0`。
+- 模拟器（Pixel_10_Pro / API 35）安装 release APK 冒烟：启动、空态阅读页、
+  底部「写日记」按钮均正常。
