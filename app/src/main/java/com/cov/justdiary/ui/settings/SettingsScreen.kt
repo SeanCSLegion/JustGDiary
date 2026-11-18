@@ -217,7 +217,7 @@ private fun SettingsBody(
     var dayStartPickerVisible by remember { mutableStateOf(false) }
     var remindPickerVisible by remember { mutableStateOf(false) }
     val settings = state.settings
-    // 列数只随宽度变：1 列（<680dp）→ 2 列（≥680dp）→ 3 列（≥1000dp），与 iOS 一致
+    // 手机设置维持单列顺序，横屏仍可滚动浏览。
     val columns = LocalAdaptiveLayout.current.settingsColumns
 
     // ⚠️ 页头放在网格**外面**：原来它是网格里一个跨列 item，网格的 16dp contentPadding

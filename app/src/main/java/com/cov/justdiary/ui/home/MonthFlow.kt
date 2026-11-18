@@ -42,7 +42,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // ===========================================================================
-// 连续月历流（月视图：竖屏整屏 / 平板分栏左栏）
+// 连续月历流（月视图：竖屏整屏 / 横屏分栏左栏）
 //
 // **逐条移植**自 iOS `Views/Home/MonthFlow.swift`（commit fbbfb83）。
 //

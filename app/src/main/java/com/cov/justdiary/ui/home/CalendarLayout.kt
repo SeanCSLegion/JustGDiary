@@ -109,7 +109,7 @@ object CalendarLayout {
     const val MINI_LUNAR_FONT = 6f
 
     /**
-     * 竖屏 / 平板竖屏的日历最大宽度（dp）。
+     * 竖屏日历最大宽度（dp）。
      *
      * 700dp 的可用宽下 7 列每格 100dp，日号缩在中间、年份卡片会被拉成 224dp 的空盒子。
      * 640dp 对应每格 ~91dp，与 iPhone 的观感接近；分栏时改走 `masterWidth` 公式。
@@ -160,7 +160,7 @@ object CalendarLayout {
      * 月格行高的**安全上限**（dp）。
      *
      * 规范 §5.1：行高不封顶，`cellH = (区高 − 大标题槽 − 星期栏) / 6`。这个上限只在
-     * 平板竖屏这类极端比例上生效，防止一格高到 200dp 以上；**不是**给下方面板让位
+     * 极端窗口比例下生效，防止一格高到 200dp 以上；**不是**给下方面板让位
      * （首轮把它当成"要留给面板的比例"，方向就错了 —— 面板只在周态与横屏分栏里出现）。
      */
     const val SANITY_MAX_CELL_H = 200f
@@ -288,7 +288,7 @@ object CalendarLayout {
      *
      * 首轮把行高封顶在 96dp 的后果是：6 行只占 576dp，屏下方空出 270dp（实测缺陷 D5）。
      *
-     * [SANITY_MAX_CELL_H] 只在平板竖屏这类极端比例上生效，**不是**给下方面板让位。
+     * [SANITY_MAX_CELL_H] 只在极端窗口比例下生效，**不是**给下方面板让位。
      * 上下界恒定满足 `MIN_CELL_H < SANITY_MAX_CELL_H`，`coerceIn` 的区间永不反转。
      */
     fun cellHeightFor(

@@ -36,7 +36,7 @@
 >
 > 🚀 **2026-11-14：P2 全部收口（R40）** —— 真机 MEIZU 21 复测：月→周 **98–101fps**、
 > 周→月 **118fps**、新月份块首帧 **6.8ms**；TalkBack 焦点/语义、48dp 触控目标、
-> 分享深色/平板/图片行三项视觉走查全部完成，证据在 `docs/ui-audit/r40/`。
+> 分享深色与图片行视觉走查全部完成（平板记录为历史验收），证据在 `docs/ui-audit/r40/`。
 >
 > ✨ **2026-11-14：P3 第一批（R41）** —— 阅读页分享面板新增“复制文字 / 分享文字”，
 > 搜索页新增“最近搜索”（最多 10 条、可清除），编辑器图片入口支持一次选多张
@@ -67,24 +67,27 @@
 > [`docs/research-compose-rich-text-apis.md`](docs/research-compose-rich-text-apis.md)。
 >
 > 📐 **2026-09-26：Android 设计规范 v3 已定稿** ——
-> **[`docs/android-design/`](docs/android-design/README.md)** 是**当前唯一的权威界面规范**
+> **[`docs/architecture.md`](docs/architecture.md) 与 [`docs/screens/`](docs/screens/) 是当前架构与逐屏规范**
 > （取代 `docs/design-spec.md` 与 `docs/ui-design-plan.md` v2；v2 的 8 处自相矛盾已在
 > [README §5](docs/android-design/README.md) 逐条裁决）。
 > 依据是 iOS 最新代码（commit `0b07050`）的逐行分析，IOS 侧证据在 `docs/ios-reference/v3-*.md`。
 > 三条前提：**视觉 = Material 3 / Material You**、**层级与交互对齐 iOS**、
-> **手机锁竖屏、横屏只在平板上出现**。
-> 逐屏设计稿（含横屏与深色）见 **[`docs/android-design/mockups/`](docs/android-design/mockups/index.html)**；
+> **手机竖屏与横屏均支持，包含折叠屏窗口变化；不维护平板专属布局**。
+> 架构、各页面功能/交互说明见 **[`docs/architecture.md`](docs/architecture.md)**；横屏与折叠屏约定见 [`docs/landscape-and-foldables.md`](docs/landscape-and-foldables.md)。逐屏设计稿见 **[`docs/android-design/mockups/`](docs/android-design/mockups/index.html)**；
 > 差距清单与实施批次见 [`docs/android-design/07-ios-map-and-plan.md`](docs/android-design/07-ios-map-and-plan.md)。
 
 ## 关键约定
+
+当前对齐版本：Android **1.1 (2)**，与 iOS 一致，版本来源见 [`version.properties`](version.properties)。
+
 
 | 项目 | 约定 |
 | --- | --- |
 | 应用包名（applicationId） | `com.cov.justdiary` |
 | 与 iOS 版的关系 | 包名与 iOS 版**完全一致**；debug 也**不加** `applicationIdSuffix` |
 | minSdk / targetSdk / compileSdk | 33 / 36 / 37 |
-| 设计语言 | **Material 3 + 动态取色（Material You）+ 原生自适应导航**；不模仿 iOS 的 Liquid Glass，界面按 Google 规范重新设计，只对齐功能、交互与动画（详见 [`docs/android-design/01-design-system.md`](docs/android-design/01-design-system.md)） |
-| 方向 | **手机锁竖屏**（`sw < 600dp` → `SCREEN_ORIENTATION_PORTRAIT`）；**平板允许横竖屏**（`sw ≥ 600dp` → `FULL_SENSOR`）。横屏界面只是平板设计 |
+| 设计语言 | **Material 3 + 动态取色（Material You）+ 底部 NavigationBar**；不模仿 iOS 的 Liquid Glass，界面按 Google 规范重新设计，只对齐功能、交互与动画（详见 [`docs/android-design/01-design-system.md`](docs/android-design/01-design-system.md)） |
+| 方向 | 手机竖屏与横屏均支持；布局按窗口宽高与安全区自适应，不按设备类别分支 |
 | 第三方 UI 库 | **零**（不引入任何玻璃/模糊库；柱状图等自绘） |
 | 默认分支 | `main` |
 

@@ -101,7 +101,7 @@ internal fun YearLayer(
         zodiacLabel = dateFormats?.yearZodiac(year).orEmpty(),
         modifier = Modifier
             // ⚠️ 必须与月历用**同一个限宽**：原来这里是 `fillMaxWidth()`，只有月历层被限到
-            // `calendarW`。平板竖屏下年历会拿到 ~703dp，卡片被拉成 ~220dp 的空盒，
+            // `calendarW`。宽窗口下年历会拿到 ~703dp，卡片被拉成 ~220dp 的空盒，
             // 而且年历与月历横向错位 ~31dp —— morph 的锚点也就对不上了（规范 §2.2/§5.2）。
             .width(yearWidth.dp)
             .height(yearHeight.dp)
@@ -261,7 +261,7 @@ internal fun PagerViewport(
             .height(bandH.dp)
             .clipToBounds(),
         // ⚠️ 每一页都要**自己居中**：日历与年历都限宽 `min(640, 内容宽)`，
-        // 而这里的 Box 是整宽的 —— 少了 `TopCenter`，宽屏（平板竖屏）上日历会贴左边，
+        // 而这里的 Box 是整宽的 —— 少了 `TopCenter`，宽屏上日历会贴左边，
         // 右边空出一大块（实测回归：包了这一层之后丢的）。
         contentAlignment = Alignment.TopCenter,
     ) {

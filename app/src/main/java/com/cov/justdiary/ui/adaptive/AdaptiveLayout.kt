@@ -27,12 +27,11 @@ import kotlin.math.roundToInt
  *
  * | 用途 | 阈值 | 出处 |
  * | --- | --- | --- |
- * | 主导航形态 | `<600dp` 底栏 / `≥600dp` 侧栏 | Material 3 窗口尺寸类（决策 Q10） |
- * | 内容分栏与列数 | `<700` / `700–999` / `≥1000dp` | iOS `AdaptiveLayout` 阈值原样保留（决策 Q17） |
+ * | 主导航形态 | 固定为手机底栏 | Material 3 NavigationBar |
  * | 首页左右分栏 | 内容宽 `≥548.5dp` **且** 宽 > 高 | `splitsMasterDetail`（竖屏够宽也保持年/月/周三态 morph） |
  *
  * 548.5 = 2×16(页边距) + 16.5(栏间距 + 0.5 分隔线) + 260(主栏最窄) + 240(详情栏最窄)。
- * 这是 iOS 的当前值（v2 文档里的 700 是旧值，已作废，见设计规范 README 裁决 #7）。
+ * 这是 iOS 的当前值；仅在横屏且窗口宽度满足条件时启用分栏。
  *
  * 全部是纯计算，因此可以在 JVM 上把临界值逐条断言（见 `AdaptiveLayoutTest`）。
  */
@@ -48,18 +47,12 @@ data class AdaptiveLayout(
     /**
      * 可用于放内容、且不会被系统占位吃掉的宽度。
      *
-     * 要扣三样：左右安全区（横屏时常不等）、以及 **Rail 形态下的导航栏与它右侧的分隔线**。
-     *
-     * ⚠️ 原来只扣了安全区。于是 600–680dp 宽的横屏窗口会算出 `contentWidth ≥ 548.5`
-     * 而**实际内容宽只有 ~503dp**，错误地进入分栏、详情栏还不足 240dp。
-     * 81 = M3 `NavigationRail` 的默认宽 80dp + 1dp `VerticalDivider`（已在
-     * 2560×1600@320dpi 的平板上实测：栏占 0–80dp、分隔线 80–81dp）。
+     * 扣除左右安全区（横屏时常不等）。主导航固定使用底栏。
      */
     val contentWidth: Float
         get() = max(
             0f,
-            width - max(0f, safeLeading) - max(0f, safeTrailing) -
-                if (navForm == NavForm.Rail) NAV_RAIL_TOTAL_WIDTH else 0f,
+            width - max(0f, safeLeading) - max(0f, safeTrailing),
         )
 
     /**
@@ -75,27 +68,13 @@ data class AdaptiveLayout(
      *
      * 7 列每格至少 ~37dp 才好点，因此取"内容宽的 46%"并夹在 260…440 之间 ——
      * 更宽只是把格子拉大，不会让内容更好读。iOS 在 750dp 内容宽下得到 345dp，
-     * 与设计稿一致；Android 内容宽更大时按同一公式放大（平板横屏到 440 封顶）。
+     * 与设计稿一致；Android 内容宽更大时按同一公式放大（宽屏到 440 封顶）。
      */
     val masterWidth: Float
         get() = min(MASTER_MAX_WIDTH, max(MASTER_MIN_WIDTH, (contentWidth * MASTER_WIDTH_RATIO).roundToInt().toFloat()))
 
-    /** 主导航形态：紧凑用底栏，中等/扩展用侧栏（M3 窗口尺寸类）。 */
-    val navForm: NavForm get() = if (width >= RAIL_MIN_WIDTH) NavForm.Rail else NavForm.Bar
-
-    /** 内容档位（设置列数、筛选压行、并排布局都用它）。 */
-    val tier: Tier get() = when {
-        width < WIDE_MIN_WIDTH -> Tier.Compact
-        width < EXTRA_WIDE_MIN_WIDTH -> Tier.Medium
-        else -> Tier.Expanded
-    }
-
-    /** 设置页列数：1 列（<700dp）→ 2 列（≥700dp）→ 3 列（≥1000dp）。 */
-    val settingsColumns: Int get() = when {
-        width < SETTINGS_TWO_COLUMN_MIN_WIDTH -> 1
-        width < EXTRA_WIDE_MIN_WIDTH -> 2
-        else -> 3
-    }
+    /** 设置页维持单列手机信息顺序。 */
+    val settingsColumns: Int get() = 1
 
     /** 搜索页的两组筛选条件是否左右并排（横屏省约 60dp 高度）。 */
     val filtersSideBySide: Boolean get() = splitsMasterDetail
@@ -123,25 +102,8 @@ data class AdaptiveLayout(
     fun contentColumn(maxWidth: Float = READING_MAX_WIDTH): Float =
         min(maxWidth, max(MIN_CONTENT_COLUMN, width - 2 * PAGE_PADDING))
 
-    enum class NavForm { Bar, Rail }
-
-    enum class Tier { Compact, Medium, Expanded }
-
     companion object {
-        /** 侧栏的最小宽度（M3 窗口尺寸类的中等档下沿）。 */
-        const val RAIL_MIN_WIDTH = 600f
-
-        /** 内容档位阈值（iOS 原样保留）。 */
-        const val WIDE_MIN_WIDTH = 700f
-        const val EXTRA_WIDE_MIN_WIDTH = 1000f
-
-        /** Rail 形态下导航栏 + 分隔线占掉的宽度。 */
-    const val NAV_RAIL_TOTAL_WIDTH = 81f
-
-    /** 设置页两列的下沿（设计规范 §3.1：<700 一列 / 700–999 两列 / ≥1000 三列）。 */
-        const val SETTINGS_TWO_COLUMN_MIN_WIDTH = 700f
-
-        /** 首页/足迹分栏的最小内容宽度（iOS 当前值；v2 的 700 已作废）。 */
+        /** 首页/足迹分栏的最小内容宽度，与 iOS 当前值一致。 */
         const val SPLIT_MIN_CONTENT_WIDTH = 548.5f
 
         const val MASTER_WIDTH_RATIO = 0.46f

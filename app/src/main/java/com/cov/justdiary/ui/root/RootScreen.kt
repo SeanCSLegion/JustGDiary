@@ -1,20 +1,13 @@
 package com.cov.justdiary.ui.root
 
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
@@ -50,16 +43,8 @@ import com.cov.justdiary.ui.search.SearchViewModel
 import com.cov.justdiary.ui.settings.SettingsScreen
 
 /**
- * 根界面：主导航宿主。
- *
- * 对应 iOS `Views/RootView.swift`（`TabView(.sidebarAdaptable)` + 设置/语言变更时整树重建）。
- *
- * **导航形态按 Google 自适应导航规范**（Q10 已确认，不照抄 iOS 的底部悬浮条）：
- *  - 紧凑宽度（<600dp）→ 底部 [NavigationBar]
- *  - 中等/扩展宽度（≥600dp，含手机横屏）→ 侧边 [NavigationRail]
- *
- * 几何只在这里读一次，解析成 [AdaptiveLayout] 后经 [LocalAdaptiveLayout] 下发；
- * 页面内部一律**不再自己读屏幕尺寸**（与 iOS 的 `adaptiveLayoutReader` 同一原则）。
+ * 根界面：主导航宿主。几何只在此读取一次并经 LocalAdaptiveLayout 下发；
+ * 主导航固定使用 Material 3 NavigationBar，横屏页面按窗口几何自适应。
  */
 @Composable
 fun RootScreen(modifier: Modifier = Modifier) {
@@ -125,17 +110,11 @@ fun RootScreen(modifier: Modifier = Modifier) {
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val adaptive = rememberAdaptiveLayout(maxWidth.value, maxHeight.value)
-        val useRail = adaptive.navForm == AdaptiveLayout.NavForm.Rail
-
-        if (useRail) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing),
-            ) {
-                NavigationRail {
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
                     AppTab.entries.forEach { tab ->
-                        NavigationRailItem(
+                        NavigationBarItem(
                             selected = tab == selected,
                             onClick = { selectedName = tab.name },
                             icon = { Icon(tab.icon, contentDescription = null) },
@@ -143,45 +122,19 @@ fun RootScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 }
-                VerticalDivider()
-                CompositionLocalProvider(LocalAdaptiveLayout provides adaptive) {
-                    TabContent(
-                        tab = selected,
-                        container = container,
-                        dataVersion = dataVersion,
-                        settingsVersion = settingsVersion,
-                        onOpenDay = { openDayKey = it },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        } else {
-            Scaffold(
-                bottomBar = {
-                    NavigationBar {
-                        AppTab.entries.forEach { tab ->
-                            NavigationBarItem(
-                                selected = tab == selected,
-                                onClick = { selectedName = tab.name },
-                                icon = { Icon(tab.icon, contentDescription = null) },
-                                label = { Text(stringResource(tab.labelRes)) },
-                            )
-                        }
-                    }
-                },
-            ) { innerPadding ->
-                CompositionLocalProvider(LocalAdaptiveLayout provides adaptive) {
-                    TabContent(
-                        tab = selected,
-                        container = container,
-                        dataVersion = dataVersion,
-                        settingsVersion = settingsVersion,
-                        onOpenDay = { openDayKey = it },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding),
-                    )
-                }
+            },
+        ) { innerPadding ->
+            CompositionLocalProvider(LocalAdaptiveLayout provides adaptive) {
+                TabContent(
+                    tab = selected,
+                    container = container,
+                    dataVersion = dataVersion,
+                    settingsVersion = settingsVersion,
+                    onOpenDay = { openDayKey = it },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                )
             }
         }
     }

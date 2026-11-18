@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-    平板（最小宽度 ≥ 600dp）：允许横竖屏自由旋转。
-    横屏才是"横屏界面"（左右分栏），手机上不启用。见设计规范 §1。
--->
-<resources>
-    <bool name="is_tablet">true</bool>
-</resources>

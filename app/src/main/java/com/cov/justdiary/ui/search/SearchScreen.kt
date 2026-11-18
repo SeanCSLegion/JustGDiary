@@ -90,7 +90,7 @@ import java.time.LocalDate
  *
  * 竖屏结构：页头（+ 计数徽标）→ 搜索框 → 筛选卡（时间范围 / 地点两组）→
  * 条件摘要行（可逐条撤销）→ 结果列表。
- * 平板横屏：左栏 340dp 固定放筛选，右栏放结果（筛选常驻可见，不需要再开面板）。
+ * 宽屏横屏：筛选与结果并排，条件常驻可见。
  *
  * ## 与 iOS 一致的关键行为
  *
@@ -402,7 +402,7 @@ fun SearchScreen(
     }
 
     if (split) {
-        // 平板横屏：左栏固定 340dp 放筛选（常驻可见），右栏结果列表
+        // 横屏宽度足够时筛选与结果并排，条件常驻可见
         Row(modifier = modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier

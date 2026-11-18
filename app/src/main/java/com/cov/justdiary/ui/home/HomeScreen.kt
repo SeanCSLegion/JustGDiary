@@ -93,7 +93,7 @@ enum class HomeViewMode { MONTH, WEEK, YEAR }
  *  2. **morph 进行中禁止一切输入** —— 分页手势整条撤下，返回 / 点日期 / 今天三者都 guard。
  *  3. **状态不持久化语义**：冷启动恒为「今天 + 月态」；进入分栏时无动画收回月态。
  *
- * ## 平板分栏（规范 §2.3 / §4.2）
+ * ## 横屏分栏（规范 §2）
  *
  * `splitsMasterDetail`（内容宽 ≥ 548.5dp 且宽 > 高）时左右分栏：
  * 左栏月历（仅上下滑翻月 + 点日期）、右栏选中日。**分栏下没有顶栏、没有周态、没有年态**
@@ -400,7 +400,7 @@ fun HomeScreen(
     }
 
     /**
-     * 分栏（平板横屏）滚动落定后：把选中日带到新月份的同一天，右栏才跟着一起走。
+     * 分栏滚动落定后：把选中日带到新月份的同一天，右栏才跟着一起走。
      *
      * 竖屏**不做**这件事 —— 翻月是纯浏览动作，不该悄悄改变"我要写哪一天"的目标
      * （副作用由顶栏胶囊的文案规则兜住，见规范 §3.3）。
@@ -567,7 +567,7 @@ fun HomeScreen(
         val availableW = maxWidth.value
         val adaptive = LocalAdaptiveLayout.current
         val split = adaptive.splitsMasterDetail
-        // 竖屏 / 平板竖屏：日历限宽 640dp 居中（规范 §2.2）。不限宽时平板竖屏一格会有 100dp 宽，
+        // 竖屏：日历限宽 640dp 居中。不限宽时单元格会过宽，
         // 日号缩在中间、年份卡片更是被拉成 224dp 的空盒子。分栏时用主栏宽度公式。
         val calendarW = if (split) {
             adaptive.masterWidth
