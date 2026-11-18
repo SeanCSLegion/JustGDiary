@@ -46,8 +46,9 @@ def actual_test_count() -> int | None:
 
 
 def documented_counts() -> set[int]:
-    text = read("README.md") + "\n" + read("TODO.md")
-    # 只认“630 条/个 JVM 测试”这种明确表述，避免把性能毫秒数当成用例数。
+    todo = read("TODO.md").split("\n## 1.", 1)[0]
+    text = read("README.md") + "\n" + todo
+    # 只认 README 与 TODO 当前摘要；后续章节保留带日期的历史测试记录。
     return {int(m) for m in re.findall(r"(\d{3,5})\s*(?:条|个)\s*JVM\s*(?:单测|测试)", text)}
 
 
