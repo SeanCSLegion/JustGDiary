@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FileProvider 可暴露的路径。**只暴露真正在用的那一个**：
+<!-- FileProvider 只暴露功能所需的具体子目录：
      分享长图写在 cacheDir/share/（ImageShareRenderer），由 DiaryPageScreen 通过
      ShareIntents.shareImage 分享。
      曾经还有 `exports`（cacheDir 整个目录）与 `images`（filesDir/images）：前者对应的
      备份分享入口从未被调用（导出实际走 SAF CreateDocument），后者也没有
      任何代码把 filesDir/images 转成 content:// URI —— 两条都删掉了，
-     顺带避免了"把整个缓存目录暴露给 FileProvider"这种过宽的授权。 -->
+     顺带避免了"把整个缓存目录暴露给 FileProvider"这种过宽的授权；更新也只授权 updates/ 下的 APK。 -->
 <paths>
     <cache-path name="share" path="share/" />
+    <cache-path name="updates" path="updates/" />
 </paths>

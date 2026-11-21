@@ -114,6 +114,21 @@
 
     <string name="settings_section_about">About</string>
     <string name="settings_version">Version</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_check_sub">Check GitHub Releases for a newer version</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_downloading">Downloading and checking APK…</string>
+    <string name="update_current">You have the latest version</string>
+    <string name="update_available">Update available</string>
+    <string name="update_failed">Update unavailable</string>
+    <string name="update_available_title">Version %1$s is available</string>
+    <string name="update_release_notes_empty">No release notes provided.</string>
+    <string name="update_download_install">Download</string>
+    <string name="update_ready_title">Download verified</string>
+    <string name="update_ready_message">Version %1$s is ready. Android will ask you to confirm installation.</string>
+    <string name="update_open_installer">Install update</string>
+    <string name="update_install_permission_required">Allow this app to install unknown apps, then try again.</string>
+    <string name="update_failed_title">Couldn’t update</string>
 
 
     <!-- ============================================================

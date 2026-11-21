@@ -116,6 +116,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"  
 ./gradlew clean assembleDebug testDebugUnitTest   # 编译 + 652 个 JVM 单测（含 29 个 Robolectric 类 / 198 条运行时用例）
 ./gradlew :app:connectedDebugAndroidTest          # 7 条 instrumented（需已启动模拟器/真机）
 ./gradlew :app:assembleRelease                    # 签名配置见 docs/release.md；R8 + 资源压缩
+python3 tools/verify_release_apk.py app/build/outputs/apk/release/app-release.apk  # 验签 / 包名 / 版本
 
 # 三个独立校验脚本
 python3 tools/verify_sqlite_schema.py    # 从 Kotlin 源码抽出 DDL，用宿主 sqlite3 真跑一遍（18 条断言）

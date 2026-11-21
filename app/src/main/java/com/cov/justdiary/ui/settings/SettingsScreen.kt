@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -37,11 +38,24 @@ import com.cov.justdiary.data.ImportMode
 import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.service.DateFormats
+import com.cov.justdiary.service.GitHubReleaseUpdater
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.PageHeader
 import com.cov.justdiary.ui.components.SectionTitle
 import com.cov.justdiary.ui.components.locPrecisionLabel
 import com.cov.justdiary.ui.theme.Spacing
+import kotlinx.coroutines.launch
+import java.io.File
+
+private sealed interface UpdaterUiState {
+    data object Idle : UpdaterUiState
+    data object Checking : UpdaterUiState
+    data object Current : UpdaterUiState
+    data object Downloading : UpdaterUiState
+    data class Available(val release: GitHubReleaseUpdater.Release) : UpdaterUiState
+    data class Ready(val file: File, val release: GitHubReleaseUpdater.Release) : UpdaterUiState
+    data class Failed(val message: String) : UpdaterUiState
+}
 
 /**
  * 设置页。对应 iOS `Views/Settings/SettingsView.swift`。
@@ -72,6 +86,29 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     // 与 MainActivity 取到的是同一个实例（同一个 ViewModelStore + 默认 key）
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(container))
     val state by viewModel.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    val updater = remember(context) { GitHubReleaseUpdater(context.applicationContext) }
+    var updaterState by remember { mutableStateOf<UpdaterUiState>(UpdaterUiState.Idle) }
+    var pendingInstallerFile by remember { mutableStateOf<File?>(null) }
+    fun launchInstaller(file: File) {
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(updater.installerUri(file), "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(installIntent)
+    }
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val file = pendingInstallerFile
+        pendingInstallerFile = null
+        if (file != null && context.packageManager.canRequestPackageInstalls()) {
+            runCatching { launchInstaller(file) }
+                .onFailure { updaterState = UpdaterUiState.Failed(it.message ?: "Could not open Android installer") }
+        } else if (file != null) {
+            updaterState = UpdaterUiState.Failed(context.getString(R.string.update_install_permission_required))
+        }
+    }
 
     val locationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -127,6 +164,30 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             state = state,
             formats = formats,
             viewModel = viewModel,
+            updateEnabled = updaterState !is UpdaterUiState.Checking && updaterState !is UpdaterUiState.Downloading,
+            updateStatus = when (updaterState) {
+                UpdaterUiState.Checking -> stringResource(R.string.update_checking)
+                UpdaterUiState.Downloading -> stringResource(R.string.update_downloading)
+                UpdaterUiState.Current -> stringResource(R.string.update_current)
+                is UpdaterUiState.Available, is UpdaterUiState.Ready -> stringResource(R.string.update_available)
+                is UpdaterUiState.Failed -> stringResource(R.string.update_failed)
+                UpdaterUiState.Idle -> ""
+            },
+            onCheckUpdate = {
+                updaterState = UpdaterUiState.Checking
+                scope.launch {
+                    updaterState = runCatching { updater.check() }
+                        .fold(
+                            onSuccess = { result ->
+                                when (result) {
+                                    GitHubReleaseUpdater.CheckResult.UpToDate -> UpdaterUiState.Current
+                                    is GitHubReleaseUpdater.CheckResult.Available -> UpdaterUiState.Available(result.release)
+                                }
+                            },
+                            onFailure = { UpdaterUiState.Failed(it.message ?: "Update check failed") },
+                        )
+                }
+            },
             onExport = { includeSettings ->
                 pendingExportWithSettings = includeSettings
                 exportLauncher.launch(defaultBackupFileName())
@@ -138,6 +199,56 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
     state.alert?.let { alert ->
         SettingsAlertDialog(alert = alert, onDismiss = viewModel::consumeAlert)
+    }
+
+    when (val update = updaterState) {
+        is UpdaterUiState.Available -> AlertDialog(
+            onDismissRequest = { updaterState = UpdaterUiState.Idle },
+            title = { Text(stringResource(R.string.update_available_title, update.release.versionName)) },
+            text = {
+                Text(
+                    if (update.release.notes.isBlank()) stringResource(R.string.update_release_notes_empty)
+                    else update.release.notes,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    updaterState = UpdaterUiState.Downloading
+                    scope.launch {
+                        updaterState = runCatching { updater.downloadAndVerify(update.release) }
+                            .fold(
+                                onSuccess = { UpdaterUiState.Ready(it, update.release) },
+                                onFailure = { UpdaterUiState.Failed(it.message ?: "APK verification failed") },
+                            )
+                    }
+                }) { Text(stringResource(R.string.update_download_install)) }
+            },
+            dismissButton = { TextButton(onClick = { updaterState = UpdaterUiState.Idle }) { Text(stringResource(R.string.cancel)) } },
+        )
+        is UpdaterUiState.Ready -> AlertDialog(
+            onDismissRequest = { updaterState = UpdaterUiState.Idle },
+            title = { Text(stringResource(R.string.update_ready_title)) },
+            text = { Text(stringResource(R.string.update_ready_message, update.release.versionName)) },
+            confirmButton = { TextButton(onClick = {
+                if (context.packageManager.canRequestPackageInstalls()) {
+                    runCatching { launchInstaller(update.file) }
+                        .onFailure { updaterState = UpdaterUiState.Failed(it.message ?: "Could not open Android installer") }
+                } else {
+                    pendingInstallerFile = update.file
+                    unknownSourcesLauncher.launch(
+                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.fromParts("package", context.packageName, null)),
+                    )
+                }
+            }) { Text(stringResource(R.string.update_open_installer)) } },
+            dismissButton = { TextButton(onClick = { updaterState = UpdaterUiState.Idle }) { Text(stringResource(R.string.cancel)) } },
+        )
+        is UpdaterUiState.Failed -> AlertDialog(
+            onDismissRequest = { updaterState = UpdaterUiState.Idle },
+            title = { Text(stringResource(R.string.update_failed_title)) },
+            text = { Text(update.message) },
+            confirmButton = { TextButton(onClick = { updaterState = UpdaterUiState.Idle }) { Text(stringResource(R.string.ok)) } },
+        )
+        else -> Unit
     }
 
     // 「新一天的开始时间」的二次确认（规范 §3.4）：非空 = 有待确认的改动。
@@ -211,6 +322,9 @@ private fun SettingsBody(
     state: SettingsUiState,
     formats: DateFormats,
     viewModel: SettingsViewModel,
+    updateEnabled: Boolean,
+    updateStatus: String,
+    onCheckUpdate: () -> Unit,
     onExport: (includeSettings: Boolean) -> Unit,
     onImport: () -> Unit,
 ) {
@@ -429,6 +543,14 @@ private fun SettingsBody(
                     ),
                     value = stringResource(R.string.settings_storage_total, formatBytes(storage.totalBytes)),
                     enabled = false,
+                )
+                ValueRow(
+                    icon = SettingsIcons.about,
+                    title = stringResource(R.string.update_check),
+                    sub = if (updateStatus.isBlank()) stringResource(R.string.update_check_sub) else updateStatus,
+                    value = "",
+                    enabled = updateEnabled,
+                    onClick = onCheckUpdate,
                 )
                 RowDivider()
                 ValueRow(

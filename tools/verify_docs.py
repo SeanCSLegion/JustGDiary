@@ -94,11 +94,32 @@ def check_release_config() -> None:
         fail("缺少 version.properties")
 
 
+def check_updater_config() -> None:
+    manifest = read("app/src/main/AndroidManifest.xml")
+    provider_paths = read("app/src/main/res/xml/file_paths.xml")
+    updater = read("app/src/main/java/com/cov/justdiary/service/GitHubReleaseUpdater.kt")
+    release_doc = read("docs/release.md")
+    if 'android:name="android.permission.INTERNET"' not in manifest:
+        fail("应用内更新缺少 INTERNET 权限")
+    if 'android:name="android.permission.REQUEST_INSTALL_PACKAGES"' not in manifest:
+        fail("应用内更新缺少 REQUEST_INSTALL_PACKAGES 权限")
+    if 'name="updates" path="updates/"' not in provider_paths:
+        fail("FileProvider 缺少仅用于安装包的 updates/ 缓存路径")
+    for marker in ("JustGDiary-$versionName.apk", "APK_ASSET_NAME = \"JustGDiary.apk\"", "SHA-256", "longVersionCode", "packageName"):
+        if marker not in updater:
+            fail(f"应用内更新缺少检查项：{marker}")
+    if "verify_release_apk.py" not in release_doc:
+        fail("docs/release.md 缺少 release APK 打包验证步骤")
+    if not (ROOT / "tools/verify_release_apk.py").is_file():
+        fail("缺少 tools/verify_release_apk.py")
+
+
 def main() -> int:
     check_test_counts()
     check_p1_complete()
     check_design_docs()
     check_release_config()
+    check_updater_config()
     if failures:
         print("❌ 文档 / 配置校验失败：")
         for item in failures:

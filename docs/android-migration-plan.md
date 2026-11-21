@@ -5,7 +5,7 @@
 > 13 张设计稿的逐项通读，以及 Google 官方文档的版本核对。
 >
 > 源端事实基线：`bundle id = com.cov.justdiary`、iOS 27+、SwiftUI、**无任何 Swift Package 外部依赖**、
-> 197 条本地化键（zh-Hans / en）、纯本地应用（无网络请求，只有系统级反地理编码走网络）。
+> 197 条本地化键（zh-Hans / en）、以本地数据为核心（无账号/云同步；系统级反地理编码和用户手动触发的 GitHub Release 更新会访问网络）。
 >
 > **实施记录见 [`docs/migration-progress.md`](migration-progress.md)**（环境与工具链实测值、每个里程碑的
 > 交付物与验收证据、踩过的坑）。本文件是方案，那份是记录。
@@ -875,7 +875,7 @@ Android 的实现与政策约束：
 | 2 | 图片加载与缓存（内联图片） | **`io.coil-kt.coil3:coil-compose`** | Apache-2.0 | 可选。iOS 是自写 `DiaryImageStore`；Android 可自写 `BitmapFactory` + `LruCache` | 自写（与 iOS 结构更对称） |
 | 3 | 柱状图 | 建议**不引入** | — | 全 app 仅 1 张柱状图（单色 + 4dp 圆角 + 左轴），自绘约 100–150 行，可控性最好 | Vico（Apache-2.0，Compose 原生，最贴近 Swift Charts 写法）/ MPAndroidChart（View 体系，需 `AndroidView`，维护放缓） |
 
-**明确不需要**的常见依赖：Hilt（手工 `AppContainer` 已足够、更对称）、Retrofit/OkHttp（**纯本地应用，无网络请求**）、
+**明确不需要**的常见依赖：Hilt（手工 `AppContainer` 已足够、更对称）、Retrofit/OkHttp（更新使用标准库 `HttpURLConnection`；应用主体仍是本地数据）、
 Gson/Moshi（用 kotlinx.serialization）、Glide、Accompanist 权限（用 `ActivityResultContracts`）、
 SQLCipher（无加密需求）、Room KMP、Compose Multiplatform（不共享代码，避免额外复杂度）。
 Google 官方库（`play-services-location`、`androidx.*`）不计入"第三方"。
