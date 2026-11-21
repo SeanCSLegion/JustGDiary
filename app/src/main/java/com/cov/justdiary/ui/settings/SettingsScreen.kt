@@ -545,15 +545,6 @@ private fun SettingsBody(
                     enabled = false,
                 )
                 ValueRow(
-                    icon = SettingsIcons.about,
-                    title = stringResource(R.string.update_check),
-                    sub = if (updateStatus.isBlank()) stringResource(R.string.update_check_sub) else updateStatus,
-                    value = "",
-                    enabled = updateEnabled,
-                    onClick = onCheckUpdate,
-                )
-                RowDivider()
-                ValueRow(
                     icon = SettingsIcons.cleanup,
                     title = stringResource(R.string.settings_storage_cleanup),
                     sub = stringResource(R.string.settings_storage_cleanup_sub),
@@ -600,6 +591,15 @@ private fun SettingsBody(
                     sub = null,
                     value = state.appVersion,
                     enabled = false,
+                )
+                RowDivider()
+                ValueRow(
+                    icon = SettingsIcons.about,
+                    title = stringResource(R.string.update_check),
+                    sub = if (updateStatus.isBlank()) stringResource(R.string.update_check_sub) else updateStatus,
+                    value = "",
+                    enabled = updateEnabled,
+                    onClick = onCheckUpdate,
                 )
             }
         }
