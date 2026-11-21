@@ -50,7 +50,10 @@ class MonthA11yTest {
         Shadows.shadowOf(manager).setTouchExplorationEnabled(false)
     }
 
-    private fun composeBlock(onDayTap: (LocalDate, Int) -> Unit = { _, _ -> }) {
+    private fun composeBlock(
+        visibleRows: IntRange = 0 until Int.MAX_VALUE,
+        onDayTap: (LocalDate, Int) -> Unit = { _, _ -> },
+    ) {
         val weekStart = DateUtil.WEEK_START_MONDAY
         val layout = MonthFlowLayout.of(weekStart, rowH = 96f)
         val block = layout.blocks.first { it.key == 202611 }
@@ -61,6 +64,7 @@ class MonthA11yTest {
                 BlockCanvas(
                     block = block,
                     weeks = weeks,
+                    visibleRows = visibleRows,
                     metrics = metrics,
                     rowH = 96f,
                     showLunar = true,
@@ -105,5 +109,13 @@ class MonthA11yTest {
         composeBlock()
 
         rule.onAllNodes(hasClickAction()).assertCountEquals(0)
+    }
+
+    @Test
+    fun `accessibility on exposes only dates in visible rows`() {
+        composeBlock(visibleRows = 1..1)
+
+        // 2026-11 的第 2 行（周一至周日）全部属于当月；预挂载/视口外日期不进入焦点顺序。
+        rule.onAllNodes(hasClickAction()).assertCountEquals(7)
     }
 }

@@ -397,6 +397,7 @@ internal fun BlockCanvas(
             CalendarDayA11yLayer(
                 block = block,
                 weeks = weeks,
+                visibleRows = visibleRows,
                 metrics = metrics,
                 selectedKey = selectedKey,
                 todayKey = todayKey,
@@ -418,6 +419,8 @@ internal fun BlockCanvas(
 private fun CalendarDayA11yLayer(
     block: MonthFlowLayout.Block,
     weeks: List<List<java.time.LocalDate>>,
+    /** 只为当前视口内的行创建无障碍节点；预挂载月份仍保留绘制缓存，不进入 TalkBack 顺序。 */
+    visibleRows: IntRange,
     metrics: CalendarLayout.DayMetrics,
     selectedKey: String,
     todayKey: String,
@@ -436,6 +439,7 @@ private fun CalendarDayA11yLayer(
 
     Column(modifier = Modifier.fillMaxSize()) {
         weeks.forEachIndexed { row, week ->
+            if (row !in visibleRows) return@forEachIndexed
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
