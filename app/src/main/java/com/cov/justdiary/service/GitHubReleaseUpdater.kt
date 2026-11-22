@@ -78,7 +78,10 @@ class GitHubReleaseUpdater(private val context: Context) {
         }
     }
 
-    suspend fun downloadAndVerify(release: Release): File = withContext(Dispatchers.IO) {
+    suspend fun downloadAndVerify(
+        release: Release,
+        onProgress: suspend (downloaded: Long, total: Long) -> Unit = { _, _ -> },
+    ): File = withContext(Dispatchers.IO) {
         val directory = File(context.cacheDir, "updates").apply { mkdirs() }
         val temporary = File(directory, "${release.tag}.apk.part")
         val apk = File(directory, "${release.tag}.apk")
@@ -107,6 +110,7 @@ class GitHubReleaseUpdater(private val context: Context) {
                         if (total > MAX_APK_BYTES) error("APK is larger than the allowed download limit")
                         digest.update(buffer, 0, count)
                         output.write(buffer, 0, count)
+                        onProgress(total, release.expectedSize.takeIf { it > 0 } ?: contentLength)
                     }
                 }
             }

@@ -208,7 +208,8 @@ class ImageShareRenderer(
         paint.typeface = typefaceFor(op.font, op.bold)
         val fm = paint.fontMetrics
         lines.forEachIndexed { index, line ->
-            val baseline = op.rect.y + op.lineHeight * index + (op.lineHeight + fm.descent)
+            val baseline = op.rect.y + op.lineHeight * index +
+                (op.lineHeight - (fm.descent - fm.ascent)) / 2 - fm.ascent
             val x = if (op.align == ShareLayout.Align.Right) {
                 op.rect.right - paint.measureText(line)
             } else {

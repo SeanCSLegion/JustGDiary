@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -183,6 +184,8 @@ internal fun ValueRow(
     onClick: () -> Unit = {},
     /** 「版本」这类行不可点，也不画箭头（规范 §3.5）。 */
     enabled: Boolean = true,
+    actionLabel: String? = null,
+    status: String = "",
 ) {
     Row(
         modifier = Modifier
@@ -198,7 +201,14 @@ internal fun ValueRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                if (actionLabel != null && status.isNotBlank()) "$title · $status" else title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = if (actionLabel != null) Modifier.semantics {
+                    contentDescription = "$title ${value}，${actionLabel}"
+                } else Modifier,
+            )
             if (sub != null) {
                 Text(
                     text = sub,

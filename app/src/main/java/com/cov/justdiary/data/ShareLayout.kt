@@ -746,7 +746,7 @@ object ShareLayout {
         return max(IMAGE_MIN_HEIGHT, width * ratio)
     }
 
-    /** 贪心逐字符换行（与阅读 / 编辑的排版同一策略：CJK 逐字、ASCII 也逐字符）。 */
+    /** 英文按单词换行，CJK 可按字换行。 */
     fun wrappedLines(
         text: String,
         fontSize: Double,
@@ -756,19 +756,33 @@ object ShareLayout {
         val lines = mutableListOf<String>()
         val current = StringBuilder()
         var currentWidth = 0.0
-        for (ch in text) {
-            val w = metrics.width(ch.toString(), fontSize)
-            if (currentWidth + w > maxWidth && current.isNotEmpty()) {
-                lines += current.toString()
+        fun flush() {
+            if (current.isNotEmpty()) {
+                val line = current.toString().trimEnd()
+                if (line.isNotEmpty()) lines += line
                 current.setLength(0)
-                current.append(ch)
-                currentWidth = w
-            } else {
-                current.append(ch)
-                currentWidth += w
+                currentWidth = 0.0
             }
         }
-        if (current.isNotEmpty()) lines += current.toString()
+        val tokens = Regex("[\\u4E00-\\u9FFF\\u3400-\\u4DBF\\u3000-\\u303F]|[^\\S\\r\\n]+|[^\\u4E00-\\u9FFF\\u3400-\\u4DBF\\u3000-\\u303F\\s]+|\\r?\\n")
+            .findAll(text).map { it.value }
+        for (token in tokens) {
+            if (token == "\n" || token == "\r\n") { flush(); continue }
+            val width = metrics.width(token, fontSize)
+            if (currentWidth + width > maxWidth && current.isNotEmpty()) flush()
+            if (width > maxWidth && token.none { it.isWhitespace() }) {
+                for (ch in token) {
+                    val charWidth = metrics.width(ch.toString(), fontSize)
+                    if (currentWidth + charWidth > maxWidth && current.isNotEmpty()) flush()
+                    current.append(ch)
+                    currentWidth += charWidth
+                }
+            } else {
+                current.append(token)
+                currentWidth += width
+            }
+        }
+        flush()
         return lines
     }
 

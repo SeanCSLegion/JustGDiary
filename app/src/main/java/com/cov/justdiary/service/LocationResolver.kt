@@ -134,7 +134,17 @@ object LocationResolver {
      * 新建片段时菜单能给的级别：不粗于 [maxPrecision] —— 系统给不出更细的位置，
      * 菜单里就不该有更细的级别（iOS `availablePrecisions(maxPrecision:)`）。
      */
-    fun availablePrecisions(maxPrecision: String): List<String> = LocPrecision.levels(cappedAt = maxPrecision)
+    fun availablePrecisions(maxPrecision: String, placemark: PlacemarkText? = null): List<String> {
+        if (placemark != null && placemark.thoroughfare.isEmpty()) {
+            if (maxPrecision == LocPrecision.exact && placemark.name.isNotEmpty()) {
+                return listOf(LocPrecision.exact) + LocPrecision.levels(LocPrecision.district)
+            }
+            if (maxPrecision == LocPrecision.exact || maxPrecision == LocPrecision.street) {
+                return LocPrecision.levels(LocPrecision.district)
+            }
+        }
+        return LocPrecision.levels(cappedAt = maxPrecision)
+    }
 
     /**
      * 分享长图上的地点文案：**只用地区列重建**，`locText` 根本不是它的输入。

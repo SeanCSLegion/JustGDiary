@@ -119,7 +119,7 @@ class LocationService(context: Context) {
             return null
         }
         // ① 新鲜缓存：室内没有卫星信号时，这是唯一能在 1 秒内拿到的点
-        cachedLocation(LocationRules::isFreshFix)?.let {
+        withTimeoutOrNull(CACHE_LOOKUP_TIMEOUT_MS) { cachedLocation(LocationRules::isFreshFix) }?.let {
             Log.location.i("用新鲜缓存点（${it.ageMillis}ms 前）")
             return it.fix
         }
@@ -127,7 +127,7 @@ class LocationService(context: Context) {
         val fix = withTimeoutOrNull(timeoutMillis) { firstFix() }
         if (fix != null) return fix
         // ③ 兜底：稍旧但仍在可用窗口内的缓存点
-        val stale = cachedLocation(LocationRules::isUsableStaleFix)
+        val stale = withTimeoutOrNull(CACHE_LOOKUP_TIMEOUT_MS) { cachedLocation(LocationRules::isUsableStaleFix) }
         if (stale == null) {
             Log.location.w("定位超时（${timeoutMillis}ms）或失败")
         } else {
@@ -405,6 +405,7 @@ class LocationService(context: Context) {
     )
 
     companion object {
+        private const val CACHE_LOOKUP_TIMEOUT_MS = 1_000L
         /** 与 iOS 的 8 秒超时一致。 */
         const val DEFAULT_TIMEOUT_MS: Long = 8_000
 

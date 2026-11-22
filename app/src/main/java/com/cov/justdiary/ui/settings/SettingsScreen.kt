@@ -32,6 +32,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.cov.justdiary.JustDiaryApplication
 import com.cov.justdiary.R
 import com.cov.justdiary.data.ImportMode
@@ -39,6 +43,7 @@ import com.cov.justdiary.model.AppSettings
 import com.cov.justdiary.model.LocPrecision
 import com.cov.justdiary.service.DateFormats
 import com.cov.justdiary.service.GitHubReleaseUpdater
+import com.cov.justdiary.service.ReleaseDownloadWorker
 import com.cov.justdiary.ui.adaptive.LocalAdaptiveLayout
 import com.cov.justdiary.ui.components.PageHeader
 import com.cov.justdiary.ui.components.SectionTitle
@@ -51,7 +56,7 @@ private sealed interface UpdaterUiState {
     data object Idle : UpdaterUiState
     data object Checking : UpdaterUiState
     data object Current : UpdaterUiState
-    data object Downloading : UpdaterUiState
+    data class Downloading(val percent: Int = 0) : UpdaterUiState
     data class Available(val release: GitHubReleaseUpdater.Release) : UpdaterUiState
     data class Ready(val file: File, val release: GitHubReleaseUpdater.Release) : UpdaterUiState
     data class Failed(val message: String) : UpdaterUiState
@@ -89,6 +94,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val updater = remember(context) { GitHubReleaseUpdater(context.applicationContext) }
     var updaterState by remember { mutableStateOf<UpdaterUiState>(UpdaterUiState.Idle) }
+    var terminalWorkId by remember { mutableStateOf<String?>(null) }
+    fun dismissDownloadResult() {
+        terminalWorkId?.let { context.getSharedPreferences("release_download", android.content.Context.MODE_PRIVATE)
+            .edit().putString("dismissed_work_id", it).apply() }
+        terminalWorkId = null
+        updaterState = UpdaterUiState.Idle
+    }
     var pendingInstallerFile by remember { mutableStateOf<File?>(null) }
     fun launchInstaller(file: File) {
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -155,6 +167,43 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    LaunchedEffect(context, updater) {
+        WorkManager.getInstance(context).getWorkInfosForUniqueWorkFlow(ReleaseDownloadWorker.UNIQUE_WORK).collect { infos ->
+            val work = infos.firstOrNull() ?: return@collect
+            val dismissedWorkId = context.getSharedPreferences("release_download", android.content.Context.MODE_PRIVATE)
+                .getString("dismissed_work_id", null)
+            if (work.id.toString() == dismissedWorkId && work.state.isFinished) return@collect
+            when (work.state) {
+                WorkInfo.State.ENQUEUED, WorkInfo.State.RUNNING, WorkInfo.State.BLOCKED -> {
+                    val size = work.progress.getLong(ReleaseDownloadWorker.KEY_SIZE, 0L)
+                    val downloaded = work.progress.getLong(ReleaseDownloadWorker.KEY_DOWNLOADED, 0L)
+                    val percent = if (size > 0) (downloaded * 100 / size).toInt().coerceIn(0, 100) else 0
+                    updaterState = UpdaterUiState.Downloading(percent)
+                }
+                WorkInfo.State.SUCCEEDED -> {
+                    terminalWorkId = work.id.toString()
+                    val path = work.outputData.getString(ReleaseDownloadWorker.KEY_FILE) ?: return@collect
+                    val release = GitHubReleaseUpdater.Release(
+                        tag = work.outputData.getString(ReleaseDownloadWorker.KEY_TAG).orEmpty(),
+                        versionName = work.outputData.getString(ReleaseDownloadWorker.KEY_VERSION).orEmpty(),
+                        notes = work.outputData.getString(ReleaseDownloadWorker.KEY_NOTES).orEmpty(),
+                        downloadUrl = work.outputData.getString(ReleaseDownloadWorker.KEY_URL).orEmpty(),
+                        expectedSize = work.outputData.getLong(ReleaseDownloadWorker.KEY_SIZE, 0L),
+                        sha256 = work.outputData.getString(ReleaseDownloadWorker.KEY_SHA256),
+                    )
+                    updaterState = UpdaterUiState.Ready(File(path), release)
+                }
+                WorkInfo.State.FAILED -> {
+                    terminalWorkId = work.id.toString()
+                    updaterState = UpdaterUiState.Failed(
+                        work.outputData.getString(ReleaseDownloadWorker.KEY_ERROR) ?: "APK verification failed",
+                    )
+                }
+                WorkInfo.State.CANCELLED -> if (updaterState is UpdaterUiState.Downloading) updaterState = UpdaterUiState.Idle
+            }
+        }
+    }
+
     val formats = remember(state.settings.appLanguage) {
         DateFormats.forContext(context, state.settings.appLanguage)
     }
@@ -164,10 +213,11 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             state = state,
             formats = formats,
             viewModel = viewModel,
-            updateEnabled = updaterState !is UpdaterUiState.Checking && updaterState !is UpdaterUiState.Downloading,
+            updateEnabled = updaterState !is UpdaterUiState.Checking && updaterState !is UpdaterUiState.Downloading &&
+                updaterState !is UpdaterUiState.Available && updaterState !is UpdaterUiState.Ready,
             updateStatus = when (updaterState) {
                 UpdaterUiState.Checking -> stringResource(R.string.update_checking)
-                UpdaterUiState.Downloading -> stringResource(R.string.update_downloading)
+                is UpdaterUiState.Downloading -> stringResource(R.string.update_progress, (updaterState as UpdaterUiState.Downloading).percent)
                 UpdaterUiState.Current -> stringResource(R.string.update_current)
                 is UpdaterUiState.Available, is UpdaterUiState.Ready -> stringResource(R.string.update_available)
                 is UpdaterUiState.Failed -> stringResource(R.string.update_failed)
@@ -213,23 +263,23 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    updaterState = UpdaterUiState.Downloading
-                    scope.launch {
-                        updaterState = runCatching { updater.downloadAndVerify(update.release) }
-                            .fold(
-                                onSuccess = { UpdaterUiState.Ready(it, update.release) },
-                                onFailure = { UpdaterUiState.Failed(it.message ?: "APK verification failed") },
-                            )
-                    }
+                    updaterState = UpdaterUiState.Downloading()
+                    val request = OneTimeWorkRequestBuilder<ReleaseDownloadWorker>()
+                        .setInputData(ReleaseDownloadWorker.input(update.release))
+                        .build()
+                    WorkManager.getInstance(context).enqueueUniqueWork(
+                        ReleaseDownloadWorker.UNIQUE_WORK, ExistingWorkPolicy.KEEP, request,
+                    )
                 }) { Text(stringResource(R.string.update_download_install)) }
             },
             dismissButton = { TextButton(onClick = { updaterState = UpdaterUiState.Idle }) { Text(stringResource(R.string.cancel)) } },
         )
         is UpdaterUiState.Ready -> AlertDialog(
-            onDismissRequest = { updaterState = UpdaterUiState.Idle },
+            onDismissRequest = ::dismissDownloadResult,
             title = { Text(stringResource(R.string.update_ready_title)) },
             text = { Text(stringResource(R.string.update_ready_message, update.release.versionName)) },
             confirmButton = { TextButton(onClick = {
+                dismissDownloadResult()
                 if (context.packageManager.canRequestPackageInstalls()) {
                     runCatching { launchInstaller(update.file) }
                         .onFailure { updaterState = UpdaterUiState.Failed(it.message ?: "Could not open Android installer") }
@@ -240,13 +290,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     )
                 }
             }) { Text(stringResource(R.string.update_open_installer)) } },
-            dismissButton = { TextButton(onClick = { updaterState = UpdaterUiState.Idle }) { Text(stringResource(R.string.cancel)) } },
+            dismissButton = { TextButton(onClick = ::dismissDownloadResult) { Text(stringResource(R.string.cancel)) } },
         )
         is UpdaterUiState.Failed -> AlertDialog(
-            onDismissRequest = { updaterState = UpdaterUiState.Idle },
+            onDismissRequest = ::dismissDownloadResult,
             title = { Text(stringResource(R.string.update_failed_title)) },
             text = { Text(update.message) },
-            confirmButton = { TextButton(onClick = { updaterState = UpdaterUiState.Idle }) { Text(stringResource(R.string.ok)) } },
+            confirmButton = { TextButton(onClick = ::dismissDownloadResult) { Text(stringResource(R.string.ok)) } },
         )
         else -> Unit
     }
@@ -456,7 +506,7 @@ private fun SettingsBody(
                 MenuRow(
                     icon = SettingsIcons.shareLoc,
                     title = stringResource(R.string.settings_share_loc),
-                    sub = stringResource(R.string.settings_share_loc_sub),
+                    sub = stringResource(R.string.settings_share_loc_sub) + " " + stringResource(R.string.settings_share_loc_limit_sub),
                     value = locPrecisionLabel(settings.shareLocPrecision),
                     options = buildList {
                         add(
@@ -530,7 +580,7 @@ private fun SettingsBody(
                     text = stringResource(R.string.settings_section_data),
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
-                // P2-5：存储占用 + 孤儿图片清理入口。
+                // 存储占用；孤儿图片由启动时后台清理。
                 val storage = state.storage
                 ValueRow(
                     icon = SettingsIcons.storage,
@@ -543,18 +593,6 @@ private fun SettingsBody(
                     ),
                     value = stringResource(R.string.settings_storage_total, formatBytes(storage.totalBytes)),
                     enabled = false,
-                )
-                ValueRow(
-                    icon = SettingsIcons.cleanup,
-                    title = stringResource(R.string.settings_storage_cleanup),
-                    sub = stringResource(R.string.settings_storage_cleanup_sub),
-                    value = if (state.cleaningStorage) {
-                        stringResource(R.string.settings_storage_cleaning)
-                    } else {
-                        ""
-                    },
-                    enabled = !state.cleaningStorage,
-                    onClick = viewModel::cleanupOrphanImages,
                 )
                 RowDivider()
                 MenuRow(
@@ -590,16 +628,10 @@ private fun SettingsBody(
                     title = stringResource(R.string.settings_version),
                     sub = null,
                     value = state.appVersion,
-                    enabled = false,
-                )
-                RowDivider()
-                ValueRow(
-                    icon = SettingsIcons.about,
-                    title = stringResource(R.string.update_check),
-                    sub = if (updateStatus.isBlank()) stringResource(R.string.update_check_sub) else updateStatus,
-                    value = "",
                     enabled = updateEnabled,
                     onClick = onCheckUpdate,
+                    actionLabel = stringResource(R.string.update_check),
+                    status = updateStatus,
                 )
             }
         }

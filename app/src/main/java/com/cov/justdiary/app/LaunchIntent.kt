@@ -38,6 +38,9 @@ object LaunchIntent {
     /** 递增计数：每次"打开搜索"请求 +1。 */
     val search: StateFlow<Int> = _search.asStateFlow()
 
+    private val _settings = MutableStateFlow(0)
+    val settings: StateFlow<Int> = _settings.asStateFlow()
+
     /**
      * 从 `Intent` 里取出深链目标。
      *
@@ -45,6 +48,7 @@ object LaunchIntent {
      * `justdiary://editor/YYYY-MM-DD`（后者便于手工测试）。
      */
     fun consume(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) == true) _settings.value += 1
         val data = intent?.data ?: return
         if (data.scheme != SCHEME) return
         when (data.host) {
@@ -74,10 +78,13 @@ object LaunchIntent {
         _search.value = 0
     }
 
+    fun clearSettings() { _settings.value = 0 }
+
     const val SCHEME = "justdiary"
     const val HOST_EDITOR = "editor"
     const val HOST_SEARCH = "search"
     const val QUERY_DAY_KEY = "dayKey"
+    const val EXTRA_OPEN_SETTINGS = "open_settings"
 
     private val DAY_KEY_PATTERN = Regex("""\d{4}-\d{2}-\d{2}""")
 }

@@ -96,6 +96,14 @@ fun RootScreen(modifier: Modifier = Modifier) {
         LaunchIntent.clearSearch()
     }
 
+    val settingsRequest by LaunchIntent.settings.collectAsState()
+    LaunchedEffect(settingsRequest) {
+        if (settingsRequest <= 0) return@LaunchedEffect
+        openDayKey = null
+        selectedName = AppTab.Settings.name
+        LaunchIntent.clearSettings()
+    }
+
     if (openDayKey != null) {
         AdaptiveLayoutHost(modifier = modifier) {
             DiaryPageScreen(

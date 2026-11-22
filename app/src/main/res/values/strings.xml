@@ -78,13 +78,6 @@
     <string name="settings_storage">Storage</string>
     <string name="settings_storage_sub">Journal %1$s · Images %2$s · Backups %3$s</string>
     <string name="settings_storage_total">Total %1$s</string>
-    <string name="settings_storage_cleanup">Clean up orphan images</string>
-    <string name="settings_storage_cleanup_sub">Remove images no longer used by any entry or draft</string>
-    <string name="settings_storage_cleaning">Cleaning…</string>
-    <string name="settings_storage_cleaned_title">Cleanup complete</string>
-    <string name="settings_storage_cleaned">Removed %1$d orphan images.</string>
-    <string name="settings_storage_clean_failed_title">Cleanup failed</string>
-    <string name="settings_storage_clean_failed_msg">Couldn\'t clean up image files. Please try again.</string>
     <string name="settings_section_data">Data</string>
     <string name="settings_export">Export all entries</string>
     <string name="settings_export_sub">Generate a .jdiary backup</string>
@@ -115,9 +108,10 @@
     <string name="settings_section_about">About</string>
     <string name="settings_version">Version</string>
     <string name="update_check">Check for updates</string>
-    <string name="update_check_sub">Check GitHub Releases for a newer version</string>
     <string name="update_checking">Checking for updates…</string>
     <string name="update_downloading">Downloading and checking APK…</string>
+    <string name="update_channel_name">App updates</string>
+    <string name="update_progress">Downloading update: %1$d%%</string>
     <string name="update_current">You have the latest version</string>
     <string name="update_available">Update available</string>
     <string name="update_failed">Update unavailable</string>
@@ -282,6 +276,7 @@
     <string name="editor_placeholder_existing">Edit this entry…</string>
     <string name="settings_share_loc">Location in shared image</string>
     <string name="settings_share_loc_sub">No exact place or street</string>
+    <string name="settings_share_loc_limit_sub">This can only make a recorded place less precise.</string>
     <string name="settings_share_loc_hidden">Hide</string>
 
     <!-- 2026-11-13：P1 平台项新增文案 -->

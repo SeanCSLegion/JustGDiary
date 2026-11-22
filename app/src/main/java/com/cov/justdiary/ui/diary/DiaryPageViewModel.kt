@@ -14,6 +14,7 @@ import com.cov.justdiary.service.LocationFix
 import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.service.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +58,7 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     private var pendingDraftKey: String? = null
 
     private var searchJob: Job? = null
+    private var locateJob: Job? = null
 
     private val shareController by lazy {
         DiaryPageShareController(
@@ -181,6 +183,12 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
         pendingDraft = null
         pendingDraftKey = null
         drafts.clear(key)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val protected = drafts.referencedImageSources()
+                container.repository.cleanupOrphanImages(protected)
+            }.onFailure { Log.db.w("放弃草稿后清理孤儿图片失败：${it.message}") }
+        }
         if (_state.value.editorDraft != null) {
             _state.value = _state.value.copy(editorDraft = null)
         }
@@ -694,30 +702,42 @@ class DiaryPageViewModel(private val container: AppContainer) : ViewModel() {
     fun beginLocate() {
         val current = _state.value
         if (current.isEditingExistingBlock) return
+        if (locateJob?.isActive == true || current.locating) return
         if (!container.locationService.isAuthorized()) {
             _state.value = current.copy(locating = false)
             return
         }
         _state.value = current.copy(locating = true)
-        viewModelScope.launch {
-            val settings = _state.value.settings
-            val fix = container.locationService.currentLocation()
-            if (fix == null) {
+        locateJob = viewModelScope.launch {
+            try {
+                val settings = _state.value.settings
+                var fix = container.locationService.currentLocation(timeoutMillis = 2_500L)
+                if (fix == null) {
+                    delay(350)
+                    fix = container.locationService.currentLocation(timeoutMillis = 2_500L)
+                }
+                if (fix != null) {
+                    val placemark = container.locationService.reverseGeocode(
+                        LocationFix(fix.latitude, fix.longitude), settings.appLanguage,
+                    )
+                    val snapshot = container.locationService.snapshotFor(
+                        fix = fix,
+                        placemark = placemark,
+                        appLanguage = settings.appLanguage,
+                        preferred = settings.defaultLocPrecision,
+                    )
+                    _state.value = _state.value.copy(location = snapshot, locating = false)
+                } else {
+                    _state.value = _state.value.copy(locating = false)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.location.w("编辑页定位失败：${error.message}")
                 _state.value = _state.value.copy(locating = false)
-                return@launch
+            } finally {
+                locateJob = null
             }
-            val placemark = container.locationService.reverseGeocode(
-                LocationFix(fix.latitude, fix.longitude),
-                settings.appLanguage,
-            )
-            val snapshot = container.locationService.snapshotFor(
-                fix = fix,
-                placemark = placemark,
-                appLanguage = settings.appLanguage,
-                // 上一次手动选的精度在这里生效：只会让这条记录更粗，不会顶穿权限上限
-                preferred = settings.defaultLocPrecision,
-            )
-            _state.value = _state.value.copy(location = snapshot, locating = false)
         }
     }
 

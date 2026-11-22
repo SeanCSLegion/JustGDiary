@@ -237,11 +237,6 @@ internal fun SettingsAlertDialog(alert: SettingsAlert, onDismiss: () -> Unit) {
 
         SettingsAlert.ExportFailed -> stringResource(R.string.settings_export_failed_msg)
         SettingsAlert.ImportFailed -> stringResource(R.string.settings_import_failed_msg)
-        is SettingsAlert.StorageCleaned ->
-            stringResource(R.string.settings_storage_cleaned, alert.deleted)
-
-        SettingsAlert.StorageCleanFailed -> stringResource(R.string.settings_storage_clean_failed_msg)
-
         is SettingsAlert.ImportSucceeded -> {
             val stats = alert.stats
             buildString {
@@ -267,8 +262,6 @@ internal fun SettingsAlertDialog(alert: SettingsAlert, onDismiss: () -> Unit) {
         SettingsAlert.ExportFailed -> stringResource(R.string.settings_export_failed_title)
         SettingsAlert.ImportFailed -> stringResource(R.string.settings_import_failed_title)
         is SettingsAlert.ImportSucceeded -> stringResource(R.string.settings_import_success_title)
-        is SettingsAlert.StorageCleaned -> stringResource(R.string.settings_storage_cleaned_title)
-        SettingsAlert.StorageCleanFailed -> stringResource(R.string.settings_storage_clean_failed_title)
     }
     AlertDialog(
         onDismissRequest = onDismiss,

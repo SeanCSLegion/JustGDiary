@@ -64,8 +64,6 @@ data class SettingsUiState(
     val appVersion: String = "",
     /** P2-5：数据库 / 图片 / 备份占用。 */
     val storage: StorageUsage = StorageUsage(),
-    /** P2-5：正在清理孤儿图片。 */
-    val cleaningStorage: Boolean = false,
     /**
      * 启动序列失败（开库 / 迁移）。非空时界面上盖一层显式错误态，而不是展示"空日记本"。
      *
@@ -92,11 +90,6 @@ sealed interface SettingsAlert {
     /** `settings_import_success_title` + `settings_import_success_msg`（+ 恢复设置那一行）。 */
     data class ImportSucceeded(val stats: BackupStats) : SettingsAlert
 
-    /** P2-5：孤儿图片清理完成（文案 `settings_storage_cleaned`）。 */
-    data class StorageCleaned(val deleted: Int) : SettingsAlert
-
-    /** P2-5：孤儿图片清理失败。 */
-    data object StorageCleanFailed : SettingsAlert
 }
 
 /** 需要 Activity 参与的请求（权限、跳系统设置）。 */
@@ -413,6 +406,10 @@ class SettingsViewModel(
             val result = runCatching { container.backupService.importBackup(file, mode) }
             file.delete()
             result.onSuccess { stats ->
+                runCatching {
+                    val protected = withContext(Dispatchers.IO) { container.editorDrafts.referencedImageSources() }
+                    repository.cleanupOrphanImages(protected)
+                }.onFailure { Log.db.w("恢复后清理孤儿图片失败：${it.message}") }
                 val restored = stats.restoredSettings
                 if (restored == null) {
                     container.reminderScheduler.rearm()
@@ -505,35 +502,6 @@ class SettingsViewModel(
             pendingImportDayStartStats = null,
             alert = SettingsAlert.ImportSucceeded(stats),
         )
-    }
-
-    /**
-     * P2-5：清理不再被任何片段/草稿引用的图片，并刷新占用。
-     */
-    fun cleanupOrphanImages() {
-        if (_state.value.cleaningStorage) return
-        _state.value = _state.value.copy(cleaningStorage = true)
-        viewModelScope.launch {
-            val result = runCatching {
-                val protected = withContext(Dispatchers.IO) {
-                    container.editorDrafts.referencedImageSources()
-                }
-                repository.cleanupOrphanImages(protected)
-            }.onFailure { Log.db.w("清理孤儿图片失败：${it.message}") }
-            val storage = runCatching {
-                withContext(Dispatchers.IO) {
-                    StorageUsage.measure(container.appContext, repository.imagesDir)
-                }
-            }.getOrDefault(StorageUsage())
-            _state.value = _state.value.copy(
-                cleaningStorage = false,
-                storage = storage,
-                alert = result.fold(
-                    onSuccess = { SettingsAlert.StorageCleaned(it) },
-                    onFailure = { SettingsAlert.StorageCleanFailed },
-                ),
-            )
-        }
     }
 
     fun consumeAlert() {

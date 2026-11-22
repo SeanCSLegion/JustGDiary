@@ -69,13 +69,6 @@
     <string name="settings_storage">存储占用</string>
     <string name="settings_storage_sub">日记 %1$s · 图片 %2$s · 备份 %3$s</string>
     <string name="settings_storage_total">共 %1$s</string>
-    <string name="settings_storage_cleanup">清理孤儿图片</string>
-    <string name="settings_storage_cleanup_sub">删除不再被任何日记或草稿引用的图片</string>
-    <string name="settings_storage_cleaning">清理中…</string>
-    <string name="settings_storage_cleaned_title">清理完成</string>
-    <string name="settings_storage_cleaned">已清理 %1$d 张孤儿图片。</string>
-    <string name="settings_storage_clean_failed_title">清理失败</string>
-    <string name="settings_storage_clean_failed_msg">无法清理图片文件，请稍后重试。</string>
     <string name="settings_section_data">数据</string>
     <string name="settings_export">导出全部日记</string>
     <string name="settings_export_sub">生成 .jdiary 备份包</string>
@@ -106,9 +99,10 @@
     <string name="settings_section_about">关于</string>
     <string name="settings_version">版本</string>
     <string name="update_check">检查更新</string>
-    <string name="update_check_sub">检查 GitHub Releases 上的新版本</string>
     <string name="update_checking">正在检查更新…</string>
     <string name="update_downloading">正在下载并校验安装包…</string>
+    <string name="update_channel_name">应用更新</string>
+    <string name="update_progress">正在下载更新：%1$d%%</string>
     <string name="update_current">已是最新版本</string>
     <string name="update_available">发现新版本</string>
     <string name="update_failed">无法更新</string>
@@ -271,6 +265,7 @@
     <string name="editor_placeholder_existing">修改这段内容…</string>
     <string name="settings_share_loc">分享位置精度</string>
     <string name="settings_share_loc_sub">精确地点与街道不分享</string>
+    <string name="settings_share_loc_limit_sub">只能比记录时更粗，无法提高精度。</string>
     <string name="settings_share_loc_hidden">隐藏</string>
 
     <!-- 2026-11-13：P1 平台项新增文案 -->

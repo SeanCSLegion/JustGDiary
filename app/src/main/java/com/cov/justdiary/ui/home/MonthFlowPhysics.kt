@@ -17,7 +17,9 @@ import com.cov.justdiary.service.Log
 import kotlin.math.abs
 import kotlin.math.max
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 
 /**
  * 月流的手势与惯性：橡皮筋、投影落点、弹簧回弹。
@@ -100,11 +102,17 @@ internal suspend fun PointerInputScope.flowDrag(
         if (started) {
             val velocityDp = tracker.calculateVelocity().y / density
             val translationDp = accumulatedPx / density
-            scope.launch {
+            val job = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                try {
                 settle(scroll, layout, viewportH, origin, translationDp, velocityDp)
                 val index = layout.dominantBlockIndex(scroll.offsetDp, viewportH)
                 layout.blocks.getOrNull(index)?.let { onSettle(it.key) }
+                } finally {
+                    if (scroll.animJob === coroutineContext[Job]) scroll.animJob = null
+                }
             }
+            scroll.animJob = job
+            job.start()
         }
     }
 }

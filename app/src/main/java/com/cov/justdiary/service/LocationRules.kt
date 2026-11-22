@@ -182,7 +182,7 @@ object LocationRules {
      */
     fun precisionOptions(snapshot: LocationSnapshot): List<String> =
         if (snapshot.placemark != null) {
-            LocationResolver.availablePrecisions(snapshot.maxPrecision)
+            LocationResolver.availablePrecisions(snapshot.maxPrecision, snapshot.placemark)
         } else {
             LocationResolver.availablePrecisionsForRecorded(snapshot.region, snapshot.recordedPrecision)
         }
@@ -221,16 +221,15 @@ object LocationRules {
      * 这两条差异都是 iOS 的既有行为，刻意各自保留，因此两个映射都做成纯函数以便对比断言。
      */
     fun regionFromLivePlacemark(placemark: PlacemarkText?, locQuality: String): LocRegion {
-        val hasBoth =
-            placemark != null && placemark.locality.isNotEmpty() && placemark.subAdministrativeArea.isNotEmpty()
+        val hasLocality = placemark != null && placemark.locality.isNotEmpty()
         return LocRegion(
             country = placemark?.country.orEmpty(),
             countryCode = placemark?.isoCountryCode.orEmpty(),
             region1 = placemark?.administrativeArea.orEmpty(),
             // region2 = subAdministrativeArea ?? locality
             region2 = placemark?.subAdministrativeArea.orEmpty().ifEmpty { placemark?.locality.orEmpty() },
-            // region3 只在 locality 与 subAdministrativeArea 都存在时才取 subLocality
-            region3 = if (hasBoth) placemark.subLocality else "",
+            // Geocoder 在中国常不填 subAdministrativeArea；locality 存在时仍保留区县。
+            region3 = if (hasLocality) placemark.subLocality else "",
             locQuality = locQuality,
         )
     }
