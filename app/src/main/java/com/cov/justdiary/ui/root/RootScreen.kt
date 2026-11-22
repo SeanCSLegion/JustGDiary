@@ -8,6 +8,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
@@ -133,16 +138,24 @@ fun RootScreen(modifier: Modifier = Modifier) {
             },
         ) { innerPadding ->
             CompositionLocalProvider(LocalAdaptiveLayout provides adaptive) {
-                TabContent(
-                    tab = selected,
-                    container = container,
-                    dataVersion = dataVersion,
-                    settingsVersion = settingsVersion,
-                    onOpenDay = { openDayKey = it },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
+                AnimatedContent(
+                    targetState = selected,
+                    transitionSpec = {
+                        fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                    },
+                    label = "tab-content-transition",
+                ) { tab ->
+                    TabContent(
+                        tab = tab,
+                        container = container,
+                        dataVersion = dataVersion,
+                        settingsVersion = settingsVersion,
+                        onOpenDay = { openDayKey = it },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
             }
         }
     }

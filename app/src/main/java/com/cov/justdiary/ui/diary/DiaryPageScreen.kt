@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
@@ -45,6 +46,8 @@ import com.cov.justdiary.service.LocationRules
 import com.cov.justdiary.service.ShareIntents
 import androidx.compose.ui.graphics.asImageBitmap
 import com.cov.justdiary.ui.theme.isDarkTheme
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.runtime.mutableFloatStateOf
 
 /**
  * 日记页宿主：**一个页面、两种形态**。对应 iOS `Views/Diary/DiaryPageView.swift`。
@@ -55,7 +58,8 @@ import com.cov.justdiary.ui.theme.isDarkTheme
  *
  * 与 iOS 的差异（平台事实）：
  * - 分享长图用 `Intent.ACTION_SEND`（`ShareIntents`），iOS 用 `ShareLink`；
- * - 返回键走 `BackHandler`（系统返回手势），iOS 用悬浮返回按钮 + `dismiss`。
+ * - 系统返回使用 `PredictiveBackHandler`，日记页会随手势位移、缩放并显露下层页面；
+ *   编辑态仍由 ViewModel 决定是否回阅读态或显示放弃确认。
  */
 @Composable
 fun DiaryPageScreen(
@@ -101,6 +105,7 @@ fun DiaryPageScreen(
     val state by viewModel.state.collectAsState()
     // 编辑器有没有未保存内容 —— 由编辑器上报，返回键据此决定是否二次确认
     var editorDirty by remember { mutableStateOf(false) }
+    var backProgress by remember { mutableFloatStateOf(0f) }
 
     // 定位权限：编辑器里的「重新获取位置」在未授权时**先申请权限再取点**
     // （iOS `beginLocate()` 未授权时会 `requestPermission()` 并在 600ms 后复查；
@@ -215,8 +220,13 @@ fun DiaryPageScreen(
         viewModel.consumeMessage()
     }
 
-    androidx.activity.compose.BackHandler {
-        viewModel.handleBack(editorHasContent = editorDirty)
+    PredictiveBackHandler { progress ->
+        try {
+            progress.collect { event -> backProgress = event.progress }
+            viewModel.handleBack(editorHasContent = editorDirty)
+        } finally {
+            backProgress = 0f
+        }
     }
 
     // 离开编辑态（保存 / 放弃 / 返回）要把键盘收掉：编辑器是被整个换掉的，
@@ -268,7 +278,16 @@ fun DiaryPageScreen(
     // 外层 Box 只为一件事：把一次性提示（Snackbar）与分享面板叠在页面之上。
     Box(modifier = modifier.fillMaxSize()) {
         Surface(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                // Follow Android's predictive back gesture: reveal the calendar underneath
+                // while the diary page tracks the user's finger and gently scales down.
+                val p = backProgress.coerceIn(0f, 1f)
+                translationX = size.width * 0.22f * p
+                scaleX = 1f - 0.035f * p
+                scaleY = 1f - 0.035f * p
+                alpha = 1f - 0.08f * p
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+            },
         color = MaterialTheme.colorScheme.background,
     ) {
         // 全屏路由没有外层 Scaffold，系统栏避让要自己做（对应 iOS 的 safeArea）
